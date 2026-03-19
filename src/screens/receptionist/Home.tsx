@@ -1,27 +1,49 @@
-import React, { useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
+import React, { useEffect, useMemo } from "react";
+import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { connectSocket, getSocket } from "../../services/socket";
+
+type ApptStatus = "waiting" | "checked-in" | "with-doctor" | "done";
 
 type Appointment = {
   id: string;
   patient: string;
   doctor: string;
   time: string;
-  status: "waiting" | "in-progress" | "done";
+  status: ApptStatus;
 };
 
 const appointments: Appointment[] = [
-  { id: "AP-301", patient: "Amaya Perera", doctor: "Dr. Silva", time: "09:15", status: "in-progress" },
-  { id: "AP-302", patient: "Ruwan Jayasinghe", doctor: "Dr. Fernando", time: "09:45", status: "waiting" },
-  { id: "AP-303", patient: "Ishara Fernando", doctor: "Dr. Silva", time: "10:10", status: "waiting" },
-  { id: "AP-304", patient: "Dilani Senanayake", doctor: "Dr. Perera", time: "10:45", status: "waiting" },
-  { id: "AP-305", patient: "Nuwan Alwis", doctor: "Dr. Fernando", time: "11:15", status: "done" },
+  { id: "AP-401", patient: "Amaya Perera", doctor: "Dr. Silva", time: "09:15", status: "with-doctor" },
+  { id: "AP-402", patient: "Ruwan Jayasinghe", doctor: "Dr. Fernando", time: "09:45", status: "checked-in" },
+  { id: "AP-403", patient: "Ishara Fernando", doctor: "Dr. Silva", time: "10:10", status: "waiting" },
+  { id: "AP-404", patient: "Dilani Senanayake", doctor: "Dr. Perera", time: "10:45", status: "waiting" },
+  { id: "AP-405", patient: "Nuwan Alwis", doctor: "Dr. Fernando", time: "11:15", status: "done" },
 ];
 
 export default function Home() {
   const waiting = useMemo(() => appointments.filter((a) => a.status === "waiting").length, []);
-  const seenToday = useMemo(() => appointments.filter((a) => a.status === "done").length, []);
+  const checkedIn = useMemo(() => appointments.filter((a) => a.status === "checked-in").length, []);
+  const done = useMemo(() => appointments.filter((a) => a.status === "done").length, []);
+
+  useEffect(() => {
+    connectSocket("http://172.20.10.4:5050");
+    const socket = getSocket();
+    if (!socket) return;
+    socket.emit("joinReceptionRoom");
+    socket.on("queueUpdated", (data: any) => {
+      if (data?.type === "QUEUE_STARTED") {
+        Alert.alert("Queue Started", "The clinic queue has started.");
+      }
+      if (data?.type === "CLINIC_ENDED") {
+        Alert.alert("Clinic Ended", "Today's clinic session has ended.");
+      }
+    });
+    return () => {
+      socket.off("queueUpdated");
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -31,12 +53,12 @@ export default function Home() {
         bounces={false}
       >
         <Text style={styles.heading}>Dashboard</Text>
-        <Text style={styles.subheading}>Today at a glance</Text>
+        <Text style={styles.subheading}>Today&apos;s appointment desk view</Text>
 
         <View style={styles.metricsRow}>
-          <MetricCard label="Patients seen today" value={seenToday.toString()} icon="checkmark-circle" color="#2E7D32" />
-          <MetricCard label="Current queue" value={waiting.toString()} icon="time-outline" color="#1976D2" />
-          <MetricCard label="Appointments today" value={appointments.length.toString()} icon="calendar-outline" color="#FFA000" />
+          <MetricCard label="Appointments today" value={appointments.length.toString()} icon="calendar-outline" color="#1976D2" />
+          <MetricCard label="Current queue" value={waiting.toString()} icon="time-outline" color="#FFA000" />
+          <MetricCard label="Checked-in" value={checkedIn.toString()} icon="people-outline" color="#2E7D32" />
         </View>
 
         <View style={styles.card}>
@@ -65,9 +87,9 @@ export default function Home() {
             <Text style={styles.cardCount}>Live</Text>
           </View>
           <View style={styles.summaryRow}>
-            <SummaryItem label="In progress" value="1" color="#1976D2" icon="medkit-outline" />
-            <SummaryItem label="Waiting" value={waiting.toString()} color="#FFA000" icon="people-outline" />
-            <SummaryItem label="Completed" value={seenToday.toString()} color="#2E7D32" icon="checkmark-outline" />
+            <SummaryItem label="Waiting" value={waiting.toString()} color="#FFA000" icon="hourglass-outline" />
+            <SummaryItem label="Checked-in" value={checkedIn.toString()} color="#1976D2" icon="checkmark-done-outline" />
+            <SummaryItem label="Completed" value={done.toString()} color="#2E7D32" icon="checkmark-outline" />
           </View>
         </View>
       </ScrollView>
@@ -87,10 +109,11 @@ function MetricCard({ label, value, icon, color }: { label: string; value: strin
   );
 }
 
-function StatusPill({ status }: { status: Appointment["status"] }) {
+function StatusPill({ status }: { status: ApptStatus }) {
   const map = {
     waiting: { text: "Waiting", color: "#FFA000" },
-    "in-progress": { text: "In progress", color: "#1976D2" },
+    "checked-in": { text: "Checked-in", color: "#1976D2" },
+    "with-doctor": { text: "With doctor", color: "#7B1FA2" },
     done: { text: "Done", color: "#2E7D32" },
   };
   const { text, color } = map[status];

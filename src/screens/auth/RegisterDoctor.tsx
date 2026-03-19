@@ -1,4 +1,4 @@
-import React, { useState, useContext } from "react";
+import React, { useContext, useState } from "react";
 import {
   View,
   Text,
@@ -13,15 +13,19 @@ import { jwtDecode } from "jwt-decode";
 import { AuthContext } from "../../utils/AuthContext";
 import { apiFetch } from "../../config/api";
 
-export default function Login({ navigation }: any) {
+export default function RegisterDoctor({ navigation }: any) {
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [slmcNumber, setSlmcNumber] = useState("");
+  const [specialization, setSpecialization] = useState("");
   const [loading, setLoading] = useState(false);
 
   const { refreshAuth } = useContext(AuthContext);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
+  const handleRegister = async () => {
+    if (!fullName || !email || !password || !phone || !slmcNumber || !specialization) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
@@ -29,43 +33,58 @@ export default function Login({ navigation }: any) {
     setLoading(true);
 
     try {
-      const response = await apiFetch("/auth/login", {
+      const response = await apiFetch("/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          name: fullName,
+          email,
+          password,
+          phone,
+          slmcNumber,
+          specialization,
+          role: "doctor",
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
         setLoading(false);
-        Alert.alert("Login Failed", data.message || "Invalid credentials");
+        Alert.alert("Registration Failed", data.message || "Unable to register");
         return;
       }
 
-      // Save token
       await AsyncStorage.setItem("token", data.token);
 
-      // Decode role
       const decoded: any = jwtDecode(data.token);
-      console.log("Logged in as:", decoded.role);
+      console.log("Registered as:", decoded.role);
 
-      // 🔥 Very important — refresh RootNavigator to show correct role tabs
       await refreshAuth();
 
       setLoading(false);
-      Alert.alert("Success", "Logged in successfully!");
-
+      Alert.alert(
+        "Submitted",
+        "Registration submitted. Admin approval may be required. Redirecting..."
+      );
     } catch (error) {
       setLoading(false);
       Alert.alert("Error", "Unable to connect to server");
-      console.log("Login error:", error);
+      console.log("Register doctor error:", error);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>HealthLink Login</Text>
+      <Text style={styles.title}>Doctor Registration</Text>
+      <Text style={styles.subtitle}>Provide SLMC details for admin approval.</Text>
+
+      <TextInput
+        placeholder="Full Name"
+        style={styles.input}
+        value={fullName}
+        onChangeText={setFullName}
+      />
 
       <TextInput
         placeholder="Email"
@@ -73,6 +92,7 @@ export default function Login({ navigation }: any) {
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
+        keyboardType="email-address"
       />
 
       <TextInput
@@ -83,20 +103,42 @@ export default function Login({ navigation }: any) {
         secureTextEntry
       />
 
+      <TextInput
+        placeholder="Phone"
+        style={styles.input}
+        value={phone}
+        onChangeText={setPhone}
+        keyboardType="phone-pad"
+      />
+
+      <TextInput
+        placeholder="SLMC Number"
+        style={styles.input}
+        value={slmcNumber}
+        onChangeText={setSlmcNumber}
+      />
+
+      <TextInput
+        placeholder="Specialization"
+        style={styles.input}
+        value={specialization}
+        onChangeText={setSpecialization}
+      />
+
       <TouchableOpacity
         style={styles.button}
-        onPress={handleLogin}
+        onPress={handleRegister}
         disabled={loading}
       >
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Login</Text>
+          <Text style={styles.buttonText}>Register as Doctor</Text>
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => navigation.navigate("Register")}>
-        <Text style={styles.registerText}>Create an account</Text>
+      <TouchableOpacity onPress={() => navigation.goBack()}>
+        <Text style={styles.loginText}>Back to role selection</Text>
       </TouchableOpacity>
     </View>
   );
@@ -110,11 +152,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F7FA",
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: "700",
     textAlign: "center",
-    marginBottom: 40,
+    marginBottom: 6,
     color: "#1976D2",
+  },
+  subtitle: {
+    fontSize: 14,
+    textAlign: "center",
+    color: "#555",
+    marginBottom: 20,
   },
   input: {
     width: "100%",
@@ -122,7 +170,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     borderRadius: 10,
     paddingHorizontal: 15,
-    marginBottom: 15,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: "#d9d9d9",
   },
@@ -137,10 +185,10 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: "white",
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "700",
   },
-  registerText: {
+  loginText: {
     color: "#1976D2",
     textAlign: "center",
     marginTop: 20,

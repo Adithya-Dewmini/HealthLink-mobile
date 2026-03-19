@@ -1,42 +1,76 @@
-import React from "react";
+import React, { useContext } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import Dashboard from "../screens/patient/Dashboard";
 import Appointments from "../screens/patient/Appointments";
 import Prescriptions from "../screens/patient/Prescriptions";
+import { TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { AuthContext } from "../utils/AuthContext";
+import type { PatientTabParamList } from "../types/navigation";
 
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<PatientTabParamList>();
 
 export default function PatientTabs() {
+  useContext(AuthContext); // keep context ready for children
+
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
+      screenOptions={({ route, navigation }) => ({
+        headerShown: true,
         tabBarActiveTintColor: "#1976D2",
         tabBarInactiveTintColor: "gray",
-        tabBarLabelStyle: { fontSize: 12 },
+        tabBarLabelStyle: { fontSize: 11, marginTop: 0 },
+        tabBarItemStyle: { paddingVertical: 6 },
         tabBarStyle: {
-          paddingBottom: 6,
-          height: 60,
+          paddingTop: 6,
+          paddingBottom: 10,
+          height: 72,
+          borderTopWidth: 0,
+          borderTopColor: "transparent",
         },
-        tabBarIcon: ({ color, size }) => {
-          let iconName: any;
-
-          if (route.name === "Dashboard") {
-            iconName = "home";
-          } else if (route.name === "Appointments") {
-            iconName = "calendar";
-          } else if (route.name === "Prescriptions") {
-            iconName = "document-text";
-          }
-
-          return <Ionicons name={iconName} size={22} color={color} />;
-        },
+        headerLeft: route.name === "PatientDashboard" ? undefined : () => (
+          <TouchableOpacity
+            onPress={() => navigation.navigate("PatientDashboard")}
+            style={{ paddingHorizontal: 12 }}
+          >
+            <Ionicons name="chevron-back" size={22} color="#0F1E2E" />
+          </TouchableOpacity>
+        ),
       })}
     >
-      <Tab.Screen name="Dashboard" component={Dashboard} />
-      <Tab.Screen name="Appointments" component={Appointments} />
-      <Tab.Screen name="Prescriptions" component={Prescriptions} />
+      <Tab.Screen
+        name="PatientDashboard"
+        component={Dashboard}
+        options={{
+          tabBarLabel: "Dashboard",
+          headerShown: false,
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="home" size={20} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="PatientAppointments"
+        component={Appointments}
+        options={{
+          tabBarLabel: "Appointments",
+          headerShown: false,
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="calendar" size={20} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="PatientPrescriptions"
+        component={Prescriptions}
+        options={{
+          tabBarLabel: "Prescriptions",
+          headerShown: false,
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="document-text" size={20} color={color} />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }

@@ -1,0 +1,258 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Vibration,
+  StatusBar,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+
+type DoctorStatus = "active" | "break" | "paused";
+
+const THEME = {
+  background: "#F2F5F9",
+  white: "#FFFFFF",
+  textDark: "#1A1C1E",
+  textGray: "#6A6D7C",
+  mint: "#E1F1E7",
+  lavender: "#E9E7F7",
+  softBlue: "#E1EEF9",
+  accentGreen: "#4CAF50",
+  accentPurple: "#9C27B0",
+  accentBlue: "#2196F3",
+  accentRed: "#FF5252",
+  softRed: "#FEE2E2",
+};
+
+export default function LiveQueue() {
+  const navigation = useNavigation();
+  const [currentNumber, setCurrentNumber] = useState(42);
+  const [yourNumber, setYourNumber] = useState(48);
+  const [status, setStatus] = useState<DoctorStatus>("active");
+  const [notify, setNotify] = useState(true);
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const remaining = useMemo(() => Math.max(yourNumber - currentNumber, 0), [yourNumber, currentNumber]);
+  const progressPct = useMemo(
+    () => Math.min((currentNumber / Math.max(yourNumber, 1)) * 100, 100),
+    [currentNumber, yourNumber]
+  );
+
+  const estimatedWait = useMemo(() => {
+    const minutes = remaining * 4;
+    if (minutes < 60) return `${minutes} min`;
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  }, [remaining]);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setCurrentNumber((n) => n + (Math.random() > 0.7 ? 1 : 0));
+    }, 8000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (notify && remaining <= 2 && remaining > 0) Vibration.vibrate(500);
+  }, [remaining, notify]);
+
+  const statusConfig = {
+    active: { label: "Seeing patients", color: THEME.accentGreen, bg: THEME.mint },
+    break: { label: "On break", color: THEME.accentPurple, bg: THEME.lavender },
+    paused: { label: "Paused", color: THEME.accentRed, bg: THEME.softRed },
+  }[status];
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="dark-content" />
+      
+      {/* Header */}
+      <View style={styles.headerNav}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="chevron-back" size={22} color={THEME.textDark} />
+        </TouchableOpacity>
+        <View style={styles.headerTextWrap}>
+          <Text style={styles.headerTitle}>Live Queue</Text>
+          <Text style={styles.headerSub}>Real-time clinic tracking</Text>
+        </View>
+        <TouchableOpacity 
+          style={[styles.notifyToggle, notify ? { backgroundColor: THEME.mint } : { backgroundColor: THEME.background }]}
+          onPress={() => setNotify(!notify)}
+        >
+          <Ionicons name={notify ? "notifications" : "notifications-off"} size={20} color={notify ? THEME.accentGreen : THEME.textGray} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
+        
+        {/* 1. Main Queue Display */}
+        <View style={styles.heroCard}>
+          <View style={styles.rowBetween}>
+            <View>
+              <Text style={styles.labelCaps}>Now Serving</Text>
+              <Text style={styles.bigNumber}>{currentNumber}</Text>
+            </View>
+            <View style={[styles.statusChip, { backgroundColor: statusConfig.bg }]}>
+              <View style={[styles.statusDot, { backgroundColor: statusConfig.color }]} />
+              <Text style={[styles.statusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
+            </View>
+          </View>
+
+          {/* Progress Bar */}
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBarBg}>
+               <View style={[styles.progressBarFill, { width: `${progressPct}%` }]} />
+            </View>
+            <Text style={styles.progressText}>Queue progress: {Math.round(progressPct)}%</Text>
+          </View>
+        </View>
+
+        {/* 2. User Ticket Card */}
+        <View style={styles.ticketCard}>
+          <View style={styles.rowBetween}>
+            <View>
+              <Text style={styles.labelCaps}>Your Ticket</Text>
+              <Text style={styles.ticketNumber}>{yourNumber}</Text>
+            </View>
+            <View style={styles.waitBox}>
+               <Text style={styles.waitLabel}>EST. WAIT</Text>
+               <Text style={styles.waitValue}>{estimatedWait}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <Ionicons name="people-outline" size={18} color={THEME.accentBlue} />
+            <Text style={styles.infoText}>
+              There are <Text style={styles.boldText}>{remaining}</Text> patients ahead of you.
+            </Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.inputSection}>
+            <TextInput
+              style={styles.input}
+              placeholder="Change ticket number..."
+              keyboardType="number-pad"
+              placeholderTextColor={THEME.textGray}
+              onChangeText={(t) => setYourNumber(parseInt(t) || yourNumber)}
+            />
+            <TouchableOpacity style={styles.updateBtn}>
+              <Text style={styles.updateBtnText}>Update</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 3. Quick Tips */}
+        <Text style={styles.sectionTitle}>Queue Guidelines</Text>
+        <View style={styles.tipsCard}>
+          <TipItem icon="walk" text="Be present when 3 patients are remaining." color={THEME.accentBlue} />
+          <TipItem icon="megaphone" text="Keep notifications ON to get a vibration alert." color={THEME.accentPurple} />
+          <TipItem icon="cafe" text="Let the desk know if you need a short break." color={THEME.accentGreen} isLast />
+        </View>
+
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const TipItem = ({ icon, text, color, isLast }: any) => (
+  <View style={[styles.tipItem, isLast && { borderBottomWidth: 0 }]}>
+    <View style={[styles.tipIcon, { backgroundColor: color + "15" }]}>
+      <Ionicons name={icon} size={18} color={color} />
+    </View>
+    <Text style={styles.tipText}>{text}</Text>
+  </View>
+);
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: THEME.white },
+  scroll: { backgroundColor: THEME.background },
+  container: { padding: 20 },
+  headerNav: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: THEME.white,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: THEME.background,
+  },
+  headerTextWrap: { flex: 1, marginLeft: 12 },
+  headerTitle: { fontSize: 20, fontWeight: "bold", color: THEME.textDark },
+  headerSub: { fontSize: 13, color: THEME.textGray },
+  notifyToggle: { width: 45, height: 45, borderRadius: 15, justifyContent: "center", alignItems: "center" },
+
+  heroCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 28,
+    padding: 24,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 15,
+  },
+  labelCaps: { fontSize: 11, fontWeight: "bold", color: THEME.textGray, textTransform: "uppercase", letterSpacing: 1 },
+  bigNumber: { fontSize: 48, fontWeight: "bold", color: THEME.textDark, marginTop: 4 },
+  
+  statusChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, alignSelf: 'flex-start' },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  statusText: { fontSize: 12, fontWeight: "bold" },
+
+  progressContainer: { marginTop: 24 },
+  progressBarBg: { height: 8, backgroundColor: THEME.background, borderRadius: 4, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: THEME.accentGreen, borderRadius: 4 },
+  progressText: { fontSize: 11, color: THEME.textGray, marginTop: 8, fontWeight: '600' },
+
+  ticketCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 28,
+    padding: 24,
+    marginBottom: 25,
+  },
+  ticketNumber: { fontSize: 32, fontWeight: "bold", color: THEME.accentBlue, marginTop: 4 },
+  waitBox: { alignItems: 'flex-end' },
+  waitLabel: { fontSize: 10, fontWeight: 'bold', color: THEME.textGray },
+  waitValue: { fontSize: 18, fontWeight: 'bold', color: THEME.textDark },
+  
+  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 15, backgroundColor: THEME.softBlue, padding: 12, borderRadius: 12 },
+  infoText: { marginLeft: 10, fontSize: 14, color: THEME.textDark },
+  boldText: { fontWeight: 'bold' },
+  
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 20 },
+  
+  inputSection: { flexDirection: 'row', gap: 10 },
+  input: { flex: 1, backgroundColor: THEME.background, borderRadius: 12, paddingHorizontal: 15, height: 45, fontSize: 14 },
+  updateBtn: { backgroundColor: THEME.textDark, borderRadius: 12, paddingHorizontal: 15, justifyContent: 'center' },
+  updateBtnText: { color: THEME.white, fontWeight: 'bold', fontSize: 13 },
+
+  sectionTitle: { fontSize: 16, fontWeight: "bold", color: THEME.textDark, marginBottom: 12 },
+  tipsCard: { backgroundColor: THEME.white, borderRadius: 24, padding: 16 },
+  tipItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  tipIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  tipText: { flex: 1, fontSize: 13, color: THEME.textGray, lineHeight: 18 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }
+});
