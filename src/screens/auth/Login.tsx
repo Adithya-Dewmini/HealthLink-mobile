@@ -12,6 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
 import { AuthContext } from "../../utils/AuthContext";
 import { apiFetch } from "../../config/api";
+import { getExpoPushToken } from "../../services/notifications";
 
 export default function Login({ navigation }: any) {
   const [email, setEmail] = useState("");
@@ -29,10 +30,11 @@ export default function Login({ navigation }: any) {
     setLoading(true);
 
     try {
+      const expoPushToken = await getExpoPushToken();
       const response = await apiFetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, expoPushToken }),
       });
 
       const data = await response.json();

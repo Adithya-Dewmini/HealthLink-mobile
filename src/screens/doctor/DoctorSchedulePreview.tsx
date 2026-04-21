@@ -64,8 +64,9 @@ export default function DoctorSchedulePreview({ shifts, onConfirm, onClose }: Pr
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroCard}>
+      <View style={styles.body}>
+        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+          <View style={styles.heroCard}>
           <View style={styles.heroInfo}>
             <Text style={styles.heroLabel}>Total Working Hours</Text>
             <Text style={styles.heroValue}>
@@ -114,16 +115,14 @@ export default function DoctorSchedulePreview({ shifts, onConfirm, onClose }: Pr
           </View>
         ))}
 
-        <TouchableOpacity style={styles.confirmBtn} onPress={onConfirm}>
-          <Text style={styles.confirmText}>Confirm & Publish</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.background },
+  safe: { flex: 1, backgroundColor: THEME.white },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -137,6 +136,7 @@ const styles = StyleSheet.create({
   editBtn: { backgroundColor: THEME.softBlue, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
   editBtnText: { color: THEME.accentBlue, fontWeight: "700" },
 
+  body: { flex: 1, backgroundColor: THEME.background },
   container: { padding: 24 },
 
   heroCard: {
@@ -204,14 +204,4 @@ const styles = StyleSheet.create({
   capacityRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   capacityText: { fontSize: 13, color: THEME.textGray, fontWeight: "500" },
 
-  confirmBtn: {
-    backgroundColor: THEME.textDark,
-    height: 56,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 10,
-    marginBottom: 30,
-  },
-  confirmText: { color: THEME.white, fontWeight: "700", fontSize: 16 },
 });

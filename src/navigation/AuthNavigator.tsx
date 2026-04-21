@@ -6,8 +6,11 @@ import RegisterPatient from "../screens/auth/RegisterPatient";
 import RegisterDoctor from "../screens/auth/RegisterDoctor";
 import RegisterPharmacist from "../screens/auth/RegisterPharmacist";
 import RegisterReceptionist from "../screens/auth/RegisterReceptionist";
+import RegisterMedicalCenterAdmin from "../screens/auth/RegisterMedicalCenterAdmin";
+import SetPasswordScreen from "../screens/auth/SetPasswordScreen";
+import type { AuthStackParamList } from "../types/navigation";
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 export default function AuthNavigator() {
   return (
@@ -25,6 +28,11 @@ export default function AuthNavigator() {
         name="RegisterReceptionist"
         component={RegisterReceptionist}
       />
+      <Stack.Screen
+        name="RegisterMedicalCenterAdmin"
+        component={RegisterMedicalCenterAdmin}
+      />
+      <Stack.Screen name="SetPassword" component={SetPasswordScreen} />
     </Stack.Navigator>
   );
 }

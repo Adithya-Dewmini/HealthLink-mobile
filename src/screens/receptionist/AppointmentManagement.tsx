@@ -1,332 +1,298 @@
 import React, { useMemo, useState } from "react";
 import {
-  View,
-  Text,
+  Dimensions,
+  FlatList,
+  SafeAreaView,
+  StatusBar,
   StyleSheet,
-  ScrollView,
-  TextInput,
+  Text,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
-type Appointment = {
-  id: string;
-  patient: string;
-  doctor: string;
-  time: string;
-  status: "confirmed" | "rescheduled" | "cancelled";
+const { width } = Dimensions.get("window");
+
+const THEME = {
+  primary: "#2196F3",
+  background: "#F5F7FB",
+  white: "#FFFFFF",
+  textPrimary: "#1A1C1E",
+  textSecondary: "#6B7280",
+  success: "#2BB673",
+  danger: "#EF4444",
+  warning: "#F59E0B",
+  muted: "#E2E8F0",
+  tabInactive: "#F1F5F9",
+  softBlue: "#E3F2FD",
+  softSuccess: "#E8F8EF",
+  softDanger: "#FEF2F2",
+  border: "#E2E8F0",
+  cardRadius: 20,
 };
 
-const sampleAppointments: Appointment[] = [
-  { id: "AP-501", patient: "Amaya Perera", doctor: "Dr. Silva", time: "09:30", status: "confirmed" },
-  { id: "AP-502", patient: "Ruwan Jayasinghe", doctor: "Dr. Fernando", time: "10:00", status: "rescheduled" },
-  { id: "AP-503", patient: "Ishara Fernando", doctor: "Dr. Silva", time: "10:45", status: "confirmed" },
-  { id: "AP-504", patient: "Dilani Senanayake", doctor: "Dr. Perera", time: "11:15", status: "cancelled" },
+type ApptStatus = "Upcoming" | "Completed" | "Missed" | "Cancelled";
+
+interface Appointment {
+  id: string;
+  patientName: string;
+  timeSlot: string;
+  date: string;
+  status: ApptStatus;
+}
+
+const DATA: Appointment[] = [
+  { id: "1", patientName: "Nadun Perera", timeSlot: "10:30 AM – 10:45 AM", date: "Apr 17", status: "Upcoming" },
+  { id: "2", patientName: "Saman Kumara", timeSlot: "11:00 AM – 11:15 AM", date: "Apr 17", status: "Upcoming" },
+  { id: "3", patientName: "Anula Devi", timeSlot: "09:00 AM – 09:15 AM", date: "Apr 17", status: "Completed" },
+  { id: "4", patientName: "Kamal Silva", timeSlot: "08:30 AM – 08:45 AM", date: "Apr 17", status: "Missed" },
+  { id: "5", patientName: "Priyani Cooray", timeSlot: "02:00 PM – 02:15 PM", date: "Apr 17", status: "Cancelled" },
 ];
 
-export default function AppointmentManagement() {
-  const [patient, setPatient] = useState("");
-  const [doctor, setDoctor] = useState("");
-  const [time, setTime] = useState("");
-  const [note, setNote] = useState("");
-  const [filter, setFilter] = useState("");
+const TABS: ApptStatus[] = ["Upcoming", "Completed", "Missed", "Cancelled"];
 
-  const filtered = useMemo(
-    () =>
-      sampleAppointments.filter(
-        (appt) =>
-          appt.patient.toLowerCase().includes(filter.toLowerCase()) ||
-          appt.id.toLowerCase().includes(filter.toLowerCase())
-      ),
-    [filter]
+export default function AppointmentManagement() {
+  const [activeTab, setActiveTab] = useState<ApptStatus>("Upcoming");
+
+  const filteredData = useMemo(
+    () => DATA.filter((item) => item.status === activeTab),
+    [activeTab]
+  );
+
+  const counts = useMemo(
+    () => ({
+      Upcoming: DATA.filter((item) => item.status === "Upcoming").length,
+      Completed: DATA.filter((item) => item.status === "Completed").length,
+      Missed: DATA.filter((item) => item.status === "Missed").length,
+      Cancelled: DATA.filter((item) => item.status === "Cancelled").length,
+    }),
+    []
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 28 }}
-        bounces={false}
-      >
-        <Text style={styles.heading}>Appointment Management</Text>
-        <Text style={styles.subheading}>Create, reschedule, or cancel bookings</Text>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Create appointment</Text>
-            <View style={styles.badge}>
-              <Ionicons name="calendar-outline" size={14} color="#1976D2" />
-              <Text style={styles.badgeText}>New booking</Text>
-            </View>
-          </View>
-
-          <LabeledInput label="Patient name" value={patient} onChangeText={setPatient} placeholder="Enter patient name" />
-          <LabeledInput label="Doctor" value={doctor} onChangeText={setDoctor} placeholder="Assign doctor" />
-          <LabeledInput label="Time" value={time} onChangeText={setTime} placeholder="e.g. 10:30" />
-          <LabeledInput
-            label="Notes (optional)"
-            value={note}
-            onChangeText={setNote}
-            placeholder="Extra info for the doctor"
-          />
-
-          <TouchableOpacity style={styles.primaryButton}>
-            <Ionicons name="save-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.primaryButtonText}>Save appointment</Text>
-          </TouchableOpacity>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Appointments</Text>
+          <Text style={styles.subtitle}>Manage patient bookings</Text>
         </View>
+        <TouchableOpacity style={styles.searchBtn}>
+          <Ionicons name="search" size={22} color={THEME.textPrimary} />
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Edit / reschedule</Text>
-            <View style={styles.badge}>
-              <Ionicons name="create-outline" size={14} color="#1976D2" />
-              <Text style={styles.badgeText}>Live list</Text>
-            </View>
+      <View style={styles.tabWrapper}>
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={TABS}
+          keyExtractor={(item) => item}
+          contentContainerStyle={styles.tabList}
+          renderItem={({ item }) => {
+            const active = activeTab === item;
+            return (
+              <TouchableOpacity
+                onPress={() => setActiveTab(item)}
+                style={[
+                  styles.tabPill,
+                  active ? styles.tabPillActive : styles.tabPillInactive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    active ? styles.tabLabelActive : styles.tabLabelInactive,
+                  ]}
+                >
+                  {item}
+                </Text>
+                {counts[item] > 0 ? (
+                  <View style={[styles.countBadge, item === "Missed" && styles.countBadgeDanger]}>
+                    <Text style={styles.countText}>{counts[item]}</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+
+      <FlatList
+        data={filteredData}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <MaterialCommunityIcons name="calendar-blank" size={72} color={THEME.muted} />
+            <Text style={styles.emptyText}>No appointments found</Text>
           </View>
-
-          <LabeledInput
-            label="Search by name or ID"
-            value={filter}
-            onChangeText={setFilter}
-            placeholder="Filter appointments"
-          />
-
-          {filtered.map((appt) => (
-            <View key={appt.id} style={styles.apptRow}>
-              <View style={styles.apptHeader}>
-                <View>
-                  <Text style={styles.apptTitle}>{appt.patient}</Text>
-                  <Text style={styles.apptMeta}>{appt.id} • {appt.doctor}</Text>
-                </View>
-                <StatusPill status={appt.status} />
-              </View>
-              <View style={styles.apptBody}>
-                <View style={styles.timeChip}>
-                  <Ionicons name="time-outline" size={14} color="#0F1E2E" />
-                  <Text style={styles.timeText}>{appt.time}</Text>
-                </View>
-                <View style={styles.actionsRow}>
-                  <ActionButton label="Reschedule" icon="time-outline" />
-                  <ActionButton label="Cancel booking" icon="close-circle-outline" type="danger" />
-                </View>
-              </View>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+        }
+        renderItem={({ item }) => <AppointmentCard item={item} />}
+      />
     </SafeAreaView>
   );
 }
 
-function StatusPill({ status }: { status: Appointment["status"] }) {
-  const map = {
-    confirmed: { text: "Confirmed", color: "#2E7D32" },
-    rescheduled: { text: "Rescheduled", color: "#FFA000" },
-    cancelled: { text: "Cancelled", color: "#D14343" },
+function AppointmentCard({ item }: { item: Appointment }) {
+  const statusColors = {
+    Upcoming: THEME.primary,
+    Completed: THEME.success,
+    Missed: THEME.danger,
+    Cancelled: THEME.textSecondary,
   };
-  const { text, color } = map[status];
-  return (
-    <View style={[styles.statusPill, { borderColor: color, backgroundColor: `${color}12` }]}>
-      <View style={[styles.statusDot, { backgroundColor: color }]} />
-      <Text style={[styles.statusText, { color }]}>{text}</Text>
-    </View>
-  );
-}
 
-function ActionButton({ label, icon, type }: { label: string; icon: any; type?: "danger" }) {
-  const color = type === "danger" ? "#D14343" : "#1976D2";
-  return (
-    <TouchableOpacity style={[styles.actionBtn, { borderColor: color }]}>
-      <Ionicons name={icon} size={14} color={color} />
-      <Text style={[styles.actionText, { color }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
+  const statusBackgrounds = {
+    Upcoming: THEME.softBlue,
+    Completed: THEME.softSuccess,
+    Missed: THEME.softDanger,
+    Cancelled: THEME.tabInactive,
+  };
 
-function LabeledInput({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (t: string) => void;
-  placeholder?: string;
-}) {
   return (
-    <View style={{ marginBottom: 12 }}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        style={styles.input}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-      />
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={styles.patientRow}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{item.patientName.charAt(0)}</Text>
+          </View>
+          <View style={styles.patientInfo}>
+            <Text style={styles.patientName}>{item.patientName}</Text>
+            <View style={styles.metaRow}>
+              <Ionicons name="calendar-outline" size={14} color={THEME.textSecondary} />
+              <Text style={styles.metaText}>{item.date}</Text>
+              <View style={styles.metaDot} />
+              <Ionicons name="time-outline" size={14} color={THEME.textSecondary} />
+              <Text style={styles.metaText}>{item.timeSlot}</Text>
+            </View>
+          </View>
+        </View>
+        <View style={[styles.statusBadge, { backgroundColor: statusBackgrounds[item.status] }]}>
+          <Text style={[styles.statusText, { color: statusColors[item.status] }]}>{item.status}</Text>
+        </View>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.actionRow}>
+        <TouchableOpacity style={[styles.btn, styles.btnPrimary]}>
+          <Ionicons name="checkmark-circle" size={18} color={THEME.white} />
+          <Text style={styles.btnTextWhite}>Check-in</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.btn, styles.btnDanger]}>
+          <Text style={styles.btnTextRed}>Missed</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.btn, styles.btnSecondary]}>
+          <Text style={styles.btnTextSecondary}>Reschedule</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
+  container: { flex: 1, backgroundColor: THEME.background },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: THEME.white,
   },
-  container: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 0,
+  title: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
+  subtitle: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
+  searchBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: THEME.tabInactive,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#0F1E2E",
+  tabWrapper: {
+    backgroundColor: THEME.white,
+    paddingBottom: 14,
   },
-  subheading: {
-    color: "#5A6676",
-    marginBottom: 14,
-    fontSize: 14,
+  tabList: {
+    paddingHorizontal: 16,
+    gap: 10,
   },
+  tabPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    gap: 8,
+  },
+  tabPillActive: { backgroundColor: THEME.primary },
+  tabPillInactive: { backgroundColor: THEME.tabInactive },
+  tabLabel: { fontSize: 14, fontWeight: "700" },
+  tabLabelActive: { color: THEME.white },
+  tabLabelInactive: { color: THEME.textSecondary },
+  countBadge: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  countBadgeDanger: {
+    backgroundColor: THEME.danger,
+  },
+  countText: { color: THEME.white, fontSize: 10, fontWeight: "900" },
+  listContent: { padding: 16, paddingBottom: 40 },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    backgroundColor: THEME.white,
+    borderRadius: THEME.cardRadius,
     padding: 16,
-    marginBottom: 12,
-    shadowColor: "#1C1C1C",
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
     elevation: 2,
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: "#0F1E2E",
-  },
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#EAF4FF",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  badgeText: {
-    color: "#1976D2",
-    fontWeight: "700",
-  },
-  label: {
-    fontWeight: "700",
-    color: "#0F1E2E",
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: "#F7F9FC",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#E4E9F2",
-    color: "#0F1E2E",
-  },
-  primaryButton: {
-    marginTop: 8,
-    backgroundColor: "#1976D2",
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: "center",
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  patientRow: { flexDirection: "row", alignItems: "center", flex: 1, paddingRight: 12 },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: THEME.softBlue,
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-    fontSize: 15,
-  },
-  apptRow: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF1F6",
-    gap: 10,
-  },
-  apptHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    gap: 10,
   },
-  apptTitle: {
-    fontWeight: "800",
-    color: "#0F1E2E",
-  },
-  apptMeta: {
-    color: "#5A6676",
-    marginTop: 2,
-  },
-  apptBody: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  avatarText: { fontSize: 18, fontWeight: "800", color: THEME.primary },
+  patientInfo: { marginLeft: 12, flex: 1 },
+  patientName: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6, flexWrap: "wrap" },
+  metaText: { fontSize: 12, color: THEME.textSecondary, fontWeight: "600" },
+  metaDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: THEME.muted, marginHorizontal: 4 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  statusText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  divider: { height: 1, backgroundColor: THEME.tabInactive, marginVertical: 16 },
+  actionRow: { flexDirection: "row", gap: 10 },
+  btn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 14,
+    justifyContent: "center",
     alignItems: "center",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  timeChip: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: "#F7F9FC",
-    borderWidth: 1,
-    borderColor: "#E4E9F2",
-  },
-  timeText: {
-    color: "#0F1E2E",
-    fontWeight: "800",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  actionBtn: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#FFFFFF",
-  },
-  actionText: {
-    fontWeight: "700",
-  },
-  statusPill: {
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
     gap: 6,
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontWeight: "800",
-  },
+  btnPrimary: { backgroundColor: THEME.primary, flex: 1.35 },
+  btnDanger: { backgroundColor: THEME.softDanger },
+  btnSecondary: { backgroundColor: THEME.tabInactive },
+  btnTextWhite: { color: THEME.white, fontWeight: "800", fontSize: 13 },
+  btnTextRed: { color: THEME.danger, fontWeight: "800", fontSize: 13 },
+  btnTextSecondary: { color: THEME.textSecondary, fontWeight: "800", fontSize: 13 },
+  emptyContainer: { alignItems: "center", marginTop: 100 },
+  emptyText: { marginTop: 15, fontSize: 16, fontWeight: "600", color: THEME.textSecondary },
 });

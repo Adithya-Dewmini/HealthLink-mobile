@@ -20,6 +20,11 @@ export function AuthProvider({ children }: any) {
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const normalizeRole = (value: unknown) => {
+    const roleValue = String(value || "").trim().toLowerCase();
+    return roleValue.length > 0 ? roleValue : null;
+  };
+
   // 🔥 Refresh token + decode role
   const refreshAuth = async () => {
     try {
@@ -31,7 +36,7 @@ export function AuthProvider({ children }: any) {
       }
 
       const decoded: any = jwtDecode(token);
-      setRole(decoded.role);
+      setRole(normalizeRole(decoded.role));
     } catch (err) {
       console.log("Token decode error:", err);
       setRole(null);

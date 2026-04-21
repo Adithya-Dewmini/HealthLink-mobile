@@ -1,18 +1,22 @@
 import React, { useContext } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import Home from "../screens/pharmacist/Home";
-import Scanner from "../screens/pharmacist/Scanner";
+import ScannerScreen from "../screens/pharmacist/ScannerScreen";
 import Inventory from "../screens/pharmacist/Inventory";
-import AddMedicine from "../screens/pharmacist/AddMedicine";
-import Forecasting from "../screens/pharmacist/Forecasting";
+import ToolsHub from "../screens/pharmacist/ToolsHub";
+import Reports from "../screens/pharmacist/Reports";
 import { Ionicons } from "@expo/vector-icons";
-import { TouchableOpacity, Text } from "react-native";
+import { TouchableOpacity, Text, View, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthContext } from "../utils/AuthContext";
 
 const Tab = createBottomTabNavigator();
 
 export default function PharmacistTabs() {
   const { logout } = useContext(AuthContext);
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = 70 + insets.bottom;
+  const tabBarBottom = 0;
 
   return (
     <Tab.Navigator
@@ -33,13 +37,36 @@ export default function PharmacistTabs() {
             </Text>
           </TouchableOpacity>
         ),
-        tabBarActiveTintColor: "#1976D2",
-        tabBarInactiveTintColor: "gray",
-        tabBarLabelStyle: { fontSize: 12 },
+        tabBarActiveTintColor: "#2BB673",
+        tabBarInactiveTintColor: "#9CA3AF",
+        tabBarLabelStyle: { fontSize: 12, marginBottom: 5 },
+        tabBarItemStyle: { paddingVertical: 5 },
         tabBarStyle: {
-          paddingBottom: 6,
-          height: 60,
+          position: "absolute",
+          bottom: tabBarBottom,
+          left: 16,
+          right: 16,
+          height: tabBarHeight,
+          paddingBottom: insets.bottom,
+          backgroundColor: "#FFFFFF",
+          borderRadius: 25,
+          elevation: 10,
+          shadowColor: "#000",
+          shadowOpacity: 0.1,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 5 },
+          borderTopWidth: 0,
         },
+        tabBarBackground: () => (
+          <View
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 25,
+              bottom: 0,
+            }}
+          />
+        ),
       }}
     >
       <Tab.Screen
@@ -47,7 +74,7 @@ export default function PharmacistTabs() {
         component={Home}
         options={{
           tabBarLabel: "Home",
-          headerTitle: "Pharmacist Dashboard",
+          headerShown: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="cart" size={22} color={color} />
           ),
@@ -55,12 +82,31 @@ export default function PharmacistTabs() {
       />
       <Tab.Screen
         name="PharmacyScanner"
-        component={Scanner}
+        component={ScannerScreen}
         options={{
           tabBarLabel: "Scanner",
-          headerTitle: "Prescription Scanner",
+          headerShown: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="qr-code-outline" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="PharmacyTools"
+        component={ToolsHub}
+        options={{
+          tabBarLabel: "",
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <View style={styles.centerTabWrap}>
+              <View style={[styles.centerTabCircle, focused && styles.centerTabCircleActive]}>
+                <Ionicons
+                  name="grid"
+                  size={22}
+                  color="#2BB673"
+                />
+              </View>
+            </View>
           ),
         }}
       />
@@ -69,34 +115,50 @@ export default function PharmacistTabs() {
         component={Inventory}
         options={{
           tabBarLabel: "Inventory",
-          headerTitle: "Inventory",
+          headerShown: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="albums-outline" size={22} color={color} />
           ),
         }}
       />
       <Tab.Screen
-        name="PharmacyAddMedicine"
-        component={AddMedicine}
+        name="PharmacyReports"
+        component={Reports}
         options={{
-          tabBarLabel: "Add",
-          headerTitle: "Add Medicine",
+          tabBarLabel: "Reports",
+          headerShown: false,
           tabBarIcon: ({ color }) => (
-            <Ionicons name="add-circle-outline" size={22} color={color} />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="PharmacyForecasting"
-        component={Forecasting}
-        options={{
-          tabBarLabel: "Forecast",
-          headerTitle: "AI Forecasting",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="analytics-outline" size={22} color={color} />
+            <Ionicons name="stats-chart-outline" size={22} color={color} />
           ),
         }}
       />
     </Tab.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  centerTabWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -10,
+  },
+  centerTabCircle: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  centerTabCircleActive: {
+    backgroundColor: "#E6F7EF",
+    borderColor: "#CDEFE0",
+  },
+});

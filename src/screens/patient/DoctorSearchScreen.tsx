@@ -10,11 +10,13 @@ import {
   StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
 import FilterBottomSheet from "../../components/FilterBottomSheet";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { apiFetch } from "../../config/api";
+import { addFavorite, getFavorites, removeFavorite } from "../../services/favoritesApi";
 
 const THEME = {
   background: "#F2F5F9",
@@ -37,47 +39,24 @@ const CATEGORIES = [
   "Neurologist",
 ];
 
-const DOCTORS = [
-  {
-    id: "1",
-    name: "Dr. Silva",
-    specialty: "General Physician",
-    city: "Colombo",
-    rating: 4.9,
-    reviews: "120",
-    experience: "8 Years",
-    queueLength: 8,
-    isAvailableToday: true,
-    available: true,
-  },
-  {
-    id: "2",
-    name: "Dr. Fernando",
-    specialty: "Dermatologist",
-    city: "Kandy",
-    rating: 4.8,
-    reviews: "85",
-    experience: "5 Years",
-    queueLength: 15,
-    isAvailableToday: false,
-    available: false,
-  },
-  {
-    id: "3",
-    name: "Dr. Peiris",
-    specialty: "Cardiologist",
-    city: "Galle",
-    rating: 5.0,
-    reviews: "210",
-    experience: "12 Years",
-    queueLength: 4,
-    isAvailableToday: true,
-    available: true,
-  },
-];
+const normalizeValue = (value: string) => value.trim().toLowerCase();
+
+type DoctorCard = {
+  id: number;
+  name: string;
+  specialty: string;
+  city: string;
+  rating?: number | null;
+  reviews?: number | null;
+  experience: string;
+  queueLength: number;
+  isAvailableToday: boolean;
+  available: boolean;
+};
 
 export default function DoctorSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
+  const route = useRoute<any>();
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({
@@ -87,8 +66,11 @@ export default function DoctorSearchScreen() {
     queue: null as number | null,
     availableToday: false,
   });
-  const [filteredDoctors, setFilteredDoctors] = useState(DOCTORS);
+  const [doctors, setDoctors] = useState<DoctorCard[]>([]);
+  const [filteredDoctors, setFilteredDoctors] = useState<DoctorCard[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [favoriteDoctorIds, setFavoriteDoctorIds] = useState<number[]>([]);
 
   const locations = useMemo(
     () => [
@@ -125,16 +107,32 @@ export default function DoctorSearchScreen() {
   );
 
   useEffect(() => {
-    let filtered = [...DOCTORS];
+    const specialtyParam = route?.params?.specialty;
+    if (typeof specialtyParam === "string" && specialtyParam.trim()) {
+      const normalized = specialtyParam.trim().toLowerCase();
+      const matched =
+        CATEGORIES.find((cat) => cat.toLowerCase() === normalized) || "All";
+      setActiveTab(matched);
+      setFilters((prev) => ({
+        ...prev,
+        specialty: matched === "All" ? "" : matched,
+      }));
+    }
+  }, [route?.params?.specialty]);
+
+  useEffect(() => {
+    let filtered = [...doctors];
 
     if (filters.location) {
-      filtered = filtered.filter((d) => d.city === filters.location);
+      const target = normalizeValue(filters.location);
+      filtered = filtered.filter((d) => normalizeValue(d.city) === target);
     }
     if (filters.specialty) {
-      filtered = filtered.filter((d) => d.specialty === filters.specialty);
+      const target = normalizeValue(filters.specialty);
+      filtered = filtered.filter((d) => normalizeValue(d.specialty) === target);
     }
     if (filters.rating) {
-      filtered = filtered.filter((d) => d.rating >= (filters.rating || 0));
+      filtered = filtered.filter((d) => (d.rating ?? 0) >= (filters.rating || 0));
     }
     if (filters.queue) {
       filtered = filtered.filter((d) => d.queueLength < (filters.queue || Infinity));
@@ -154,12 +152,79 @@ export default function DoctorSearchScreen() {
     }
 
     setFilteredDoctors(filtered);
-  }, [filters, search]);
+  }, [filters, search, doctors]);
+
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        setLoading(true);
+        const res = await apiFetch("/api/patients/doctors");
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || "Failed to load doctors");
+        }
+        const data = await res.json();
+        const mapped = (Array.isArray(data) ? data : []).map((doc: any) => ({
+          id: Number(doc.doctor_id),
+          name: doc.name ?? "Doctor",
+          specialty: doc.specialization ?? "General Physician",
+          city: doc.city ?? "Colombo",
+          rating: doc.rating ?? null,
+          reviews: doc.review_count ?? null,
+          experience: doc.experience_years ? `${doc.experience_years} Years` : "N/A",
+          queueLength: Number(doc.queue_length ?? 0),
+          isAvailableToday: Boolean(doc.is_available_today),
+          available: Boolean(doc.is_available_today),
+        }));
+        setDoctors(mapped);
+      } catch (err) {
+        console.error("Load doctors error:", err);
+        setDoctors([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadDoctors();
+  }, []);
+
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const data = await getFavorites();
+        setFavoriteDoctorIds(data.doctors.map((doc) => Number(doc.id)));
+      } catch (err) {
+        console.error("Load favorite doctors error:", err);
+      }
+    };
+    loadFavorites();
+  }, []);
+
+  const toggleFavorite = async (doctorId: number) => {
+    const isFavorite = favoriteDoctorIds.includes(doctorId);
+    setFavoriteDoctorIds((current) =>
+      isFavorite ? current.filter((id) => id !== doctorId) : [...current, doctorId]
+    );
+
+    try {
+      if (isFavorite) {
+        await removeFavorite(doctorId, "doctor");
+      } else {
+        await addFavorite(doctorId, "doctor");
+      }
+    } catch (err) {
+      setFavoriteDoctorIds((current) =>
+        isFavorite ? [...current, doctorId] : current.filter((id) => id !== doctorId)
+      );
+      console.error("Toggle doctor favorite error:", err);
+    }
+  };
 
   const applyFilters = (nextFilters = filters) => {
     setFilters(nextFilters);
     if (nextFilters.specialty) {
       setActiveTab(nextFilters.specialty);
+    } else {
+      setActiveTab("All");
     }
     setIsFilterOpen(false);
   };
@@ -168,9 +233,10 @@ export default function DoctorSearchScreen() {
     setIsFilterOpen(true);
   };
 
-  const displayDoctors = filteredDoctors.filter((doc) =>
-    activeTab === "All" ? true : doc.specialty === activeTab
-  );
+  const displayDoctors = filteredDoctors.filter((doc) => {
+    if (activeTab === "All") return true;
+    return normalizeValue(doc.specialty) === normalizeValue(activeTab);
+  });
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -238,7 +304,13 @@ export default function DoctorSearchScreen() {
               </TouchableOpacity>
             </View>
 
-            {displayDoctors.map((doc) => (
+            {displayDoctors.length === 0 && !loading && (
+              <Text style={styles.emptyText}>No doctors available.</Text>
+            )}
+
+            {displayDoctors.map((doc) => {
+              const isFavorite = favoriteDoctorIds.includes(doc.id);
+              return (
               <TouchableOpacity key={doc.id} style={styles.doctorCard}>
                 <View style={styles.docMainInfo}>
                   <View style={styles.avatarPlaceholder}>
@@ -251,17 +323,25 @@ export default function DoctorSearchScreen() {
                     <Text style={styles.docSpec}>{doc.specialty}</Text>
 
                     <View style={styles.statsRow}>
-                      <View style={styles.ratingBox}>
-                        <Ionicons name="star" size={14} color={THEME.accentAmber} />
-                        <Text style={styles.ratingText}>{doc.rating.toFixed(1)}</Text>
-                      </View>
-                      <Text style={styles.statDivider}>|</Text>
+                      {doc.rating != null && (
+                        <>
+                          <View style={styles.ratingBox}>
+                            <Ionicons name="star" size={14} color={THEME.accentAmber} />
+                            <Text style={styles.ratingText}>{Number(doc.rating).toFixed(1)}</Text>
+                          </View>
+                          <Text style={styles.statDivider}>|</Text>
+                        </>
+                      )}
                       <Text style={styles.experienceText}>{doc.experience} Exp</Text>
                     </View>
                   </View>
 
-                  <TouchableOpacity style={styles.favBtn}>
-                    <Ionicons name="heart-outline" size={22} color={THEME.textGray} />
+                  <TouchableOpacity style={styles.favBtn} onPress={() => toggleFavorite(doc.id)}>
+                    <Ionicons
+                      name={isFavorite ? "heart" : "heart-outline"}
+                      size={22}
+                      color={isFavorite ? "#EF4444" : THEME.textGray}
+                    />
                   </TouchableOpacity>
                 </View>
 
@@ -279,17 +359,39 @@ export default function DoctorSearchScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.bookBtn}
-                    onPress={() => navigation.navigate("BookAppointmentScreen")}
+                    onPress={() =>
+                      navigation.navigate("BookAppointmentScreen", {
+                        doctorId: doc.id,
+                        doctorName: doc.name,
+                        specialty: doc.specialty,
+                        experienceYears: Number.isNaN(Number.parseInt(doc.experience, 10))
+                          ? undefined
+                          : Number.parseInt(doc.experience, 10),
+                        rating: doc.rating,
+                        reviewCount:
+                          doc.reviews == null || Number.isNaN(Number(doc.reviews))
+                            ? undefined
+                            : Number(doc.reviews),
+                      })
+                    }
                   >
                     <Text style={styles.bookBtnText}>Book Now</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
-            ))}
+            )})}
           </View>
 
-          <View style={{ height: 40 }} />
+          <View style={{ height: 120 }} />
         </ScrollView>
+
+        <TouchableOpacity
+          style={styles.floatingFab}
+          onPress={() => navigation.navigate("SymptomChecker")}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="sparkles" size={22} color={THEME.white} />
+        </TouchableOpacity>
 
         <FilterBottomSheet
           visible={isFilterOpen}
@@ -339,6 +441,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  floatingFab: {
+    position: "absolute",
+    right: 20,
+    bottom: 110,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: THEME.accentBlue,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -355,7 +472,7 @@ const styles = StyleSheet.create({
   categoryPill: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 28,
     backgroundColor: THEME.white,
     marginRight: 10,
     borderWidth: 1,
@@ -366,6 +483,7 @@ const styles = StyleSheet.create({
   activeCategoryText: { color: THEME.white },
 
   listContainer: { paddingHorizontal: 20 },
+  emptyText: { color: THEME.textGray, fontSize: 14, marginTop: 8 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -377,7 +495,7 @@ const styles = StyleSheet.create({
 
   doctorCard: {
     backgroundColor: THEME.white,
-    borderRadius: 24,
+    borderRadius: 28,
     padding: 16,
     marginBottom: 16,
     elevation: 2,

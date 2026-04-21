@@ -1,325 +1,501 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
-  Image,
-  RefreshControl,
+  SafeAreaView,
+  Dimensions,
   StatusBar,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import type { CompositeNavigationProp } from "@react-navigation/native";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { PatientStackParamList } from "../../types/navigation";
 import { apiFetch } from "../../config/api";
-import type { PatientStackParamList, PatientTabParamList } from "../../types/navigation";
 
-// Using the exact same Soft-UI theme 
+const { width } = Dimensions.get("window");
+
 const THEME = {
+  primaryBlue: "#2196F3",
+  lightBlueBg: "#E3F2FD",
   background: "#F2F5F9",
-  white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  mint: "#E1F1E7",
-  lavender: "#E9E7F7",
-  softBlue: "#E1EEF9",
-  softRed: "#FFE5E5",
-  accentGreen: "#4CAF50",
-  accentPurple: "#9C27B0",
   accentBlue: "#2196F3",
-  accentRed: "#FF5252",
+  white: "#FFFFFF",
+  textPrimary: "#1A1C1E",
+  textSecondary: "#6A6D7C",
+  border: "#E0E0E0",
+  cardRadius: 20,
 };
 
-export default function PatientDashboard() {
-  const navigation = useNavigation<
-    CompositeNavigationProp<
-      BottomTabNavigationProp<PatientTabParamList, "PatientDashboard">,
-      NativeStackNavigationProp<PatientStackParamList>
-    >
-  >();
-  const [profile, setProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const REQUEST_TIMEOUT_MS = 12000;
+type QueueStatus = {
+  status?: string;
+  queueStarted?: boolean;
+  currentToken?: number | null;
+  nowServing?: number | null;
+  patientToken?: number | null;
+  estimatedWaitMinutes?: number | null;
+  patientStatus?: string | null;
+};
 
-  const fetchProfile = useCallback(async (isRefresh = false) => {
-    setError(null);
-    isRefresh ? setRefreshing(true) : setLoading(true);
+export default function BluePatientDashboard() {
+  const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
+  const [profileName, setProfileName] = useState<string>("Patient");
+  const [latestPrescription, setLatestPrescription] = useState<any | null>(null);
+  const [nextBooking, setNextBooking] = useState<any | null>(null);
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    return "Good Evening";
+  }, []);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
     try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) { setError("Not logged in"); return; }
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const res = await apiFetch("/api/patients/me", { signal: controller.signal });
-      clearTimeout(timeoutId);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to load");
-      setProfile(data);
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        setError("Request timed out. Please check your connection and try again.");
-      } else {
-        setError(err.message || "Server Error");
+      const profileRes = await apiFetch("/api/patients/me");
+      if (profileRes.ok) {
+        const profile = await profileRes.json();
+        setProfileName(profile?.name ?? "Patient");
       }
+
+      const bookingRes = await apiFetch("/api/patients/bookings");
+      let selectedBooking: any | null = null;
+      if (bookingRes.ok) {
+        const bookingData = await bookingRes.json();
+        const upcoming = (Array.isArray(bookingData) ? bookingData : [])
+          .filter((item: any) => String(item?.status ?? "booked") !== "cancelled")
+          .map((item: any) => {
+            const date = String(item?.date ?? "");
+            const time = String(item?.time ?? "00:00");
+            const combined = new Date(`${date}T${time}`);
+            return { ...item, combined };
+          })
+          .filter((item: any) => !Number.isNaN(item.combined.getTime()))
+          .filter((item: any) => item.combined >= new Date())
+          .sort((a: any, b: any) => a.combined.getTime() - b.combined.getTime());
+        selectedBooking = upcoming[0] ?? null;
+        setNextBooking(selectedBooking);
+      } else {
+        setNextBooking(null);
+      }
+
+      const prescriptionRes = await apiFetch("/api/patients/prescriptions?latest=true");
+      if (prescriptionRes.ok) {
+        const data = await prescriptionRes.json();
+        setLatestPrescription(data ?? null);
+      } else {
+        setLatestPrescription(null);
+      }
+
+      if (selectedBooking?.doctor_id) {
+        const queueRes = await apiFetch(
+          `/api/patients/doctor/queue-status/${selectedBooking.doctor_id}`
+        );
+        if (queueRes.ok) {
+          const queueData = await queueRes.json();
+          setQueueStatus(queueData ?? null);
+        } else {
+          setQueueStatus(null);
+        }
+      } else {
+        setQueueStatus(null);
+      }
+    } catch (err) {
+      console.error("Dashboard load error:", err);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadDashboard();
+    }, [loadDashboard])
+  );
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={THEME.accentBlue} />
-      </View>
-    );
-  }
+  const currentStatus = useMemo(() => {
+    if (queueStatus?.patientToken && ["WAITING", "WITH_DOCTOR"].includes(String(queueStatus?.patientStatus))) {
+      return "queue";
+    }
+    if (nextBooking) return "appointment";
+    return "empty";
+  }, [queueStatus, nextBooking]);
 
-  if (error) {
-    return (
-      <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.center}>
-          <Text style={styles.errorTitle}>Unable to load dashboard</Text>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => fetchProfile()}>
-            <Text style={styles.retryText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const nowServing = Number(queueStatus?.currentToken ?? queueStatus?.nowServing ?? 0);
+  const yourNumber = Number(queueStatus?.patientToken ?? 0);
+  const progressPct = useMemo(() => {
+    if (!yourNumber) return 0;
+    return Math.min((nowServing / Math.max(yourNumber, 1)) * 100, 100);
+  }, [nowServing, yourNumber]);
+
+  const reminderMedicine = useMemo(() => {
+    const meds = Array.isArray(latestPrescription?.medicines)
+      ? latestPrescription.medicines
+      : [];
+    return meds[0] ?? null;
+  }, [latestPrescription]);
+
+  const recentDoctor =
+    latestPrescription?.doctor?.name ??
+    latestPrescription?.doctor_name ??
+    latestPrescription?.doctorName ??
+    "Doctor";
+
+  const recentDate = latestPrescription?.issuedAt
+    ? new Date(latestPrescription.issuedAt).toLocaleDateString()
+    : latestPrescription?.createdAt
+      ? new Date(latestPrescription.createdAt).toLocaleDateString()
+      : "—";
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
       
       {/* 1. Header Section */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Good Morning 👋</Text>
-          <Text style={styles.profileName}>{profile?.name || "Patient"}</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.greetingText}>{greeting}</Text>
+          <Text style={styles.userName}>{profileName}</Text>
         </View>
-        <View style={styles.headerIcons}>
+        <View style={styles.headerActions}>
           <TouchableOpacity style={styles.iconCircle}>
-            <Ionicons name="notifications-outline" size={20} color={THEME.textDark} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconCircle}
-            onPress={() => navigation.navigate("PatientSettings")}
-          >
-            <Ionicons name="settings-outline" size={20} color={THEME.textDark} />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.profileCircle}
-            onPress={() => navigation.navigate("PatientProfile")}
-          >
-            <Ionicons name="person" size={22} color={THEME.textGray} />
+            <Ionicons name="notifications-outline" size={24} color={THEME.primaryBlue} />
+            <View style={styles.notifDot} />
           </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchProfile(true)} />}
+        showsVerticalScrollIndicator={false}
       >
         
-        {/* 2. Active Appointment Card */}
-        <View style={styles.appointmentCard}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardTag}>Next Appointment</Text>
-            <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE</Text></View>
-          </View>
-          <Text style={styles.docName}>Dr. Silva</Text>
-          <Text style={styles.apptTime}>Today • 10:30 AM</Text>
-          
-          <View style={styles.queueInfoBox}>
-            <View style={styles.queueItem}>
-              <Text style={styles.queueLabel}>Your Token</Text>
-              <Text style={styles.queueValue}>14</Text>
-            </View>
-            <View style={[styles.queueItem, { borderLeftWidth: 1, borderColor: '#DDD' }]}>
-              <Text style={styles.queueLabel}>Now Serving</Text>
-              <Text style={[styles.queueValue, { color: THEME.accentGreen }]}>10</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity 
-            style={styles.viewQueueBtn}
-            onPress={() => navigation.navigate("PatientQueue")}
+        {/* 2. Dynamic Main Card (Blue Gradient) */}
+        {currentStatus === "queue" && (
+          <LinearGradient 
+            colors={[THEME.lightBlueBg, "#DBEAFE"]} 
+            start={{ x: 0, y: 0 }} 
+            end={{ x: 1, y: 1 }} 
+            style={styles.mainCard}
           >
-            <Text style={styles.viewQueueText}>View Queue Status</Text>
-            <Ionicons name="arrow-forward" size={18} color={THEME.white} />
-          </TouchableOpacity>
-        </View>
+            <View style={styles.mainCardHeader}>
+              <Text style={styles.mainCardLabel}>Live Queue</Text>
+              <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE</Text></View>
+            </View>
+            <View style={styles.queueContent}>
+              <View>
+                <Text style={styles.queueNumber}>{yourNumber || "—"}</Text>
+                <Text style={styles.queueSub}>Your Number</Text>
+              </View>
+              <View style={styles.queueDivider} />
+              <View>
+                <Text style={styles.queueNumberSmall}>{nowServing || "—"}</Text>
+                <Text style={styles.queueSub}>Now Serving</Text>
+              </View>
+            </View>
+            <View style={styles.progressBarBg}>
+               <View style={[styles.progressBarFill, { width: `${progressPct}%` }]} />
+            </View>
+            <Text style={styles.waitText}>
+              Estimated wait:{" "}
+              <Text style={{ fontWeight: "800" }}>
+                {queueStatus?.estimatedWaitMinutes ?? 0} mins
+              </Text>
+            </Text>
+            <TouchableOpacity
+              style={styles.mainCardBtn}
+              onPress={() =>
+                navigation.navigate("PatientQueue", {
+                  doctorId: nextBooking?.doctor_id,
+                })
+              }
+            >
+              <Text style={styles.mainCardBtnText}>Check Details</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        )}
+        {currentStatus === "appointment" && (
+          <View style={styles.appointmentCard}>
+            <View style={styles.appointmentRow}>
+              <View>
+                <Text style={styles.mainCardLabelDark}>Upcoming Appointment</Text>
+                <Text style={styles.appointmentDoctor}>
+                  {nextBooking?.doctor_name ?? "Doctor"}
+                </Text>
+                <Text style={styles.appointmentMeta}>
+                  {nextBooking?.date ?? "—"} • {formatBookingTime(nextBooking?.time)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.appointmentBtn}
+                onPress={() =>
+                  navigation.navigate("PatientTabs", { screen: "PatientAppointments" })
+                }
+              >
+                <Text style={styles.appointmentBtnText}>View</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        {currentStatus === "empty" && (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyRow}>
+              <Ionicons name="calendar-outline" size={24} color={THEME.primaryBlue} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emptyTitle}>No upcoming appointments</Text>
+                <Text style={styles.emptySub}>Book a doctor to get started.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.appointmentBtn}
+                onPress={() => navigation.navigate("DoctorSearchScreen")}
+              >
+                <Text style={styles.appointmentBtnText}>Book</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
-        {/* 3. Health Tracking Section */}
-        <Text style={styles.sectionTitle}>Health Tracking</Text>
-        <View style={styles.grid}>
-          <MetricCard 
-            title="Heart Rate" 
-            value="80" 
-            unit="bpm" 
-            icon="heart" 
-            color={THEME.softBlue} 
-            iconColor={THEME.accentBlue}
-            onPress={() => navigation.navigate("HeartRateScreen")}
-          />
-          <MetricCard 
-            title="Sleep" 
-            value="7.5" 
-            unit="hrs" 
-            icon="moon" 
-            color={THEME.lavender} 
-            iconColor={THEME.accentPurple}
-            onPress={() => navigation.navigate("SleepTrackerScreen")}
-          />
-        </View>
-
-        {/* 4. Quick Actions */}
+        {/* 3. Quick Actions Grid */}
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionList}>
-          <ActionItem 
-            icon="calendar" 
-            label="Book Appointment" 
-            onPress={() => navigation.navigate("DoctorSearchScreen")} 
+        <View style={styles.grid}>
+          <ActionTile
+            icon="calendar-outline"
+            label="Book Appt"
+            onPress={() => navigation.navigate("DoctorSearchScreen")}
           />
-          <ActionItem 
-            icon="medical" 
-            label="My Prescriptions" 
-            onPress={() => navigation.navigate("PatientPrescriptions")} 
+          <ActionTile
+            icon="document-text-outline"
+            label="Lab Reports"
+            onPress={() => navigation.navigate("MedicalHistoryScreen")}
           />
-          <ActionItem 
-            icon="document-text" 
-            label="Medical History" 
-            onPress={() => navigation.navigate("MedicalHistoryScreen")} 
+          <ActionTile
+            icon="medkit-outline"
+            label="Pharmacy"
+            onPress={() =>
+              navigation.navigate("PatientPrescriptions")
+            }
+          />
+          <ActionTile
+            icon="search-outline"
+            label="Find Doctor"
+            onPress={() => navigation.navigate("DoctorSearchScreen")}
           />
         </View>
 
+        {/* 4. Reminder Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Reminders</Text>
+          <TouchableOpacity><Text style={styles.seeAll}>See All</Text></TouchableOpacity>
+        </View>
+        {reminderMedicine ? (
+          <View style={styles.reminderCard}>
+            <View style={styles.reminderIconBox}>
+              <MaterialCommunityIcons name="pill" size={26} color={THEME.primaryBlue} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.reminderName}>
+                {reminderMedicine.name ?? reminderMedicine.medicine_name ?? "Medicine"}
+              </Text>
+              <Text style={styles.reminderTime}>
+                {reminderMedicine.instructions ??
+                  reminderMedicine.frequency ??
+                  "Follow prescription instructions"}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.takeNowBtn}
+              onPress={() => navigation.navigate("MedicineTracker")}
+            >
+              <Text style={styles.takeNowText}>Track</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.emptyReminder}>
+            <Text style={styles.emptyReminderText}>
+              {loading ? "Loading reminders..." : "No reminders yet."}
+            </Text>
+          </View>
+        )}
+
+        {/* 5. Recent Activity Section */}
+        <Text style={styles.sectionTitle}>Recent Activity</Text>
+        {latestPrescription ? (
+          <View style={styles.activityItem}>
+            <View style={styles.activityIcon}>
+              <Ionicons name="medical-outline" size={22} color={THEME.primaryBlue} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.activityTitle}>Consultation Completed</Text>
+              <Text style={styles.activitySub}>
+                {recentDoctor} • {recentDate}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={THEME.textSecondary} />
+          </View>
+        ) : (
+          <View style={styles.emptyReminder}>
+            <Text style={styles.emptyReminderText}>
+              {loading ? "Loading activity..." : "No recent activity yet."}
+            </Text>
+          </View>
+        )}
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 // Helper Components
-const MetricCard = ({ title, value, unit, icon, color, iconColor, onPress }: any) => (
-  <TouchableOpacity style={[styles.metricCard, { backgroundColor: color }]} onPress={onPress}>
-    <Ionicons name={icon} size={24} color={iconColor} />
-    <View style={{ marginTop: 12 }}>
-      <Text style={styles.metricValue}>{value} <Text style={styles.metricUnit}>{unit}</Text></Text>
-      <Text style={styles.metricTitle}>{title}</Text>
+const ActionTile = ({ icon, label, onPress }: any) => (
+  <TouchableOpacity style={styles.tile} onPress={onPress}>
+    <View style={styles.tileIconBox}>
+      <Ionicons name={icon} size={28} color={THEME.primaryBlue} />
     </View>
-  </TouchableOpacity>
-);
-
-const ActionItem = ({ icon, label, onPress }: any) => (
-  <TouchableOpacity style={styles.actionItem} onPress={onPress}>
-    <View style={styles.actionIconCircle}>
-      <Ionicons name={icon} size={20} color={THEME.accentBlue} />
-    </View>
-    <Text style={styles.actionLabel}>{label}</Text>
-    <Ionicons name="chevron-forward" size={18} color={THEME.textGray} />
+    <Text style={styles.tileLabel}>{label}</Text>
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.white },
   scroll: { backgroundColor: THEME.background },
-  scrollContent: { padding: 20 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  errorTitle: { fontSize: 18, fontWeight: "700", color: THEME.textDark, marginBottom: 6 },
-  errorText: { fontSize: 13, color: THEME.textGray, textAlign: "center", marginBottom: 12 },
-  retryBtn: {
-    backgroundColor: THEME.textDark,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  retryText: { color: THEME.white, fontWeight: "700" },
-  
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 16,
     backgroundColor: THEME.white,
+    gap: 12,
   },
-  rowBetween: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  alignItems: "center",
-},
-  greeting: { fontSize: 14, color: THEME.textGray },
-  profileName: { fontSize: 20, fontWeight: "bold", color: THEME.textDark },
-  headerIcons: { flexDirection: "row", gap: 10 },
-  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: THEME.background, justifyContent: "center", alignItems: "center" },
-  profileCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: THEME.lavender, justifyContent: "center", alignItems: "center", overflow: 'hidden' },
+  headerText: { flex: 1, alignItems: "flex-start" },
+  greetingText: { fontSize: 14, color: THEME.textSecondary, fontWeight: '500' },
+  userName: { fontSize: 26, fontWeight: '800', color: THEME.textPrimary },
+  headerActions: { flexDirection: 'row', gap: 12, alignItems: "center" },
+  iconCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
+  notifDot: { position: 'absolute', top: 14, right: 15, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 2, borderColor: THEME.white },
 
-  appointmentCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 28,
+  scrollContent: { paddingHorizontal: 20, paddingTop: 12 },
+  
+  // Main Status Card
+  mainCard: {
     padding: 20,
-    marginBottom: 25,
-    elevation: 4,
+    borderRadius: THEME.cardRadius,
+    marginTop: 12,
+    marginBottom: 24,
     shadowColor: "#000",
     shadowOpacity: 0.05,
-    shadowRadius: 15,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  cardTag: { fontSize: 12, fontWeight: "bold", color: THEME.accentBlue, textTransform: 'uppercase' },
-  liveBadge: { backgroundColor: THEME.softRed || '#FFE5E5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  liveText: { fontSize: 10, fontWeight: "bold", color: THEME.accentRed },
-  docName: { fontSize: 22, fontWeight: "bold", color: THEME.textDark, marginTop: 8 },
-  apptTime: { fontSize: 14, color: THEME.textGray, marginTop: 4 },
-  
-  queueInfoBox: {
-    flexDirection: "row",
-    backgroundColor: THEME.background,
-    borderRadius: 16,
-    padding: 15,
-    marginTop: 20,
-  },
-  queueItem: { flex: 1, alignItems: "center" },
-  queueLabel: { fontSize: 11, color: THEME.textGray, textTransform: 'uppercase' },
-  queueValue: { fontSize: 20, fontWeight: "bold", color: THEME.textDark, marginTop: 4 },
-
-  viewQueueBtn: {
-    backgroundColor: THEME.textDark,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 16,
-    borderRadius: 16,
-    marginTop: 15,
-  },
-  viewQueueText: { color: THEME.white, fontWeight: "bold", marginRight: 8 },
-
-  sectionTitle: { fontSize: 18, fontWeight: "bold", color: THEME.textDark, marginBottom: 15, marginTop: 5 },
-  grid: { flexDirection: "row", gap: 15, marginBottom: 25 },
-  metricCard: { flex: 1, padding: 20, borderRadius: 24 },
-  metricValue: { fontSize: 22, fontWeight: "bold", color: THEME.textDark },
-  metricUnit: { fontSize: 12, fontWeight: "normal", color: THEME.textGray },
-  metricTitle: { fontSize: 14, color: THEME.textGray, marginTop: 4 },
-
-  actionList: { gap: 10 },
-  actionItem: {
-    flexDirection: "row",
-    alignItems: "center",
+  mainCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  mainCardLabel: { color: THEME.textSecondary, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, fontSize: 12 },
+  liveBadge: { backgroundColor: THEME.white, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  liveText: { color: THEME.primaryBlue, fontSize: 10, fontWeight: '900' },
+  queueContent: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, gap: 24 },
+  queueNumber: { fontSize: 52, fontWeight: '900', color: THEME.textPrimary },
+  queueNumberSmall: { fontSize: 34, fontWeight: '800', color: THEME.textSecondary },
+  queueSub: { color: THEME.textSecondary, fontSize: 13, fontWeight: '600' },
+  queueDivider: { width: 1, height: 45, backgroundColor: THEME.border },
+  progressBarBg: { height: 8, backgroundColor: THEME.white, borderRadius: 4, marginBottom: 12 },
+  progressBarFill: { height: '100%', backgroundColor: THEME.primaryBlue, borderRadius: 4 },
+  waitText: { color: THEME.textSecondary, fontSize: 14 },
+  mainCardBtn: { backgroundColor: THEME.lightBlueBg, paddingVertical: 12, borderRadius: 999, marginTop: 18, alignItems: 'center' },
+  mainCardBtnText: { color: THEME.primaryBlue, fontWeight: '800', fontSize: 14 },
+  appointmentCard: {
     backgroundColor: THEME.white,
-    padding: 16,
-    borderRadius: 20,
+    borderRadius: THEME.cardRadius,
+    padding: 20,
+    marginTop: 12,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  actionIconCircle: { width: 40, height: 40, borderRadius: 12, backgroundColor: THEME.softBlue, justifyContent: "center", alignItems: "center", marginRight: 15 },
-  actionLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: THEME.textDark },
+  appointmentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
+  appointmentDoctor: { fontSize: 18, fontWeight: "800", color: THEME.textPrimary, marginTop: 6 },
+  appointmentMeta: { fontSize: 13, color: THEME.textSecondary, marginTop: 6 },
+  appointmentBtn: {
+    backgroundColor: THEME.lightBlueBg,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  appointmentBtnText: { color: THEME.primaryBlue, fontWeight: "800", fontSize: 12 },
+  mainCardLabelDark: {
+    color: THEME.textSecondary,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontSize: 12,
+  },
+  emptyCard: {
+    backgroundColor: THEME.white,
+    borderRadius: THEME.cardRadius,
+    padding: 20,
+    marginTop: 12,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  emptyRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  emptyTitle: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
+  emptySub: { fontSize: 13, color: THEME.textSecondary, marginTop: 4 },
+
+  sectionTitle: { fontSize: 20, fontWeight: '800', color: THEME.textPrimary, marginBottom: 14, marginTop: 6 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  seeAll: { color: THEME.primaryBlue, fontWeight: '700', fontSize: 14 },
+
+  // Quick Actions Grid
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 15, marginBottom: 24 },
+  tile: { width: (width - 55) / 2, backgroundColor: THEME.white, padding: 18, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  tileIconBox: { width: 54, height: 54, borderRadius: 16, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  tileLabel: { fontSize: 16, fontWeight: '700', color: THEME.textPrimary },
+
+  // Reminders
+  reminderCard: { backgroundColor: THEME.white, padding: 18, borderRadius: THEME.cardRadius, flexDirection: 'row', alignItems: 'center', gap: 15, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  reminderIconBox: { width: 52, height: 52, borderRadius: 16, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
+  reminderName: { fontSize: 17, fontWeight: '700', color: THEME.textPrimary },
+  reminderTime: { fontSize: 14, color: THEME.textSecondary, marginTop: 2 },
+  takeNowBtn: { backgroundColor: THEME.lightBlueBg, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
+  takeNowText: { color: THEME.primaryBlue, fontWeight: '800', fontSize: 12 },
+
+  // Activity
+  activityItem: { flexDirection: 'row', alignItems: 'center', gap: 15, backgroundColor: THEME.white, padding: 18, borderRadius: THEME.cardRadius, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  activityIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
+  activityTitle: { fontSize: 16, fontWeight: '700', color: THEME.textPrimary },
+  activitySub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
+  emptyReminder: {
+    backgroundColor: THEME.white,
+    padding: 18,
+    borderRadius: THEME.cardRadius,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    alignItems: "center",
+  },
+  emptyReminderText: { fontSize: 13, color: THEME.textSecondary, fontWeight: "600" },
 });
+  const formatBookingTime = (value?: string) => {
+    if (!value) return "—";
+    const parts = value.split(":");
+    if (parts.length < 2) return value;
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (Number.isNaN(h) || Number.isNaN(m)) return value;
+    const hour12 = h % 12 || 12;
+    const period = h >= 12 ? "PM" : "AM";
+    return `${hour12.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")} ${period}`;
+  };

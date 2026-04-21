@@ -14,6 +14,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Toast from "react-native-toast-message";
 import { useNavigation } from "@react-navigation/native";
 import ClinicEndedModal from "../../components/ClinicEndedModal";
+import { notifyLocal } from "../../services/notifications";
+import { apiFetch } from "../../config/api";
 import {
   getQueueDashboard,
   startQueue,
@@ -24,17 +26,22 @@ import {
 import { socket } from "../../services/socket";
 
 const THEME = {
-  background: "#F2F5F9",
+  background: "#F3F6FB",
   white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  softBlue: "#E1EEF9",  // 🔵 In Consultation
-  softGreen: "#E1F1E7", // 🟢 Completed
-  softYellow: "#FFF4E1",// 🟡 Waiting
-  accentBlue: "#2196F3",
-  accentGreen: "#4CAF50",
-  accentOrange: "#FF9800",
-  accentRed: "#F44336",
+  textDark: "#1F2937",
+  textGray: "#6B7280",
+  accentBlue: "#1E88E5",
+  accentBlueDark: "#1565C0",
+  softBlue: "#E7F1FE",
+  border: "#E6EDF5",
+  success: "#1E88E5",
+  softSuccess: "#ECFDF5",
+  warning: "#F5A05A",
+  danger: "#E05252",
+  softDanger: "#FDE9E9",
+  softWarning: "#FDEEDB",
+  softNeutral: "#EEF3F7",
+  cardDark: "#1B1E24",
 };
 
 export default function QueueScreen() {
@@ -44,6 +51,7 @@ export default function QueueScreen() {
   const [currentPatient, setCurrentPatient] = useState<any>(null);
   const [doctorId, setDoctorId] = useState<number | string | null>(null);
   const [showClinicEndedModal, setShowClinicEndedModal] = useState(false);
+  const [todayShift, setTodayShift] = useState<{ start: string; end: string } | null>(null);
 
   const loadDashboard = async () => {
     try {
@@ -60,9 +68,33 @@ export default function QueueScreen() {
     }
   };
 
+  const loadTodayShift = async () => {
+    try {
+      const res = await apiFetch("/api/doctor/availability");
+      if (!res.ok) return;
+      const data = await res.json();
+      const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+      const today = (Array.isArray(data) ? data : []).find(
+        (shift: any) => String(shift.day) === dayName
+      );
+      if (today?.start_time && today?.end_time) {
+        setTodayShift({
+          start: String(today.start_time).slice(0, 5),
+          end: String(today.end_time).slice(0, 5),
+        });
+      } else {
+        setTodayShift(null);
+      }
+    } catch (error) {
+      console.log("Today shift load error:", error);
+      setTodayShift(null);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       await loadDashboard();
+      await loadTodayShift();
     };
     void init();
   }, []);
@@ -93,6 +125,10 @@ export default function QueueScreen() {
         });
       }
 
+      if (data?.type === "QUEUE_EMPTY") {
+        void notifyLocal("Queue Empty", "There are no patients waiting.");
+      }
+
       if (data?.type === "CLINIC_ENDED") {
         Toast.show({
           type: "info",
@@ -104,8 +140,10 @@ export default function QueueScreen() {
       await loadDashboard();
     };
 
+    socket.on("queue:update", handleQueueUpdated);
     socket.on("queueUpdated", handleQueueUpdated);
     return () => {
+      socket.off("queue:update", handleQueueUpdated);
       socket.off("queueUpdated", handleQueueUpdated);
     };
   }, [doctorId]);
@@ -113,34 +151,45 @@ export default function QueueScreen() {
   const queueStatus = queue?.status || "NOT_STARTED";
   const isQueueEnded = queueStatus === "ENDED";
   const isQueueLive = queueStatus === "LIVE";
+  const isQueueActive = queueStatus === "LIVE" || queueStatus === "PAUSED";
   const queueStatusLabel =
     queueStatus === "LIVE"
       ? "LIVE"
+      : queueStatus === "PAUSED"
+        ? "PAUSED"
       : queueStatus === "ENDED"
         ? "ENDED"
         : "NOT STARTED";
   const queueStatusColor =
     queueStatus === "LIVE"
-      ? THEME.accentRed
-      : THEME.textGray;
+      ? THEME.danger
+      : queueStatus === "PAUSED"
+        ? THEME.warning
+      : queueStatus === "ENDED"
+        ? THEME.textGray
+        : THEME.textGray;
   const queueStatusBg =
     queueStatus === "LIVE"
-      ? "#FFE5E5"
-      : "#EEF1F5";
-  const activeTitle =
+      ? THEME.softDanger
+      : queueStatus === "PAUSED"
+        ? THEME.softWarning
+      : THEME.softNeutral;
+  const clinicStatusTitle =
     queueStatus === "LIVE"
-      ? (currentPatient?.name ?? "Clinic Running")
+      ? "Clinic Running"
+      : queueStatus === "PAUSED"
+        ? "Clinic Paused"
       : queueStatus === "ENDED"
         ? "Clinic Ended"
-        : "Ready to Start";
-  const activeSubtitle =
+        : "Clinic Not Started";
+  const clinicStatusSubtitle =
     queueStatus === "LIVE"
-      ? (currentPatient?.patient_id
-        ? `ID: ${currentPatient.patient_id} • Token: ${currentPatient.token_number}`
-        : "Serving patients")
+      ? "Serving patients"
+      : queueStatus === "PAUSED"
+        ? "Queue temporarily paused"
       : queueStatus === "ENDED"
         ? "This clinic session has ended"
-        : "Call a patient to begin";
+        : "Start the session to begin";
 
   // API Action Handlers
   const handleStartQueue = async () => {
@@ -148,14 +197,48 @@ export default function QueueScreen() {
     const token = await AsyncStorage.getItem("token");
     if (!token) return;
     try {
-      console.log("Calling start queue API");
-      const res = await startQueue(token);
-      console.log("API response:", res);
-      Alert.alert("Clinic Status", res?.message ?? "Queue started");
-      await loadDashboard();
-    } catch (err) {
+      const confirmStart = async () => {
+        console.log("Calling start queue API");
+        const res = await startQueue(token);
+        console.log("API response:", res);
+        Alert.alert("Clinic Status", res?.message ?? "Queue started");
+        await loadDashboard();
+      };
+
+      const now = new Date();
+      if (todayShift?.start) {
+        const [h, m] = todayShift.start.split(":").map(Number);
+        const shiftStart = new Date(now);
+        shiftStart.setHours(h, m, 0, 0);
+        const earlyStartWindow = new Date(shiftStart.getTime() - 30 * 60 * 1000);
+
+        if (now >= earlyStartWindow && now < shiftStart) {
+          Alert.alert(
+            "Start Queue Early?",
+            "You are starting up to 30 minutes before your shift. Continue?",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Start Queue", onPress: confirmStart },
+            ]
+          );
+          return;
+        }
+      }
+
+      await confirmStart();
+    } catch (err: any) {
       console.log("Start queue error:", err);
-      Alert.alert("Error", "Unable to start queue");
+      console.log("Start queue error status:", err?.response?.status);
+      console.log("Start queue error data:", err?.response?.data);
+      const backendMessage = err?.response?.data?.message;
+      if (backendMessage === "No active shift found for this time") {
+        Alert.alert(
+          "No Active Shift",
+          "You don't have a shift scheduled for the current time. Please start the clinic during your shift hours."
+        );
+      } else {
+        Alert.alert("Error", backendMessage || "Unable to start queue");
+      }
     }
   };
 
@@ -164,15 +247,67 @@ export default function QueueScreen() {
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
       const res = await callNextPatient(token);
+      if (res?.message === "Queue Empty") {
+        void notifyLocal("Queue Empty", "There are no patients waiting.");
+        return;
+      }
       if (res?.queueId) {
         navigation.navigate("ConsultationPage", { queueId: res.queueId });
       }
       await loadDashboard();
     } catch (error) {
       console.log("Failed to call next patient", error);
+      const err: any = error;
+      if (err?.response?.status === 409) {
+        void notifyLocal("Queue Empty", "There are no patients waiting.");
+      }
     }
   };
 
+  const handleCompleteConsultation = async () => {
+    try {
+      const token = await AsyncStorage.getItem("token");
+      if (!token) return;
+      const res = await callNextPatient(token);
+      if (res?.message) {
+        Toast.show({ type: "success", text1: res.message });
+      } else {
+        Toast.show({ type: "success", text1: "Patient marked completed" });
+      }
+      await loadDashboard();
+    } catch (error) {
+      console.log("Failed to complete consultation", error);
+      Toast.show({
+        type: "error",
+        text1: "Unable to complete consultation",
+      });
+    }
+  };
+
+  const handleOpenConsultation = async () => {
+    const targetQueueId = currentPatient?.queue_id || queue?.id;
+    if (!targetQueueId) {
+      if (!isQueueActive) {
+        Toast.show({ type: "info", text1: "Queue is not active" });
+        return;
+      }
+      try {
+        const token = await AsyncStorage.getItem("token");
+        if (!token) return;
+        const res = await callNextPatient(token);
+        if (res?.queueId) {
+          navigation.navigate("ConsultationPage", { queueId: res.queueId });
+        }
+        await loadDashboard();
+        return;
+      } catch (error) {
+        console.log("Failed to open consultation", error);
+        Toast.show({ type: "error", text1: "Unable to open consultation" });
+        return;
+      }
+    }
+    navigation.navigate("ConsultationPage", { queueId: targetQueueId });
+  };
   const handleSkipPatient = async () => {
     Alert.alert(
       "Skip Patient",
@@ -185,7 +320,12 @@ export default function QueueScreen() {
           onPress: async () => {
             const token = await AsyncStorage.getItem("token");
             if (token) {
-              await skipPatient(token);
+              const res = await skipPatient(token);
+              if (res?.message === "No more patients in queue") {
+                void notifyLocal("Queue Empty", "No more patients waiting.");
+              } else {
+                void notifyLocal("Patient Skipped", "The current patient was marked as skipped.");
+              }
               await loadDashboard();
             }
           },
@@ -222,8 +362,20 @@ export default function QueueScreen() {
   const formatTime = (value?: string | null) => {
     if (!value) return "--:--";
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "--:--" : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return Number.isNaN(date.getTime())
+      ? "--:--"
+      : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
+  const appointmentTime =
+    currentPatient?.appointment_time ||
+    currentPatient?.appointmentTime ||
+    currentPatient?.scheduled_time ||
+    null;
+  const patientNotes =
+    currentPatient?.symptoms ||
+    currentPatient?.notes ||
+    currentPatient?.note ||
+    null;
 
   if (showClinicEndedModal) {
     return (
@@ -232,157 +384,398 @@ export default function QueueScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Patient Queue</Text>
-          <Text style={styles.subtitle}>{queue?.name || "Daily Clinic"}</Text>
-        </View>
-        <View style={[styles.liveBadge, { backgroundColor: queueStatusBg }]}>
-          <View style={[styles.liveDot, { backgroundColor: queueStatusColor }]} />
-          <Text style={[styles.liveText, { color: queueStatusColor }]}>
-            {queueStatusLabel}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.body}>
-        <View style={styles.container}>
-
-        {/* --- CURRENT CONSULTATION (Pastel Blue) --- */}
-        <View style={[styles.currentCard, { backgroundColor: THEME.softBlue }]}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardLabel}>
-              {isQueueEnded ? "CLINIC ENDED" : "ACTIVE NOW"}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>Patient Queue</Text>
+            <Text style={styles.subtitle}>{queue?.name || "Daily Clinic"}</Text>
+          </View>
+          <View style={[styles.liveBadge, { backgroundColor: queueStatusBg }]}>
+            <View
+              style={[styles.liveDot, { backgroundColor: queueStatusColor }]}
+            />
+            <Text style={[styles.liveText, { color: queueStatusColor }]}>
+              {queueStatusLabel}
             </Text>
-            <View style={styles.statusPill}>
-              <Text style={styles.statusPillText}>
-                {queueStatus === "ENDED"
-                  ? "⚪ Ended"
-                  : queueStatus === "NOT_STARTED"
-                    ? "⚪ Not started"
-                    : `🔵 ${currentPatient ? "With Doctor" : "Idle"}`}
+          </View>
+        </View>
+
+        <View style={styles.heroCard}>
+          <Text style={styles.heroLabel}>CLINIC STATUS</Text>
+          <Text style={styles.heroTitle}>{clinicStatusTitle}</Text>
+          <Text style={styles.heroSubtitle}>{clinicStatusSubtitle}</Text>
+
+          <View style={styles.heroActions}>
+            <ActionTile
+              icon="play"
+              label="Start"
+              color={THEME.accentBlue}
+              disabled={isQueueEnded}
+              onPress={handleStartQueue}
+            />
+            <ActionTile
+              icon="play-forward"
+              label="Next"
+              color={THEME.textDark}
+              disabled={!isQueueLive}
+              onPress={handleNextPatient}
+            />
+            <ActionTile
+              icon="refresh-circle"
+              label="Skip"
+              color={THEME.warning}
+              disabled={!isQueueLive}
+              onPress={handleSkipPatient}
+            />
+            <ActionTile
+              icon="stop"
+              label="End"
+              color={THEME.danger}
+              disabled={isQueueEnded}
+              onPress={handleEndClinic}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.focusCard, { backgroundColor: THEME.softBlue }]}>
+          <View style={styles.focusHeader}>
+            <Text style={styles.actionLabel}>CURRENT PATIENT</Text>
+            <View style={styles.focusToken}>
+              <Text style={styles.focusTokenText}>
+                #{String(currentPatient?.token_number ?? "--")}
               </Text>
             </View>
           </View>
-          
-          <Text style={styles.currentName}>{activeTitle}</Text>
-          <Text style={styles.currentDetails}>{activeSubtitle}</Text>
-          
-          <View style={styles.actionGrid}>
-            <MainAction icon="play-circle" label="Start" color={THEME.accentBlue} onPress={handleStartQueue} disabled={isQueueEnded} />
-            <MainAction icon="play-forward" label="Next" color={THEME.textDark} onPress={handleNextPatient} disabled={!isQueueLive} />
-            <MainAction icon="refresh-circle" label="Skip" color={THEME.accentOrange} onPress={handleSkipPatient} disabled={!isQueueLive} />
-            <MainAction icon="stop-circle" label="End" color={THEME.accentRed} onPress={handleEndClinic} disabled={isQueueEnded} />
+
+          <Text style={styles.focusName}>
+            {currentPatient?.name || "No patient yet"}
+          </Text>
+          <Text style={styles.focusMeta}>
+            {appointmentTime
+              ? `Appointment • ${formatTime(appointmentTime)}`
+              : "Walk-in or time not set"}
+          </Text>
+
+          <View style={styles.focusNotes}>
+            <Text style={styles.focusNotesLabel}>Symptoms / Notes</Text>
+            <Text style={styles.focusNotesText}>
+              {patientNotes || "No notes added"}
+            </Text>
+          </View>
+
+          <View style={styles.focusActions}>
+            <View style={styles.focusActionRow}>
+              <TouchableOpacity
+                style={[styles.focusActionSecondary, styles.focusActionPrimaryAlt]}
+                onPress={handleOpenConsultation}
+                disabled={!currentPatient && !isQueueActive}
+              >
+                <Ionicons name="document-text-outline" size={16} color={THEME.white} />
+                <Text style={[styles.focusActionSecondaryText, styles.focusActionPrimaryAltText]}>
+                  Open Consultation
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        {/* --- QUEUE LIST (Styled Items) --- */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Waiting List</Text>
-          <Text style={styles.countText}>{patients.length} total</Text>
+          <Text style={styles.sectionTitle}>Upcoming Queue List</Text>
+          <Text style={styles.countText}>
+            {patients.filter((p) => p.status !== "WITH_DOCTOR").length} total
+          </Text>
         </View>
-        
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-          {patients.length === 0 ? (
-            <View style={styles.emptyContainer}>
-                <Ionicons name="people-outline" size={48} color={THEME.textGray} />
-                <Text style={styles.emptyText}>The queue is currently empty</Text>
-            </View>
-          ) : (
-            patients.map((p) => (
-              <QueueItem 
-                key={p.id}
-                number={String(p.token_number || "")}
-                name={p.name || `Patient ${p.patient_id}`}
-                time={formatTime(p.created_at)}
-                status={p.status}
-                isDone={p.status === "COMPLETED"}
-              />
-            ))
-          )}
-        </ScrollView>
-        </View>
-      </View>
+
+        {patients.filter((p) => p.status !== "WITH_DOCTOR").length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="people-outline" size={48} color={THEME.textGray} />
+            <Text style={styles.emptyText}>The queue is currently empty</Text>
+          </View>
+        ) : (
+          patients
+            .filter((p) => p.status !== "WITH_DOCTOR")
+            .map((p) => {
+            const isPreBooked =
+              Boolean(p?.appointment_time) ||
+              Boolean(p?.appointmentTime) ||
+              Boolean(p?.scheduled_time) ||
+              p?.type === "PREBOOKED" ||
+              p?.type === "PRE_BOOKED";
+            const typeLabel = isPreBooked ? "Pre-booked" : "Walk-in";
+            const typeColor = isPreBooked
+              ? THEME.accentBlueDark
+              : THEME.accentBlue;
+            const statusLabel =
+              p?.status === "SKIPPED"
+                ? "Skipped"
+                : p?.status === "WAITING"
+                  ? "Waiting"
+                  : p?.status || "Waiting";
+
+            return (
+              <View key={p.id} style={styles.queueItem}>
+                <View style={styles.queueBadge}>
+                  <Text style={styles.queueBadgeText}>
+                    {String(p.token_number || "--")}
+                  </Text>
+                </View>
+                <View style={styles.queueInfo}>
+                  <Text style={styles.queueName}>
+                    {p.name || `Patient ${p.patient_id}`}
+                  </Text>
+                  <View style={styles.queueMetaRow}>
+                    <View style={styles.metaPill}>
+                      <View style={[styles.metaDot, { backgroundColor: typeColor }]} />
+                      <Text style={[styles.metaText, { color: typeColor }]}>
+                        {typeLabel}
+                      </Text>
+                    </View>
+                    <View style={styles.metaPill}>
+                      <Text style={styles.metaText}>{statusLabel}</Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.queueActions}>
+                  <TouchableOpacity
+                    style={styles.queueActionButton}
+                    onPress={() =>
+                      Alert.alert("Not wired yet", "Prioritize not implemented")
+                    }
+                  >
+                    <Ionicons name="arrow-up" size={16} color={THEME.accentBlue} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.queueActionButton}
+                    onPress={() =>
+                      Alert.alert("Not wired yet", "Remove not implemented")
+                    }
+                  >
+                    <Ionicons name="close" size={16} color={THEME.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// Internal Components
-const MainAction = ({ icon, label, color, onPress, disabled }: any) => (
+const ActionTile = ({ icon, label, color, onPress, disabled }: any) => (
   <TouchableOpacity
-    style={[styles.mainActionButton, disabled && styles.mainActionButtonDisabled]}
+    style={[styles.actionTile, disabled && styles.actionTileDisabled]}
     onPress={onPress}
     disabled={disabled}
   >
-    <View style={[styles.iconBg, { backgroundColor: color + "10" }]}>
-        <Ionicons name={icon} size={22} color={color} />
+    <View style={[styles.actionIcon, { backgroundColor: color + "1A" }]}>
+      <Ionicons name={icon} size={22} color={color} />
     </View>
-    <Text style={[styles.mainActionText, { color }]}>{label}</Text>
+    <Text style={[styles.actionLabel, { color }]}>{label}</Text>
   </TouchableOpacity>
 );
 
-const QueueItem = ({ number, name, time, status, isDone }: any) => (
-  <View style={[styles.queueItem, isDone && { opacity: 0.5 }]}>
-    <View style={[styles.numberBox, { backgroundColor: isDone ? THEME.softGreen : THEME.softYellow }]}>
-      <Text style={styles.numberText}>{number}</Text>
-    </View>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.patientName}>{name}</Text>
-      <Text style={styles.patientTime}>{time} • {status}</Text>
-    </View>
-    <Ionicons 
-        name={isDone ? "checkmark-circle" : "chevron-forward"} 
-        size={20} 
-        color={isDone ? THEME.accentGreen : "#D1D5DB"} 
-    />
-  </View>
-);
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
-  container: { flex: 1, paddingHorizontal: 20 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 15,
-    paddingBottom: 20,
-    backgroundColor: THEME.white,
-  },
-  body: { flex: 1, backgroundColor: THEME.background },
-  title: { fontSize: 24, fontWeight: 'bold', color: THEME.textDark },
-  subtitle: { fontSize: 13, color: THEME.textGray },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFE5E5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: THEME.accentRed, marginRight: 6 },
-  liveText: { fontSize: 10, fontWeight: '800', color: THEME.accentRed },
-  
-  currentCard: { borderRadius: 28, padding: 20, marginBottom: 25, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10 },
-  cardLabel: { fontSize: 10, fontWeight: '800', color: THEME.accentBlue, letterSpacing: 1 },
-  statusPill: { backgroundColor: THEME.white, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  statusPillText: { fontSize: 10, fontWeight: '700', color: THEME.accentBlue },
-  currentName: { fontSize: 26, fontWeight: 'bold', color: THEME.textDark, marginTop: 8 },
-  currentDetails: { fontSize: 14, color: THEME.textGray, marginBottom: 20 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  
-  actionGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  mainActionButton: { backgroundColor: THEME.white, paddingVertical: 12, borderRadius: 20, alignItems: 'center', width: '23%' },
-  mainActionButtonDisabled: { opacity: 0.5 },
-  iconBg: { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-  mainActionText: { fontSize: 10, fontWeight: '700' },
+  container: { flex: 1, backgroundColor: THEME.background },
+  scrollContent: { padding: 20, paddingBottom: 40 },
 
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: THEME.textDark },
-  countText: { fontSize: 12, color: THEME.textGray, fontWeight: '600' },
-  
-  queueItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.white, padding: 12, borderRadius: 20, marginBottom: 10 },
-  numberBox: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-  numberText: { fontWeight: 'bold', fontSize: 16, color: THEME.textDark },
-  patientName: { fontSize: 16, fontWeight: '700', color: THEME.textDark },
-  patientTime: { fontSize: 12, color: THEME.textGray, marginTop: 2 },
-  
-  emptyContainer: { alignItems: 'center', marginTop: 40 },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 18,
+    backgroundColor: THEME.white,
+    padding: 18,
+    borderRadius: 22,
+    shadowColor: "#DCE5F2",
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+  },
+  title: { fontSize: 24, fontWeight: "900", color: THEME.textDark },
+  subtitle: { fontSize: 13, color: THEME.textGray, fontWeight: "600", marginTop: 2 },
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
+  liveText: { fontSize: 9, fontWeight: "800" },
+
+  heroCard: {
+    backgroundColor: THEME.cardDark,
+    borderRadius: 26,
+    padding: 22,
+    marginBottom: 22,
+  },
+  heroLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#A1A8B3",
+    letterSpacing: 1,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: "900",
+    color: THEME.white,
+    marginTop: 6,
+  },
+  heroSubtitle: {
+    fontSize: 14,
+    color: "#C7CDD6",
+    marginTop: 2,
+    marginBottom: 16,
+  },
+  heroActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
+
+  actionTile: {
+    backgroundColor: THEME.white,
+    width: "23%",
+    borderRadius: 18,
+    alignItems: "center",
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    shadowColor: "#DCE5F2",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+  },
+  actionTileDisabled: { opacity: 0.45 },
+  actionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  actionLabel: { fontSize: 12, fontWeight: "800" },
+
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionTitle: { fontSize: 18, fontWeight: "800", color: THEME.textDark },
+  countText: { fontSize: 12, color: THEME.textGray, fontWeight: "600" },
+
+  queueItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: THEME.white,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    marginBottom: 10,
+  },
+  queueBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: THEME.softBlue,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  queueBadgeText: { fontSize: 16, fontWeight: "800", color: THEME.textDark },
+  queueInfo: { flex: 1 },
+  queueName: { fontSize: 16, fontWeight: "800", color: THEME.textDark },
+  queueMetaRow: { flexDirection: "row", gap: 8, marginTop: 6 },
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: THEME.softNeutral,
+  },
+  metaDot: { width: 6, height: 6, borderRadius: 3 },
+  metaText: { fontSize: 11, fontWeight: "700", color: THEME.textGray },
+  queueActions: { flexDirection: "row", gap: 6, marginLeft: 8 },
+  queueActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: THEME.softNeutral,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  emptyContainer: { alignItems: "center", marginTop: 40 },
   emptyText: { marginTop: 10, color: THEME.textGray, fontSize: 14 },
+
+  focusCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    marginBottom: 22,
+  },
+  focusHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  focusToken: {
+    backgroundColor: THEME.cardDark,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  focusTokenText: { color: THEME.white, fontWeight: "800", fontSize: 12 },
+  focusName: { fontSize: 20, fontWeight: "900", color: THEME.textDark, marginTop: 10 },
+  focusMeta: { fontSize: 13, color: THEME.textGray, marginTop: 2 },
+  focusNotes: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: THEME.softBlue,
+  },
+  focusNotesLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: THEME.textGray,
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  focusNotesText: { fontSize: 13, color: THEME.textDark },
+  focusActions: { marginTop: 16 },
+  focusActionPrimary: {
+    backgroundColor: THEME.accentBlue,
+    borderRadius: 16,
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+  },
+  focusActionPrimaryText: { color: THEME.white, fontWeight: "800" },
+  focusActionRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+  focusActionSecondary: {
+    backgroundColor: THEME.accentBlue,
+    borderRadius: 18,
+    height: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+  },
+  focusActionSecondaryText: { fontSize: 14, fontWeight: "800", color: THEME.white },
+  focusActionPrimaryAlt: {
+    backgroundColor: THEME.accentBlue,
+  },
+  focusActionPrimaryAltText: { color: THEME.white },
 });

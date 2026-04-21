@@ -97,7 +97,12 @@ export default function FilterBottomSheet({
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.container} onPress={() => undefined}>
+        <Pressable
+          style={styles.container}
+          onPress={(event) => {
+            event.stopPropagation();
+          }}
+        >
           <View style={styles.handle} />
 
           <View style={styles.header}>

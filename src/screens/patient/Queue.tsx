@@ -11,7 +11,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import type { PatientStackParamList } from "../../types/navigation";
+import { apiFetch } from "../../config/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useGlobalModal } from "../../context/GlobalModalContext";
 
 type DoctorStatus = "active" | "break" | "paused";
 
@@ -32,37 +36,103 @@ const THEME = {
 
 export default function LiveQueue() {
   const navigation = useNavigation();
-  const [currentNumber, setCurrentNumber] = useState(42);
-  const [yourNumber, setYourNumber] = useState(48);
-  const [status, setStatus] = useState<DoctorStatus>("active");
+  const route = useRoute<RouteProp<PatientStackParamList, "PatientQueue">>();
+  const doctorId = route.params?.doctorId ?? 1;
+  const [currentNumber, setCurrentNumber] = useState(0);
+  const [yourNumber, setYourNumber] = useState<number | null>(null);
+  const [status, setStatus] = useState<DoctorStatus>("paused");
   const [notify, setNotify] = useState(true);
+  const [queueLength, setQueueLength] = useState(0);
+  const [estWaitMinutes, setEstWaitMinutes] = useState(0);
+  const [queueStatus, setQueueStatus] = useState<string | null>(null);
+  const [patientStatus, setPatientStatus] = useState<string | null>(null);
+  const completionHandledRef = useRef(false);
+  const { triggerConsultationFlow } = useGlobalModal();
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const remaining = useMemo(() => Math.max(yourNumber - currentNumber, 0), [yourNumber, currentNumber]);
+  const remaining = useMemo(
+    () => Math.max((yourNumber ?? currentNumber) - currentNumber, 0),
+    [yourNumber, currentNumber]
+  );
   const progressPct = useMemo(
-    () => Math.min((currentNumber / Math.max(yourNumber, 1)) * 100, 100),
+    () => Math.min((currentNumber / Math.max(yourNumber ?? currentNumber, 1)) * 100, 100),
     [currentNumber, yourNumber]
   );
 
   const estimatedWait = useMemo(() => {
-    const minutes = remaining * 4;
+    const minutes = estWaitMinutes || remaining * 4;
     if (minutes < 60) return `${minutes} min`;
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-  }, [remaining]);
+  }, [remaining, estWaitMinutes]);
+
+  const loadQueue = async () => {
+    try {
+      const res = await apiFetch(`/api/patients/doctor/queue-status/${doctorId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setQueueStatus(data?.status ?? null);
+      setPatientStatus(data?.patientStatus ?? null);
+      setCurrentNumber(Number(data?.currentToken ?? 0));
+      setQueueLength(Number(data?.waitingCount ?? 0));
+      setEstWaitMinutes(Number(data?.estimatedWaitMinutes ?? 0));
+      const patientToken = Number(data?.patientToken ?? 0);
+      const nextToken = Number(data?.nextToken ?? 0);
+      setYourNumber((prev) => prev ?? (patientToken > 0 ? patientToken : nextToken));
+      setStatus(data?.status === "LIVE" ? "active" : data?.status === "PAUSED" ? "paused" : "break");
+    } catch (err) {
+      console.error("Load queue status error:", err);
+    }
+  };
 
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setCurrentNumber((n) => n + (Math.random() > 0.7 ? 1 : 0));
-    }, 8000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, []);
+    void loadQueue();
+    const id = setInterval(loadQueue, 8000);
+    return () => clearInterval(id);
+  }, [doctorId]);
+
+  const fetchLatestPrescription = async () => {
+    try {
+      const stored = await AsyncStorage.getItem("lastSeenPrescriptionId");
+      const storedId = stored ? Number(stored) : null;
+
+      const res = await apiFetch("/api/patients/prescriptions?latest=true");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data?.id || data.isSeen) return;
+
+      const incomingId = Number(data.id);
+      if (storedId && incomingId === storedId) return;
+
+      triggerConsultationFlow(data);
+    } catch (err) {
+      console.error("Latest prescription fetch error:", err);
+    }
+  };
+
+  useEffect(() => {
+    const completed = queueStatus === "ENDED" && remaining === 0 && (yourNumber ?? 0) > 0;
+    if (completed && !completionHandledRef.current) {
+      completionHandledRef.current = true;
+      Vibration.vibrate(150);
+      void fetchLatestPrescription();
+    }
+  }, [queueStatus, remaining, yourNumber]);
 
   useEffect(() => {
     if (notify && remaining <= 2 && remaining > 0) Vibration.vibrate(500);
   }, [remaining, notify]);
+
+  const rejoinQueue = async () => {
+    try {
+      const res = await apiFetch("/api/patients/queue/join", {
+        method: "POST",
+        body: JSON.stringify({ doctor_id: doctorId }),
+      });
+      if (!res.ok) return;
+      void loadQueue();
+    } catch (err) {
+      console.error("Rejoin queue error:", err);
+    }
+  };
 
   const statusConfig = {
     active: { label: "Seeing patients", color: THEME.accentGreen, bg: THEME.mint },
@@ -102,6 +172,17 @@ export default function LiveQueue() {
         
         {/* 1. Main Queue Display */}
         <View style={styles.heroCard}>
+          {patientStatus === "MISSED" && (
+            <View style={styles.missedCard}>
+              <Ionicons name="alert-circle" size={18} color={THEME.accentRed} />
+              <Text style={styles.missedText}>
+                You missed your turn. You can rejoin the live queue.
+              </Text>
+              <TouchableOpacity style={styles.missedBtn} onPress={rejoinQueue}>
+                <Text style={styles.missedBtnText}>Rejoin Queue</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.labelCaps}>Now Serving</Text>
@@ -127,7 +208,7 @@ export default function LiveQueue() {
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.labelCaps}>Your Ticket</Text>
-              <Text style={styles.ticketNumber}>{yourNumber}</Text>
+              <Text style={styles.ticketNumber}>{yourNumber ?? "—"}</Text>
             </View>
             <View style={styles.waitBox}>
                <Text style={styles.waitLabel}>EST. WAIT</Text>
@@ -150,7 +231,12 @@ export default function LiveQueue() {
               placeholder="Change ticket number..."
               keyboardType="number-pad"
               placeholderTextColor={THEME.textGray}
-              onChangeText={(t) => setYourNumber(parseInt(t) || yourNumber)}
+              onChangeText={(t) => {
+                const parsed = parseInt(t, 10);
+                if (!Number.isNaN(parsed)) {
+                  setYourNumber(parsed);
+                }
+              }}
             />
             <TouchableOpacity style={styles.updateBtn}>
               <Text style={styles.updateBtnText}>Update</Text>
@@ -215,6 +301,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 15,
   },
+  missedCard: {
+    backgroundColor: THEME.softRed,
+    borderRadius: 18,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  missedText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.accentRed,
+  },
+  missedBtn: {
+    backgroundColor: THEME.accentRed,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  missedBtnText: { color: THEME.white, fontWeight: "700", fontSize: 12 },
   labelCaps: { fontSize: 11, fontWeight: "bold", color: THEME.textGray, textTransform: "uppercase", letterSpacing: 1 },
   bigNumber: { fontSize: 48, fontWeight: "bold", color: THEME.textDark, marginTop: 4 },
   

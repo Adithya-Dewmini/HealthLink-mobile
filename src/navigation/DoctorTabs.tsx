@@ -1,6 +1,6 @@
 import React, { useContext } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { TouchableOpacity, Text } from "react-native";
+import { TouchableOpacity, Text, View, StyleSheet } from "react-native";
 import Home from "../screens/doctor/Home";
 import QueueControl from "../screens/doctor/QueueControl";
 import Prescriptions from "../screens/doctor/Prescriptions";
@@ -17,13 +17,35 @@ export default function DoctorTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#1976D2",
-        tabBarInactiveTintColor: "gray",
-        tabBarLabelStyle: { fontSize: 12 },
+        tabBarActiveTintColor: "#2BB673",
+        tabBarInactiveTintColor: "#9CA3AF",
+        tabBarLabelStyle: { fontSize: 12, marginBottom: 5 },
+        tabBarItemStyle: { paddingVertical: 5 },
         tabBarStyle: {
-          paddingBottom: 6,
-          height: 60,
+          position: "absolute",
+          bottom: 20,
+          left: 16,
+          right: 16,
+          height: 70,
+          backgroundColor: "#FFFFFF",
+          borderRadius: 25,
+          elevation: 10,
+          shadowColor: "#000",
+          shadowOpacity: 0.1,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 5 },
+          borderTopWidth: 0,
         },
+        tabBarBackground: () => (
+          <View
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 25,
+              bottom: -20,
+            }}
+          />
+        ),
       }}
     >
       <Tab.Screen

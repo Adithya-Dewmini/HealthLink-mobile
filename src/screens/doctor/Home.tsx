@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { getQueueDashboard, getDailyReport, startQueue } from "../../services/doctorQueueService";
+import { apiFetch } from "../../config/api";
 
 const { width } = Dimensions.get("window");
 
@@ -41,6 +42,7 @@ export default function DoctorDashboard() {
   });
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [doctorProfile, setDoctorProfile] = useState<{ name?: string; specialization?: string } | null>(null);
 
   const formatTime = (value?: string) => {
     if (!value) return "--:--";
@@ -56,9 +58,10 @@ export default function DoctorDashboard() {
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
 
-      const [dashboard, report] = await Promise.all([
+      const [dashboard, report, doctorRes] = await Promise.all([
         getQueueDashboard(token),
         getDailyReport(token),
+        apiFetch("/api/doctor/dashboard"),
       ]);
 
       setPatients(dashboard?.patients ?? []);
@@ -68,6 +71,13 @@ export default function DoctorDashboard() {
         waiting: dashboard?.queue?.waitingCount ?? 0,
         completed: report?.dailySummary?.patientsCompleted ?? 0,
       });
+      if (doctorRes.ok) {
+        const data = await doctorRes.json();
+        setDoctorProfile({
+          name: data?.doctor?.name,
+          specialization: data?.doctor?.specialization,
+        });
+      }
     } catch (error) {
       console.log("Doctor home load error:", error);
     } finally {
@@ -83,9 +93,19 @@ export default function DoctorDashboard() {
       Alert.alert("Clinic Status", res?.message ?? "Queue started");
       await loadDashboard();
       navigation.navigate("DoctorQueueControl");
-    } catch (error) {
+    } catch (error: any) {
       console.log("Start consultation error:", error);
-      Alert.alert("Error", "Unable to start queue");
+      console.log("Start consultation error status:", error?.response?.status);
+      console.log("Start consultation error data:", error?.response?.data);
+      const backendMessage = error?.response?.data?.message;
+      if (backendMessage === "No active shift found for this time") {
+        Alert.alert(
+          "No Active Shift",
+          "You don't have a shift scheduled for the current time. Please start the clinic during your shift hours."
+        );
+      } else {
+        Alert.alert("Error", backendMessage || "Unable to start queue");
+      }
     }
   };
 
@@ -105,7 +125,7 @@ export default function DoctorDashboard() {
           </View>
           <View>
             <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.docName}>Dr. Silva</Text>
+            <Text style={styles.docName}>{doctorProfile?.name ?? "Doctor"}</Text>
           </View>
         </View>
         <TouchableOpacity
@@ -118,26 +138,6 @@ export default function DoctorDashboard() {
 
       <View style={styles.body}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          <View style={styles.statsGrid}>
-          <View style={[styles.statCard, { backgroundColor: THEME.softBlue }]}>
-            <Text style={styles.statNum}>{stats.totalPatients}</Text>
-            <Text style={styles.statLabel}>Total Patients</Text>
-            <View style={styles.statGraphStub}>
-              <View style={[styles.graphBar, { height: "40%", backgroundColor: THEME.accentBlue }]} />
-              <View style={[styles.graphBar, { height: "70%", backgroundColor: THEME.accentBlue }]} />
-              <View style={[styles.graphBar, { height: "50%", backgroundColor: THEME.accentBlue }]} />
-            </View>
-          </View>
-
-          <View style={[styles.statCard, { backgroundColor: THEME.softPurple }]}>
-            <Text style={[styles.statNum, { color: THEME.accentPurple }]}>
-              {stats.waiting.toString().padStart(2, "0")}
-            </Text>
-            <Text style={styles.statLabel}>Waiting Now</Text>
-            <Ionicons name="people" size={24} color={THEME.accentPurple} style={styles.statIcon} />
-          </View>
-        </View>
-
         <View style={styles.focusCard}>
           <View style={styles.focusHeader}>
             <View style={styles.liveBadge}>
@@ -162,6 +162,26 @@ export default function DoctorDashboard() {
             <Text style={styles.startBtnText}>Start Consultation</Text>
             <Ionicons name="play-circle" size={24} color={THEME.white} />
           </TouchableOpacity>
+        </View>
+
+          <View style={styles.statsGrid}>
+          <View style={[styles.statCard, { backgroundColor: THEME.softBlue }]}>
+            <Text style={styles.statNum}>{stats.totalPatients}</Text>
+            <Text style={styles.statLabel}>Total Patients</Text>
+            <View style={styles.statGraphStub}>
+              <View style={[styles.graphBar, { height: "40%", backgroundColor: THEME.accentBlue }]} />
+              <View style={[styles.graphBar, { height: "70%", backgroundColor: THEME.accentBlue }]} />
+              <View style={[styles.graphBar, { height: "50%", backgroundColor: THEME.accentBlue }]} />
+            </View>
+          </View>
+
+          <View style={[styles.statCard, { backgroundColor: THEME.softPurple }]}>
+            <Text style={[styles.statNum, { color: THEME.accentPurple }]}>
+              {stats.waiting.toString().padStart(2, "0")}
+            </Text>
+            <Text style={styles.statLabel}>Waiting Now</Text>
+            <Ionicons name="people" size={24} color={THEME.accentPurple} style={styles.statIcon} />
+          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Command Center</Text>

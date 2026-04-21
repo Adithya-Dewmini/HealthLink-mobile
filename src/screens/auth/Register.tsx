@@ -8,6 +8,7 @@ export default function Register({ navigation }: any) {
     { key: "doctor", label: "Doctor", icon: "medkit-outline" as const },
     { key: "pharmacist", label: "Pharmacist", icon: "flask-outline" as const },
     { key: "receptionist", label: "Receptionist", icon: "people-outline" as const },
+    { key: "medical_center_admin", label: "Medical Center Admin", icon: "business-outline" as const },
   ];
 
   const goToForm = (role: string) => {
@@ -23,6 +24,9 @@ export default function Register({ navigation }: any) {
         break;
       case "receptionist":
         navigation.navigate("RegisterReceptionist");
+        break;
+      case "medical_center_admin":
+        navigation.navigate("RegisterMedicalCenterAdmin");
         break;
       default:
         break;

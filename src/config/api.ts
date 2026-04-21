@@ -13,13 +13,15 @@ const getExpoHost = () => {
   return host ? `http://${host}:5050` : null;
 };
 
-const LOCALHOST =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:5050"
-    : getExpoHost() || "http://localhost:5050";
+const resolveDevBaseUrl = () => {
+  const host = getExpoHost();
+  if (host) return host;
+  if (Platform.OS === "android") return "http://10.0.2.2:5050";
+  return "http://127.0.0.1:5050";
+};
 
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || LOCALHOST;
+  process.env.EXPO_PUBLIC_API_URL || resolveDevBaseUrl();
 
 export async function apiFetch(
   endpoint: string,

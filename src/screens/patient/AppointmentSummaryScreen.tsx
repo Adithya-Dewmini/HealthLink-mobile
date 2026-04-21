@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { PatientStackParamList } from "../../types/navigation";
@@ -28,6 +29,7 @@ const THEME = {
 
 export default function AppointmentSummaryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
+  const insets = useSafeAreaInsets();
   const route = useRoute<RouteProp<PatientStackParamList, "AppointmentSummaryScreen">>();
   const {
     doctorName = "Dr. Silva",
@@ -39,6 +41,7 @@ export default function AppointmentSummaryScreen() {
     nowServing = "08",
     estimatedWait = "25 min",
     queueOpensAt = "8:45 AM",
+    doctorId,
   } = route?.params ?? {};
 
   const selectedDate = new Date(date);
@@ -48,6 +51,7 @@ export default function AppointmentSummaryScreen() {
     d1.getFullYear() === d2.getFullYear();
   const today = new Date();
   const isToday = isSameDay(selectedDate, today);
+  const showToken = typeof tokenNumber === "string" && tokenNumber !== "—";
   const isFuture =
     selectedDate.getFullYear() > today.getFullYear() ||
     (selectedDate.getFullYear() === today.getFullYear() &&
@@ -57,6 +61,12 @@ export default function AppointmentSummaryScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
+      <TouchableOpacity
+        style={[styles.closeBtn, { top: insets.top + 8 }]}
+        onPress={() => navigation.goBack()}
+      >
+        <Ionicons name="close" size={20} color={THEME.textDark} />
+      </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.successHeader}>
@@ -123,7 +133,7 @@ export default function AppointmentSummaryScreen() {
               </View>
             </View>
           </View>
-        ) : (
+        ) : showToken ? (
           <View style={styles.ticketCard}>
             <View style={styles.ticketTop}>
               <View style={styles.docAvatar}>
@@ -159,6 +169,47 @@ export default function AppointmentSummaryScreen() {
               </View>
             </View>
           </View>
+        ) : (
+          <View style={styles.ticketCard}>
+            <View style={styles.ticketTop}>
+              <View style={styles.docAvatar}>
+                <Ionicons name="person" size={30} color={THEME.accentBlue} />
+              </View>
+              <View>
+                <Text style={styles.docName}>{doctorName}</Text>
+                <Text style={styles.docSpec}>{specialty}</Text>
+                <Text style={styles.clinicName}>{clinicName}</Text>
+              </View>
+            </View>
+
+            <View style={styles.dashedContainer}>
+              <View style={[styles.cutout, { left: -20 }]} />
+              <View style={styles.dashedLine} />
+              <View style={[styles.cutout, { right: -20 }]} />
+            </View>
+
+            <View style={styles.ticketBottom}>
+              <Text style={styles.tokenLabel}>APPOINTMENT TIME</Text>
+              <View style={styles.appointmentTimeRow}>
+                <Text style={styles.appointmentTimeText}>
+                  {clinicTime.includes(" ") ? clinicTime.split(" ")[0] : clinicTime}
+                </Text>
+                {clinicTime.includes(" ") && (
+                  <Text style={styles.appointmentPeriod}>
+                    {clinicTime.split(" ").slice(1).join(" ")}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.queueStats}>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Date</Text>
+                  <Text style={styles.statValue}>
+                    {selectedDate.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" })}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
         )}
 
         <View style={styles.infoRow}>
@@ -176,9 +227,13 @@ export default function AppointmentSummaryScreen() {
 
         <View style={styles.actionGroup}>
           {isToday && (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate("PatientQueue")}>
-              <Ionicons name="pulse" size={20} color={THEME.white} />
-              <Text style={styles.primaryBtnText}>View Live Queue</Text>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => navigation.navigate("PatientQueue", { doctorId })}
+              disabled={!doctorId}
+            >
+              <Ionicons name="notifications-outline" size={20} color={THEME.white} />
+              <Text style={styles.primaryBtnText}>Notify Me</Text>
             </TouchableOpacity>
           )}
           {isFuture && (
@@ -190,9 +245,9 @@ export default function AppointmentSummaryScreen() {
 
           <TouchableOpacity
             style={styles.secondaryBtn}
-            onPress={() => navigation.navigate("PatientTabs", { screen: "PatientDashboard" })}
+            onPress={() => navigation.navigate("Appointments")}
           >
-            <Text style={styles.secondaryBtnText}>Go Home</Text>
+            <Text style={styles.secondaryBtnText}>View Appointments</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -203,6 +258,22 @@ export default function AppointmentSummaryScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.background },
   scrollContent: { padding: 24, alignItems: "center" },
+  closeBtn: {
+    position: "absolute",
+    top: 16,
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: THEME.white,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
+    zIndex: 2,
+  },
 
   successHeader: { alignItems: "center", marginBottom: 30 },
   checkIcon: { marginBottom: 15 },
@@ -263,6 +334,14 @@ const styles = StyleSheet.create({
   },
   tokenLabel: { fontSize: 12, fontWeight: "800", color: THEME.textGray, letterSpacing: 1.5 },
   tokenNumber: { fontSize: 72, fontWeight: "900", color: THEME.textDark, marginVertical: 10 },
+  appointmentTimeRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    marginVertical: 10,
+  },
+  appointmentTimeText: { fontSize: 56, fontWeight: "900", color: THEME.textDark },
+  appointmentPeriod: { fontSize: 20, fontWeight: "800", color: THEME.textGray, marginBottom: 8 },
 
   sectionLabel: { fontSize: 12, fontWeight: "800", color: THEME.textGray, letterSpacing: 1.5 },
   detailGrid: {

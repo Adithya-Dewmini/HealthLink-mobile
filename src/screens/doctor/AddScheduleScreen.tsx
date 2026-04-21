@@ -12,6 +12,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
@@ -36,6 +37,8 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function AddScheduleScreen() {
   const navigation = useNavigation();
   const [selectedDay, setSelectedDay] = useState("Mon");
+  const [workingDays, setWorkingDays] = useState<string[]>([]);
+  const [savingDays, setSavingDays] = useState(false);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
   const [maxPatients, setMaxPatients] = useState("20");
@@ -74,11 +77,27 @@ export default function AddScheduleScreen() {
   } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [queueStatus, setQueueStatus] = useState<string | null>(null);
 
   const addShift = () => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
+    if (workingDays.length > 0 && !workingDays.includes(selectedDay)) {
+      Alert.alert("Unavailable Day", "This day is marked as unavailable.");
+      return;
+    }
+    const dayValue = selectedDay.length === 3 ? expandDay(selectedDay) : selectedDay;
+    const candidateStart = String(startTime).slice(0, 5);
+    const candidateEnd = String(endTime).slice(0, 5);
+    if (hasOverlap(dayValue, candidateStart, candidateEnd)) {
+      Alert.alert("Time Overlap", "This time overlaps with an existing shift.");
+      return;
+    }
     const newShift = {
       draftId: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      day: selectedDay.length === 3 ? expandDay(selectedDay) : selectedDay,
+      day: dayValue,
       start_time: startTime,
       end_time: endTime,
       max_patients: maxPatients ? Number(maxPatients) : null,
@@ -87,10 +106,18 @@ export default function AddScheduleScreen() {
   };
 
   const removeDraftShift = (index: number) => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
     setDraftShifts((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removePublishedShift = async (shift: { id?: number }, index: number) => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
     if (!shift.id) return;
     try {
       const res = await apiFetch(`/api/doctor/availability/${shift.id}`, { method: "DELETE" });
@@ -119,9 +146,80 @@ export default function AddScheduleScreen() {
     }
   };
 
+  const loadWorkingDays = async () => {
+    try {
+      const res = await apiFetch("/api/doctor/working-days");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || "Failed to load working days");
+      }
+      const data = await res.json();
+      const days = Array.isArray(data) ? data.map((d) => shortenDay(String(d))) : [];
+      setWorkingDays(days);
+    } catch (err) {
+      console.error("Load working days error:", err);
+    }
+  };
+
+  const loadQueueStatus = async () => {
+    try {
+      const res = await apiFetch("/api/doctor/queue/dashboard");
+      if (!res.ok) return;
+      const data = await res.json();
+      const status = data?.queue?.status ?? "NOT_STARTED";
+      setQueueStatus(status);
+    } catch (err) {
+      console.error("Load queue status error:", err);
+    }
+  };
+
   useEffect(() => {
     void loadShifts();
+    void loadWorkingDays();
+    void loadQueueStatus();
   }, []);
+
+  useEffect(() => {
+    if (workingDays.length === 0) return;
+    if (!workingDays.includes(selectedDay)) {
+      setSelectedDay(workingDays[0]);
+    }
+  }, [workingDays, selectedDay]);
+
+  const toggleDay = (day: string) => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
+    setWorkingDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  const handleSaveWorkingDays = async () => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
+    if (savingDays) return;
+    try {
+      setSavingDays(true);
+      const payload = workingDays.map((day) => expandDay(day));
+      const res = await apiFetch("/api/doctor/working-days", {
+        method: "POST",
+        body: JSON.stringify({ days: payload }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || "Failed to save working days");
+      }
+      Alert.alert("Saved", "Working days updated.");
+    } catch (err) {
+      Alert.alert("Save Failed", err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSavingDays(false);
+    }
+  };
 
   const handleEdit = (shift: {
     id?: number;
@@ -132,6 +230,10 @@ export default function AddScheduleScreen() {
     end_time: string;
     max_patients?: number | null;
   }) => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
     const isPublished = !!shift.id && shift.sourceId === undefined;
     setEditingShift({
       ...shift,
@@ -158,6 +260,10 @@ export default function AddScheduleScreen() {
   };
 
   const handleConfirmPublish = async () => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
     if (publishing) return;
     try {
       setPublishing(true);
@@ -203,6 +309,10 @@ export default function AddScheduleScreen() {
   };
 
   const handleSaveEditDraft = () => {
+    if (queueStatus === "LIVE" || queueStatus === "PAUSED") {
+      Alert.alert("Queue Live", "Schedule edits are disabled while the queue is live.");
+      return;
+    }
     if (!editingShift) return;
     const dayValue = selectedDay.length === 3 ? expandDay(selectedDay) : selectedDay;
     const updated = {
@@ -213,6 +323,12 @@ export default function AddScheduleScreen() {
       end_time: endTime,
       max_patients: maxPatients ? Number(maxPatients) : null,
     };
+    const candidateStart = String(updated.start_time).slice(0, 5);
+    const candidateEnd = String(updated.end_time).slice(0, 5);
+    if (hasOverlap(dayValue, candidateStart, candidateEnd, updated)) {
+      Alert.alert("Time Overlap", "This time overlaps with an existing shift.");
+      return;
+    }
     setDraftShifts((prev) => {
       const index = prev.findIndex((s) =>
         updated.draftId
@@ -248,6 +364,37 @@ export default function AddScheduleScreen() {
     return { time: `${hour12.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`, period };
   };
 
+  const hasOverlap = (
+    day: string,
+    start: string,
+    end: string,
+    self?: { id?: number; sourceId?: number; draftId?: string }
+  ) => {
+    const allShifts = [...publishedShifts, ...draftShifts].filter((shift) => {
+      if (!self) return true;
+      if (self.draftId && "draftId" in shift && shift.draftId === self.draftId) return false;
+      if (self.sourceId && shift.id === self.sourceId) return false;
+      if (self.id && shift.id === self.id) return false;
+      return true;
+    });
+
+    const toMinutes = (value: string) => {
+      const [h, m] = value.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const startMin = toMinutes(start);
+    const endMin = toMinutes(end);
+    if (Number.isNaN(startMin) || Number.isNaN(endMin) || startMin >= endMin) return true;
+
+    return allShifts.some((shift) => {
+      if (shift.day !== day) return false;
+      const s = toMinutes(String(shift.start_time).slice(0, 5));
+      const e = toMinutes(String(shift.end_time).slice(0, 5));
+      return startMin < e && endMin > s;
+    });
+  };
+
   const handleSelectTime = (value: string) => {
     if (activeTimeField === "start") {
       setStartTime(value);
@@ -256,6 +403,8 @@ export default function AddScheduleScreen() {
     }
     setActiveTimeField(null);
   };
+
+  const scheduleLocked = queueStatus === "LIVE" || queueStatus === "PAUSED";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -266,29 +415,84 @@ export default function AddScheduleScreen() {
           <Ionicons name="chevron-back" size={24} color={THEME.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Schedule</Text>
-        <TouchableOpacity style={styles.saveBtn} onPress={handleOpenPreview} disabled={publishing}>
-          <Text style={styles.saveBtnText}>
+        <TouchableOpacity
+          style={[styles.saveBtn, (!publishedShifts.length || publishing) && styles.saveBtnDisabled]}
+          onPress={handleOpenPreview}
+          disabled={publishing || publishedShifts.length === 0}
+        >
+          <Text style={[styles.saveBtnText, (!publishedShifts.length || publishing) && styles.saveBtnTextDisabled]}>
             {publishing ? "Publishing..." : "Preview"}
           </Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.body}>
+        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {scheduleLocked && (
+          <View style={styles.lockedBanner}>
+            <Ionicons name="lock-closed" size={16} color={THEME.accentAmber} />
+            <Text style={styles.lockedBannerText}>
+              Queue is live. Schedule edits are disabled until the clinic ends.
+            </Text>
+          </View>
+        )}
         <View style={styles.daySelectionContainer}>
-          <Text style={styles.sectionTitle}>Working Day</Text>
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionTitle}>Working Days</Text>
+            <TouchableOpacity
+              style={[styles.saveDaysBtn, scheduleLocked && styles.disabledAction]}
+              onPress={handleSaveWorkingDays}
+              disabled={savingDays || scheduleLocked}
+            >
+              <Text style={styles.saveDaysText}>{savingDays ? "Saving..." : "Save Days"}</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.dayGrid}>
             {DAYS.map((day) => {
-              const isSelected = selectedDay === day;
+              const isSelected = workingDays.includes(day);
               return (
                 <TouchableOpacity
                   key={day}
-                  onPress={() => setSelectedDay(day)}
-                  style={[styles.dayPill, isSelected && styles.dayPillActive]}
+                  onPress={() => toggleDay(day)}
+                  style={[
+                    styles.dayPill,
+                    isSelected && styles.dayPillActive,
+                    scheduleLocked && styles.dayPillDisabled,
+                  ]}
+                  disabled={scheduleLocked}
                 >
                   <Text style={[styles.dayPillText, isSelected && styles.textWhite]}>{day}</Text>
                 </TouchableOpacity>
               );
             })}
+          </View>
+          <Text style={styles.helperText}>Selected = Working days. Unselected = Off days.</Text>
+        </View>
+
+        <View style={styles.daySelectionContainer}>
+          <Text style={styles.sectionTitle}>Shift Day</Text>
+          <View style={styles.dayGrid}>
+            {workingDays.length === 0 ? (
+              <Text style={styles.emptyText}>Select working days above.</Text>
+            ) : (
+              workingDays.map((day) => {
+                const isSelected = selectedDay === day;
+                return (
+                  <TouchableOpacity
+                    key={`shift-${day}`}
+                    onPress={() => setSelectedDay(day)}
+                    style={[
+                      styles.dayPill,
+                      isSelected && styles.dayPillActive,
+                      scheduleLocked && styles.dayPillDisabled,
+                    ]}
+                    disabled={scheduleLocked}
+                  >
+                    <Text style={[styles.dayPillText, isSelected && styles.textWhite]}>{day}</Text>
+                  </TouchableOpacity>
+                );
+              })
+            )}
           </View>
         </View>
 
@@ -307,8 +511,9 @@ export default function AddScheduleScreen() {
             <View style={styles.timeBlock}>
               <Text style={styles.timeLabel}>FROM</Text>
               <TouchableOpacity
-                style={styles.timeButton}
+                style={[styles.timeButton, scheduleLocked && styles.disabledAction]}
                 onPress={() => setActiveTimeField("start")}
+                disabled={scheduleLocked}
               >
                 <Text style={styles.timeValue}>{formatTime(startTime).time}</Text>
                 <Text style={styles.timeAmPm}>{formatTime(startTime).period}</Text>
@@ -324,8 +529,9 @@ export default function AddScheduleScreen() {
             <View style={styles.timeBlock}>
               <Text style={styles.timeLabel}>UNTIL</Text>
               <TouchableOpacity
-                style={styles.timeButton}
+                style={[styles.timeButton, scheduleLocked && styles.disabledAction]}
                 onPress={() => setActiveTimeField("end")}
+                disabled={scheduleLocked}
               >
                 <Text style={styles.timeValue}>{formatTime(endTime).time}</Text>
                 <Text style={styles.timeAmPm}>{formatTime(endTime).period}</Text>
@@ -340,7 +546,11 @@ export default function AddScheduleScreen() {
             <Text style={styles.cardSubTitle}>Per session limit</Text>
           </View>
           <View style={styles.capacityActions}>
-            <TouchableOpacity style={styles.circleBtn} onPress={() => adjustMaxPatients(-1)}>
+            <TouchableOpacity
+              style={[styles.circleBtn, scheduleLocked && styles.disabledAction]}
+              onPress={() => adjustMaxPatients(-1)}
+              disabled={scheduleLocked}
+            >
               <Ionicons name="remove" size={20} color={THEME.textDark} />
             </TouchableOpacity>
             <TextInput
@@ -348,15 +558,28 @@ export default function AddScheduleScreen() {
               keyboardType="numeric"
               value={maxPatients}
               onChangeText={setMaxPatients}
+              editable={!scheduleLocked}
             />
             <TouchableOpacity
               style={[styles.circleBtn, { backgroundColor: THEME.accentBlue }]}
               onPress={() => adjustMaxPatients(1)}
+              disabled={scheduleLocked}
             >
               <Ionicons name="add" size={20} color={THEME.white} />
             </TouchableOpacity>
           </View>
         </View>
+
+        <TouchableOpacity
+          style={[styles.addBtn, scheduleLocked && styles.disabledAction]}
+          onPress={addShift}
+          disabled={scheduleLocked}
+        >
+          <Text style={styles.addBtnText}>Add Shift to Schedule</Text>
+          <View style={styles.addBtnCircle}>
+            <Ionicons name="arrow-forward" size={20} color={THEME.accentBlue} />
+          </View>
+        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>Active Shifts</Text>
         <View style={styles.shiftList}>
@@ -375,14 +598,16 @@ export default function AddScheduleScreen() {
                 </View>
                 <View style={styles.shiftActions}>
                   <TouchableOpacity
-                    style={styles.editBtn}
+                    style={[styles.editBtn, scheduleLocked && styles.disabledAction]}
                     onPress={() => handleEdit(shift)}
+                    disabled={scheduleLocked}
                   >
                     <Ionicons name="create-outline" size={18} color={THEME.accentBlue} />
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.trashBtn}
+                    style={[styles.trashBtn, scheduleLocked && styles.disabledAction]}
                     onPress={() => removePublishedShift(shift, index)}
+                    disabled={scheduleLocked}
                   >
                     <Ionicons name="trash-outline" size={18} color="#FF5252" />
                   </TouchableOpacity>
@@ -409,14 +634,16 @@ export default function AddScheduleScreen() {
                   </View>
                   <View style={styles.shiftActions}>
                     <TouchableOpacity
-                      style={styles.editBtn}
+                      style={[styles.editBtn, scheduleLocked && styles.disabledAction]}
                       onPress={() => handleEdit(shift)}
+                      disabled={scheduleLocked}
                     >
                       <Ionicons name="create-outline" size={18} color={THEME.accentBlue} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.trashBtn}
+                      style={[styles.trashBtn, scheduleLocked && styles.disabledAction]}
                       onPress={() => removeDraftShift(index)}
+                      disabled={scheduleLocked}
                     >
                       <Ionicons name="trash-outline" size={18} color="#FF5252" />
                     </TouchableOpacity>
@@ -427,23 +654,17 @@ export default function AddScheduleScreen() {
           </>
         )}
 
-        <TouchableOpacity style={styles.addBtn} onPress={addShift}>
-          <Text style={styles.addBtnText}>Add Shift to Schedule</Text>
-          <View style={styles.addBtnCircle}>
-            <Ionicons name="arrow-forward" size={20} color={THEME.accentBlue} />
-          </View>
-        </TouchableOpacity>
-
         <TouchableOpacity
-          style={styles.publishBtn}
+          style={[styles.publishBtn, scheduleLocked && styles.disabledAction]}
           onPress={handleConfirmPublish}
-          disabled={publishing || draftShifts.length === 0}
+          disabled={publishing || draftShifts.length === 0 || scheduleLocked}
         >
           <Text style={styles.publishText}>
             {publishing ? "Publishing..." : "Publish Schedule"}
           </Text>
         </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       <Modal visible={showPreview} animationType="slide">
         <DoctorSchedulePreview
@@ -453,9 +674,23 @@ export default function AddScheduleScreen() {
         />
       </Modal>
 
-      <Modal transparent visible={showEditModal} animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.editModalCard}>
+      <Modal
+        transparent
+        visible={showEditModal}
+        animationType="slide"
+        onRequestClose={() => {
+          setActiveTimeField(null);
+          setShowEditModal(false);
+        }}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => {
+            setActiveTimeField(null);
+            setShowEditModal(false);
+          }}
+        >
+          <View style={styles.editModalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Shifts</Text>
               <TouchableOpacity onPress={resetForm}>
@@ -531,12 +766,17 @@ export default function AddScheduleScreen() {
               <Ionicons name="checkmark-circle" size={20} color={THEME.white} />
             </TouchableOpacity>
           </View>
-        </View>
+        </Pressable>
       </Modal>
 
-      <Modal transparent visible={activeTimeField !== null} animationType="slide">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+      <Modal
+        transparent
+        visible={activeTimeField !== null}
+        animationType="slide"
+        onRequestClose={() => setActiveTimeField(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setActiveTimeField(null)}>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 Select {activeTimeField === "start" ? "Start" : "End"} Time
@@ -567,7 +807,7 @@ export default function AddScheduleScreen() {
               showsVerticalScrollIndicator={false}
             />
           </View>
-        </View>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -616,7 +856,7 @@ const shortenDay = (day: string) => {
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.background },
+  safe: { flex: 1, backgroundColor: THEME.white },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -634,8 +874,45 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   saveBtnText: { color: THEME.accentBlue, fontWeight: "700" },
+  saveBtnDisabled: { backgroundColor: "#E8EEF5" },
+  saveBtnTextDisabled: { color: "#94A3B8" },
+  body: { flex: 1, backgroundColor: THEME.background },
   container: { padding: 20 },
   sectionTitle: { fontSize: 16, fontWeight: "800", color: THEME.textDark, marginBottom: 15 },
+  sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  disabledAction: { opacity: 0.5 },
+  lockedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFF4E5",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: "#FFD9A8",
+  },
+  lockedBannerText: { flex: 1, fontSize: 12, fontWeight: "700", color: THEME.accentAmber },
+  saveDaysBtn: {
+    backgroundColor: THEME.softBlue,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  saveDaysText: { color: THEME.accentBlue, fontWeight: "700", fontSize: 12 },
+  helperText: {
+    color: THEME.accentBlue,
+    fontSize: 12,
+    fontWeight: "700",
+    backgroundColor: "#EAF3FF",
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginTop: -6,
+    marginBottom: 16,
+  },
 
   dayGrid: { flexDirection: "row", justifyContent: "space-between", marginBottom: 30 },
   dayPill: {
@@ -650,6 +927,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 5,
   },
+  dayPillDisabled: { opacity: 0.5 },
   dayPillActive: { backgroundColor: THEME.textDark },
   dayPillText: { fontSize: 13, fontWeight: "700", color: THEME.textGray },
   textWhite: { color: THEME.white },

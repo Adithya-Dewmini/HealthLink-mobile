@@ -40,6 +40,7 @@ export default function DoctorAvailabilityScreen() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
+  const [workingDays, setWorkingDays] = useState<string[]>([]);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -59,6 +60,11 @@ export default function DoctorAvailabilityScreen() {
         }
         const data = await res.json();
         setSchedule(Array.isArray(data) ? data : []);
+        const daysRes = await apiFetch(`/api/patients/doctor/working-days/${doctorId}`);
+        if (daysRes.ok) {
+          const daysData = await daysRes.json();
+          setWorkingDays(Array.isArray(daysData) ? daysData : []);
+        }
         const bookedRes = await apiFetch(
           `/api/patients/doctor/bookings/${doctorId}?date=${today}`
         );
@@ -128,6 +134,31 @@ export default function DoctorAvailabilityScreen() {
     return `${normalized.toString().padStart(2, "0")}:${minute} ${period}`;
   };
 
+  const normalizeDay = (value?: string | null) => {
+    if (!value) return "";
+    const map: Record<string, string> = {
+      Mon: "Monday",
+      Tue: "Tuesday",
+      Wed: "Wednesday",
+      Thu: "Thursday",
+      Fri: "Friday",
+      Sat: "Saturday",
+      Sun: "Sunday",
+    };
+    return map[value] || value;
+  };
+
+  const getDayName = (dateStr: string) => {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("en-US", { weekday: "long" });
+  };
+
+  const dayName = getDayName(today);
+  const workingDaysNormalized = workingDays.map((d) => normalizeDay(d));
+  const isWorkingToday =
+    workingDaysNormalized.length === 0 ? true : workingDaysNormalized.includes(dayName);
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
@@ -155,24 +186,35 @@ export default function DoctorAvailabilityScreen() {
         <Text style={styles.sectionTitle}>Weekly Availability</Text>
         <Text style={styles.sectionSub}>Join the queue during these hours</Text>
 
+        {!loading && !isWorkingToday && dayName ? (
+          <View style={styles.offDayBanner}>
+            <Ionicons name="information-circle" size={18} color={THEME.accentAmber} />
+            <Text style={styles.offDayText}>
+              Doctor does not operate on {dayName}s.
+            </Text>
+          </View>
+        ) : null}
+
         {!loading && schedule.length === 0 && (
           <Text style={styles.sectionSub}>No availability set for this doctor.</Text>
         )}
 
         {schedule.map((item, index) => {
-          const max = 20;
-          const booked = 0;
-          const isFull = booked >= max;
-          const slotsLeft = Math.max(0, max - booked);
+          const slotCount = item.max_patients ?? 0;
           const timeRange = `${formatTime(item.start_time)} - ${formatTime(
             item.end_time
           )}`;
-          const slotCount = item.max_patients ?? 0;
           const slots = generateSlots(
             String(item.start_time).slice(0, 5),
             String(item.end_time).slice(0, 5),
             slotCount
-          ).filter((slot) => !bookedTimes.includes(slot));
+          );
+          const bookedCount =
+            item.day === dayName
+              ? slots.filter((slot) => bookedTimes.includes(slot)).length
+              : 0;
+          const isFull = slotCount > 0 && bookedCount >= slotCount;
+          const slotsLeft = Math.max(0, slotCount - bookedCount);
 
           return (
             <View key={index} style={[styles.scheduleCard, isFull && styles.fullCard]}>
@@ -190,59 +232,21 @@ export default function DoctorAvailabilityScreen() {
                     Max Patients: {item.max_patients ?? "Not set"}
                   </Text>
 
-                  <View style={styles.capacityContainer}>
-                    <View style={styles.progressBar}>
-                      <View
-                        style={[
-                          styles.progressFill,
-                          {
-                            width: `${(booked / max) * 100}%`,
-                            backgroundColor: isFull ? THEME.textGray : THEME.accentBlue,
-                          },
-                        ]}
-                      />
-                    </View>
                   <Text style={styles.capacityText}>
-                    {isFull ? "No slots left" : `${slotsLeft} slots available`}
+                    {slotCount === 0
+                      ? "Slots not set"
+                      : isFull
+                        ? "No slots left"
+                        : ""}
                   </Text>
-                </View>
               </View>
             </View>
 
-            {slotCount > 0 && (
-              <View style={styles.slotRow}>
-                {slots.length === 0 ? (
-                  <Text style={styles.noSlotsText}>No available slots</Text>
-                ) : (
-                  slots.map((slot) => (
-                    <TouchableOpacity
-                      key={`${item.day}-${slot}`}
-                      style={styles.slotChip}
-                      onPress={() => handleBook(slot)}
-                    >
-                      <Text style={styles.slotChipText}>{slot}</Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </View>
-            )}
+            {/* Slots are shown in the booking screen; keep this view as schedule-only. */}
 
-            <TouchableOpacity
-              style={[styles.actionBtn, isFull && styles.disabledBtn]}
-              disabled={isFull}
-            >
-                <Text style={styles.actionBtnText}>
-                  {isFull ? "Fully Booked" : "Book for this Day"}
-                </Text>
-                <Ionicons
-                  name="arrow-forward"
-                  size={16}
-                  color={isFull ? THEME.textGray : THEME.white}
-                />
-              </TouchableOpacity>
-            </View>
-          );
-        })}
+          </View>
+        );
+      })}
 
         <View style={styles.infoBox}>
           <Ionicons name="information-circle" size={20} color={THEME.accentBlue} />
@@ -251,6 +255,16 @@ export default function DoctorAvailabilityScreen() {
           </Text>
         </View>
         </ScrollView>
+      </View>
+
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.mainActionBtn}
+          onPress={() => navigation.navigate("BookAppointmentScreen", { doctorId })}
+        >
+          <Text style={styles.actionBtnText}>Book This Doctor</Text>
+          <Ionicons name="arrow-forward" size={20} color={THEME.white} />
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -292,6 +306,16 @@ const styles = StyleSheet.create({
 
   sectionTitle: { fontSize: 20, fontWeight: "bold", color: THEME.textDark },
   sectionSub: { fontSize: 14, color: THEME.textGray, marginTop: 4, marginBottom: 20 },
+  offDayBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: THEME.softAmber,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  offDayText: { color: THEME.accentAmber, fontSize: 13, fontWeight: "600" },
 
   scheduleCard: {
     backgroundColor: THEME.white,
@@ -323,36 +347,28 @@ const styles = StyleSheet.create({
   limitText: { marginTop: 4, color: "#999", fontSize: 13 },
 
   capacityContainer: { marginTop: 12 },
-  progressBar: {
-    height: 6,
-    backgroundColor: "#EDF2F7",
-    borderRadius: 3,
-    marginBottom: 6,
-    overflow: "hidden",
-  },
-  progressFill: { height: "100%" },
   capacityText: { fontSize: 12, color: THEME.textGray, fontWeight: "500" },
-  slotRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  slotChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: THEME.softBlue,
-    borderRadius: 10,
-  },
-  slotChipText: { fontSize: 12, fontWeight: "700", color: THEME.accentBlue },
-  noSlotsText: { fontSize: 12, color: THEME.textGray, fontWeight: "600" },
-
-  actionBtn: {
-    backgroundColor: THEME.textDark,
-    height: 48,
-    borderRadius: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  disabledBtn: { backgroundColor: THEME.border },
   actionBtnText: { color: THEME.white, fontWeight: "bold", fontSize: 14 },
+  footer: {
+    backgroundColor: THEME.white,
+    padding: 20,
+    paddingBottom: 34,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+  mainActionBtn: {
+    backgroundColor: THEME.accentBlue,
+    height: 56,
+    borderRadius: 18,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 10,
+  },
 
   infoBox: {
     flexDirection: "row",

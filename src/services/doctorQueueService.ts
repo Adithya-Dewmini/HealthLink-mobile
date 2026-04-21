@@ -1,6 +1,7 @@
 import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
-const API_URL = "http://172.20.10.4:5050/api";
+const API_URL = `${API_BASE_URL}/api`;
 
 export const getQueueDashboard = async (token: string) => {
   const res = await axios.get(`${API_URL}/doctor/queue/dashboard`, {

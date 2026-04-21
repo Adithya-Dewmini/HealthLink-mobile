@@ -1,299 +1,393 @@
-import React, { useEffect, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, Alert } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { connectSocket, getSocket } from "../../services/socket";
+import React, { useMemo } from "react";
+import {
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useNavigation } from "@react-navigation/native";
+import ActionButton from "../../components/receptionist/dashboard/ActionButton";
+import StatCard from "../../components/receptionist/dashboard/StatCard";
+import {
+  DEFAULT_RECEPTION_DASHBOARD,
+  normalizeReceptionDashboardData,
+} from "../../utils/receptionistDashboard";
 
-type ApptStatus = "waiting" | "checked-in" | "with-doctor" | "done";
-
-type Appointment = {
-  id: string;
-  patient: string;
-  doctor: string;
-  time: string;
-  status: ApptStatus;
+const THEME = {
+  primary: "#2196F3",
+  secondary: "#2BB673",
+  background: "#F5F7FB",
+  white: "#FFFFFF",
+  textPrimary: "#1A1C1E",
+  textSecondary: "#6B7280",
+  border: "#E2E8F0",
+  softBlue: "#E3F2FD",
+  softSuccess: "#E8F8EF",
+  softWarning: "#FEF7E6",
+  softDanger: "#FEF2F2",
 };
 
-const appointments: Appointment[] = [
-  { id: "AP-401", patient: "Amaya Perera", doctor: "Dr. Silva", time: "09:15", status: "with-doctor" },
-  { id: "AP-402", patient: "Ruwan Jayasinghe", doctor: "Dr. Fernando", time: "09:45", status: "checked-in" },
-  { id: "AP-403", patient: "Ishara Fernando", doctor: "Dr. Silva", time: "10:10", status: "waiting" },
-  { id: "AP-404", patient: "Dilani Senanayake", doctor: "Dr. Perera", time: "10:45", status: "waiting" },
-  { id: "AP-405", patient: "Nuwan Alwis", doctor: "Dr. Fernando", time: "11:15", status: "done" },
-];
+const QUEUE_STATUS_LABELS = {
+  LIVE: "Live",
+  NOT_STARTED: "Not Started",
+  ENDED: "Ended",
+} as const;
 
-export default function Home() {
-  const waiting = useMemo(() => appointments.filter((a) => a.status === "waiting").length, []);
-  const checkedIn = useMemo(() => appointments.filter((a) => a.status === "checked-in").length, []);
-  const done = useMemo(() => appointments.filter((a) => a.status === "done").length, []);
+export default function ReceptionDashboard() {
+  const navigation = useNavigation<any>();
+  const dashboardState = useMemo(
+    () => normalizeReceptionDashboardData(DEFAULT_RECEPTION_DASHBOARD),
+    []
+  );
 
-  useEffect(() => {
-    connectSocket("http://172.20.10.4:5050");
-    const socket = getSocket();
-    if (!socket) return;
-    socket.emit("joinReceptionRoom");
-    socket.on("queueUpdated", (data: any) => {
-      if (data?.type === "QUEUE_STARTED") {
-        Alert.alert("Queue Started", "The clinic queue has started.");
-      }
-      if (data?.type === "CLINIC_ENDED") {
-        Alert.alert("Clinic Ended", "Today's clinic session has ended.");
-      }
-    });
-    return () => {
-      socket.off("queueUpdated");
-    };
-  }, []);
+  if (!dashboardState.ok) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" />
+        <View style={styles.errorState}>
+          <Feather name="alert-circle" size={22} color="#DC2626" />
+          <Text style={styles.errorTitle}>Dashboard unavailable</Text>
+          <Text style={styles.errorMessage}>{dashboardState.message}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const dashboard = dashboardState.data;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 28 }}
-        bounces={false}
-      >
-        <Text style={styles.heading}>Dashboard</Text>
-        <Text style={styles.subheading}>Today&apos;s appointment desk view</Text>
-
-        <View style={styles.metricsRow}>
-          <MetricCard label="Appointments today" value={appointments.length.toString()} icon="calendar-outline" color="#1976D2" />
-          <MetricCard label="Current queue" value={waiting.toString()} icon="time-outline" color="#FFA000" />
-          <MetricCard label="Checked-in" value={checkedIn.toString()} icon="people-outline" color="#2E7D32" />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>{dashboard.greeting}</Text>
+            <Text style={styles.subtitle}>{dashboard.title}</Text>
+          </View>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Feather name="user" size={24} color={THEME.primary} />
+            </View>
+          </View>
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Today&apos;s appointments</Text>
-            <Text style={styles.cardCount}>{appointments.length} total</Text>
-          </View>
-          {appointments.map((appt) => (
-            <View key={appt.id} style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle}>{appt.patient}</Text>
-                <Text style={styles.rowMeta}>{appt.id} • {appt.doctor}</Text>
+        <LinearGradient
+          colors={[THEME.softBlue, "#DBEAFE"]}
+          style={styles.heroCard}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.heroHeader}>
+            <View>
+              <Text style={styles.heroDoctor}>{dashboard.doctorName}</Text>
+              <View style={styles.badge}>
+                <View style={styles.pulseDot} />
+                <Text style={styles.badgeText}>{QUEUE_STATUS_LABELS[dashboard.queueStatus]}</Text>
               </View>
-              <View style={styles.timeWrap}>
-                <Ionicons name="time-outline" size={14} color="#0F1E2E" />
-                <Text style={styles.timeText}>{appt.time}</Text>
-              </View>
-              <StatusPill status={appt.status} />
             </View>
+            <MaterialCommunityIcons
+              name={dashboard.heroIcon}
+              size={40}
+              color="rgba(33, 150, 243, 0.2)"
+            />
+          </View>
+
+          <View style={styles.heroFooter}>
+            <View style={styles.heroStat}>
+              <Feather name="clock" size={16} color={THEME.primary} />
+              <Text style={styles.heroStatText}>{dashboard.startedAtLabel}</Text>
+            </View>
+            <View style={styles.heroStat}>
+              <Feather name="users" size={16} color={THEME.primary} />
+              <Text style={styles.heroStatText}>{dashboard.totalPatientsLabel}</Text>
+            </View>
+          </View>
+        </LinearGradient>
+
+        <View style={styles.statsGrid}>
+          {dashboard.stats.map((stat) => (
+            <StatCard
+              key={stat.id}
+              icon={stat.icon}
+              label={stat.label}
+              value={stat.value}
+              iconColor={stat.iconColor}
+            />
           ))}
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Summary of patients</Text>
-            <Text style={styles.cardCount}>Live</Text>
+        <Text style={styles.sectionTitle}>Next Up</Text>
+        <View style={styles.nextPatientCard}>
+          <View style={styles.patientInfo}>
+            <View style={styles.queueNumberContainer}>
+              <Text style={styles.queueNumber}>{dashboard.nextPatient.queueNumber}</Text>
+            </View>
+            <View>
+              <Text style={styles.patientName}>{dashboard.nextPatient.name}</Text>
+              <Text style={styles.patientSubtext}>{dashboard.nextPatient.etaLabel}</Text>
+            </View>
           </View>
-          <View style={styles.summaryRow}>
-            <SummaryItem label="Waiting" value={waiting.toString()} color="#FFA000" icon="hourglass-outline" />
-            <SummaryItem label="Checked-in" value={checkedIn.toString()} color="#1976D2" icon="checkmark-done-outline" />
-            <SummaryItem label="Completed" value={done.toString()} color="#2E7D32" icon="checkmark-outline" />
+          <TouchableOpacity activeOpacity={0.7}>
+            <View style={styles.callButton}>
+              <Text style={styles.callButtonText}>{dashboard.nextPatient.callToAction}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.alertCard}>
+          <Feather name="alert-circle" size={20} color="#DC2626" />
+          <View style={styles.alertTextContainer}>
+            <Text style={styles.alertText}>{dashboard.alert.title}</Text>
+            <Text style={styles.alertSubtext}>{dashboard.alert.subtitle}</Text>
           </View>
         </View>
+
+        <View style={styles.actionsContainer}>
+          {dashboard.actions.map((action) => (
+            <ActionButton
+              key={action.id}
+              title={action.title}
+              isPrimary={action.isPrimary}
+              icon={action.icon}
+              onPress={() => {
+                if (action.id === "add-walk-in") {
+                  navigation.navigate("ReceptionistRegistration");
+                  return;
+                }
+
+                if (action.id === "view-appointments") {
+                  navigation.navigate("ReceptionistAppointments");
+                }
+              }}
+            />
+          ))}
+          <ActionButton title="View Patients" onPress={() => navigation.navigate("ReceptionistPatients")} />
+        </View>
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function MetricCard({ label, value, icon, color }: { label: string; value: string; icon: any; color: string }) {
-  return (
-    <View style={[styles.metricCard, { borderColor: `${color}55` }]}>
-      <View style={[styles.metricIcon, { backgroundColor: `${color}1A` }]}>
-        <Ionicons name={icon} size={18} color={color} />
-      </View>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function StatusPill({ status }: { status: ApptStatus }) {
-  const map = {
-    waiting: { text: "Waiting", color: "#FFA000" },
-    "checked-in": { text: "Checked-in", color: "#1976D2" },
-    "with-doctor": { text: "With doctor", color: "#7B1FA2" },
-    done: { text: "Done", color: "#2E7D32" },
-  };
-  const { text, color } = map[status];
-  return (
-    <View style={[styles.statusPill, { borderColor: color, backgroundColor: `${color}12` }]}>
-      <View style={[styles.statusDot, { backgroundColor: color }]} />
-      <Text style={[styles.statusText, { color }]}>{text}</Text>
-    </View>
-  );
-}
-
-function SummaryItem({ label, value, color, icon }: { label: string; value: string; color: string; icon: any }) {
-  return (
-    <View style={styles.summaryItem}>
-      <View style={[styles.summaryIcon, { backgroundColor: `${color}1A` }]}>
-        <Ionicons name={icon} size={16} color={color} />
-      </View>
-      <Text style={[styles.summaryValue, { color }]}>{value}</Text>
-      <Text style={styles.summaryLabel}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-  },
   container: {
     flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 0,
+    backgroundColor: THEME.background,
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#0F1E2E",
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
   },
-  subheading: {
-    color: "#5A6676",
-    marginBottom: 14,
-    fontSize: 14,
-  },
-  metricsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 14,
-  },
-  metricCard: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: "#E4E9F2",
-    shadowColor: "#1C1C1C",
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  metricIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  metricValue: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#0F1E2E",
-  },
-  metricLabel: {
-    color: "#5A6676",
-    marginTop: 2,
-    fontWeight: "700",
-  },
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#1C1C1C",
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  cardHeader: {
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 25,
   },
-  cardTitle: {
-    fontSize: 17,
+  greeting: {
+    fontSize: 14,
+    color: THEME.textSecondary,
+    fontWeight: "600",
+  },
+  subtitle: {
+    fontSize: 24,
     fontWeight: "800",
-    color: "#0F1E2E",
+    color: THEME.textPrimary,
   },
-  cardCount: {
-    color: "#5A6676",
-    fontWeight: "700",
+  avatarContainer: {
+    padding: 0,
+    backgroundColor: THEME.white,
+    borderRadius: 50,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  row: {
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: THEME.softBlue,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  heroCard: {
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  heroHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 22,
+  },
+  heroDoctor: {
+    color: THEME.textPrimary,
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  badge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF1F6",
-  },
-  rowTitle: {
-    fontWeight: "800",
-    color: "#0F1E2E",
-  },
-  rowMeta: {
-    color: "#5A6676",
-    marginTop: 3,
-  },
-  timeWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+    backgroundColor: THEME.softSuccess,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "#F7F9FC",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E4E9F2",
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginTop: 8,
+    alignSelf: "flex-start",
   },
-  timeText: {
-    fontWeight: "800",
-    color: "#0F1E2E",
-  },
-  statusPill: {
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  statusDot: {
+  pulseDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    backgroundColor: THEME.secondary,
+    marginRight: 6,
   },
-  statusText: {
-    fontWeight: "800",
+  badgeText: {
+    color: THEME.secondary,
+    fontSize: 12,
+    fontWeight: "700",
   },
-  summaryRow: {
+  heroFooter: {
     flexDirection: "row",
-    gap: 10,
+    gap: 20,
   },
-  summaryItem: {
-    flex: 1,
-    backgroundColor: "#F7F9FC",
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#E4E9F2",
-    alignItems: "flex-start",
+  heroStat: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
-  summaryIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+  heroStatText: {
+    color: THEME.textPrimary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: THEME.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 15,
+  },
+  nextPatientCard: {
+    backgroundColor: THEME.white,
+    padding: 16,
+    borderRadius: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  patientInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 15,
+    flex: 1,
+    paddingRight: 12,
+  },
+  queueNumberContainer: {
+    backgroundColor: THEME.softBlue,
+    padding: 12,
+    borderRadius: 14,
+  },
+  queueNumber: {
+    color: THEME.primary,
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  patientName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: THEME.textPrimary,
+  },
+  patientSubtext: {
+    fontSize: 12,
+    color: THEME.textSecondary,
+  },
+  callButton: {
+    backgroundColor: THEME.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  callButtonText: {
+    color: "#FFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  alertCard: {
+    backgroundColor: THEME.softWarning,
+    padding: 16,
+    borderRadius: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 30,
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+  },
+  alertTextContainer: {
+    flex: 1,
+  },
+  alertText: {
+    color: THEME.textPrimary,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  alertSubtext: {
+    color: THEME.textSecondary,
+    fontSize: 12,
+  },
+  actionsContainer: {
+    gap: 12,
+  },
+  errorState: {
+    flex: 1,
+    paddingHorizontal: 24,
     alignItems: "center",
     justifyContent: "center",
+    gap: 8,
   },
-  summaryValue: {
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  summaryLabel: {
-    color: "#5A6676",
+  errorTitle: {
+    fontSize: 17,
     fontWeight: "700",
+    color: THEME.textPrimary,
+  },
+  errorMessage: {
+    textAlign: "center",
+    fontSize: 14,
+    lineHeight: 20,
+    color: THEME.textSecondary,
+  },
+  bottomSpacer: {
+    height: 40,
   },
 });
