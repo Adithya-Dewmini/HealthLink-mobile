@@ -92,6 +92,8 @@ export default function SymptomCheckerScreen() {
       name: string;
       specialty: string;
       city: string;
+      clinicId: string | null;
+      clinicName: string | null;
       rating: number | null;
       reviews: number | null;
       experience: string;
@@ -115,6 +117,8 @@ export default function SymptomCheckerScreen() {
         name: doc.name ?? "Doctor",
         specialty: normalizeSpecialist(doc.specialization ?? "General Physician"),
         city: doc.city ?? "Colombo",
+        clinicId: doc.clinic_id ?? null,
+        clinicName: doc.clinic_name ?? null,
         rating: typeof doc.rating === "number" ? doc.rating : null,
         reviews: typeof doc.review_count === "number" ? doc.review_count : null,
         experience: doc.experience_years ? `${doc.experience_years} Years` : "N/A",
@@ -362,7 +366,18 @@ export default function SymptomCheckerScreen() {
                     <TouchableOpacity
                       style={styles.featuredCard}
                       activeOpacity={0.9}
-                      onPress={() => navigation.navigate("DoctorAvailabilityScreen", { doctorId: item.id })}
+                      onPress={() => {
+                        if (!item.clinicId) {
+                          return;
+                        }
+                        navigation.navigate("DoctorAvailabilityScreen", {
+                          doctorId: item.id,
+                          clinicId: item.clinicId,
+                          clinicName: item.clinicName ?? undefined,
+                          doctorName: item.name,
+                          specialty: item.specialty,
+                        });
+                      }}
                     >
                       <View style={styles.featuredAvatar}>
                         <Text style={styles.featuredAvatarText}>

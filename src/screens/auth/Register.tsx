@@ -1,16 +1,88 @@
-import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import React, { useRef } from "react";
+import {
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AuthLayout from "../../components/auth/AuthLayout";
+import AuthHeader from "../../components/auth/AuthHeader";
+import { AUTH_COLORS } from "../../components/auth/authTheme";
+
+const roles = [
+  {
+    key: "patient",
+    label: "Patient",
+    description: "Book appointments, view queues, and manage your healthcare.",
+    icon: "person-circle-outline" as const,
+  },
+  {
+    key: "doctor",
+    label: "Doctor",
+    description: "Join the platform, manage consultations, and review appointments.",
+    icon: "medkit-outline" as const,
+  },
+  {
+    key: "pharmacist",
+    label: "Pharmacist",
+    description: "Handle prescriptions, inventory, and dispensing workflows.",
+    icon: "flask-outline" as const,
+  },
+  {
+    key: "medical-center",
+    label: "Medical Center",
+    description: "Create a clinic workspace and manage staff operations.",
+    icon: "business-outline" as const,
+  },
+];
+
+function RoleCard({
+  icon,
+  label,
+  description,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  description: string;
+  onPress: () => void;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animate = (value: number) => {
+    Animated.spring(scale, {
+      toValue: value,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 5,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        activeOpacity={0.92}
+        style={styles.card}
+        onPress={onPress}
+        onPressIn={() => animate(0.97)}
+        onPressOut={() => animate(1)}
+      >
+        <View style={styles.cardIconWrap}>
+          <Ionicons name={icon} size={24} color={AUTH_COLORS.primary} />
+        </View>
+        <View style={styles.cardContent}>
+          <Text style={styles.cardTitle}>{label}</Text>
+          <Text style={styles.cardDescription}>{description}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={AUTH_COLORS.primary} />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
 
 export default function Register({ navigation }: any) {
-  const roles = [
-    { key: "patient", label: "Patient", icon: "person-circle-outline" as const },
-    { key: "doctor", label: "Doctor", icon: "medkit-outline" as const },
-    { key: "pharmacist", label: "Pharmacist", icon: "flask-outline" as const },
-    { key: "receptionist", label: "Receptionist", icon: "people-outline" as const },
-    { key: "medical_center_admin", label: "Medical Center Admin", icon: "business-outline" as const },
-  ];
-
   const goToForm = (role: string) => {
     switch (role) {
       case "patient":
@@ -22,11 +94,8 @@ export default function Register({ navigation }: any) {
       case "pharmacist":
         navigation.navigate("RegisterPharmacist");
         break;
-      case "receptionist":
-        navigation.navigate("RegisterReceptionist");
-        break;
-      case "medical_center_admin":
-        navigation.navigate("RegisterMedicalCenterAdmin");
+      case "medical-center":
+        navigation.navigate("RegisterMedicalCenter");
         break;
       default:
         break;
@@ -34,78 +103,69 @@ export default function Register({ navigation }: any) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Choose your role</Text>
-      <Text style={styles.subtitle}>
-        Pick a role to continue.
-      </Text>
+    <AuthLayout>
+        <AuthHeader
+          icon="apps-outline"
+          title="Choose your role"
+          subtitle="Select the account type that matches how you use HealthLink."
+        />
 
-      {roles.map((role) => (
-        <TouchableOpacity
-          key={role.key}
-          style={styles.card}
-          onPress={() => goToForm(role.key)}
-        >
-          <View style={styles.cardLeft}>
-            <Ionicons name={role.icon} size={26} color="#1976D2" />
-            <Text style={styles.cardText}>{role.label}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#666" />
+        {roles.map((role) => (
+          <RoleCard
+            key={role.key}
+            icon={role.icon}
+            label={role.label}
+            description={role.description}
+            onPress={() => goToForm(role.key)}
+          />
+        ))}
+
+        <TouchableOpacity onPress={() => navigation.navigate("Login")}>
+          <Text style={styles.loginText}>Already registered? Log in</Text>
         </TouchableOpacity>
-      ))}
-
-      <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-        <Text style={styles.loginText}>Already registered? Log in</Text>
-      </TouchableOpacity>
-    </View>
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 30,
-    backgroundColor: "#F5F7FA",
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 10,
-    color: "#1976D2",
-  },
-  subtitle: {
-    fontSize: 14,
-    textAlign: "center",
-    color: "#555",
-    marginBottom: 30,
-  },
   card: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "white",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#e3e3e3",
-  },
-  cardLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    marginBottom: 12,
+    shadowColor: AUTH_COLORS.primaryDark,
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
-  cardText: {
+  cardIconWrap: {
+    backgroundColor: AUTH_COLORS.background,
+    padding: 10,
+    borderRadius: 12,
+    marginRight: 14,
+  },
+  cardContent: {
+    flex: 1,
+  },
+  cardTitle: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
+    fontWeight: "700",
+    color: AUTH_COLORS.primaryDark,
+  },
+  cardDescription: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    color: AUTH_COLORS.textSecondary,
   },
   loginText: {
-    color: "#1976D2",
+    color: AUTH_COLORS.primaryDark,
     textAlign: "center",
-    marginTop: 20,
-    fontSize: 16,
+    marginTop: 18,
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

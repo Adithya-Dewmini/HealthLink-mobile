@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Image,
   View,
   Text,
   StyleSheet,
@@ -8,8 +9,10 @@ import {
   SafeAreaView,
   StatusBar,
 } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { apiFetch } from "../../config/api";
+import { useAuth } from "../../utils/AuthContext";
 
 const THEME = {
   primary: "#2196F3",
@@ -22,8 +25,76 @@ const THEME = {
   danger: "#EF4444",
 };
 
+type PatientProfileSummary = {
+  name?: string;
+  email?: string;
+  profile_image?: string | null;
+};
+
 export default function MyProfileScreen() {
   const navigation = useNavigation<any>();
+  const { user, setUser } = useAuth();
+  const [profile, setProfile] = React.useState<PatientProfileSummary>({
+    name: "Patient",
+    email: "",
+    profile_image: null,
+  });
+
+  React.useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const response = await apiFetch("/api/patients/me");
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as PatientProfileSummary;
+        const nextProfile = {
+          name: String(data?.name || "Patient"),
+          email: String(data?.email || ""),
+          profile_image: data?.profile_image ?? null,
+        };
+        setProfile(nextProfile);
+        setUser((prev) => ({
+          ...(prev || {}),
+          name: nextProfile.name,
+          email: nextProfile.email,
+          role: prev?.role || "patient",
+          profile_image: nextProfile.profile_image,
+        }));
+      } catch (error) {
+        console.log("Patient profile summary load error:", error);
+      }
+    };
+
+    void loadProfile();
+  }, [setUser]);
+
+  React.useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    setProfile({
+      name: String(user?.name || "Patient"),
+      email: String(user?.email || ""),
+      profile_image: user?.profile_image ?? null,
+    });
+  }, [user]);
+
+  const initials = React.useMemo(() => {
+    const name = String(profile.name || "").trim();
+    if (!name) {
+      return "P";
+    }
+
+    return name
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("");
+  }, [profile.name]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.white} />
@@ -31,12 +102,25 @@ export default function MyProfileScreen() {
       <View style={styles.topSection}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <View style={styles.headerProfileIcon}>
-              <Ionicons name="person" size={20} color={THEME.primary} />
-            </View>
+            <TouchableOpacity
+              style={styles.avatarButton}
+              onPress={() => navigation.navigate("ProfileEdit")}
+              activeOpacity={0.88}
+            >
+              {profile.profile_image ? (
+                <Image source={{ uri: profile.profile_image }} style={styles.avatarImage} />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Text style={styles.avatarInitials}>{initials}</Text>
+                </View>
+              )}
+              <View style={styles.avatarCameraBadge}>
+                <Ionicons name="camera" size={14} color={THEME.white} />
+              </View>
+            </TouchableOpacity>
             <View>
               <Text style={styles.headerTitle}>My Profile</Text>
-              <Text style={styles.headerSub}>Health insights & activity</Text>
+              <Text style={styles.headerSub}>{profile.email || "Health insights & activity"}</Text>
             </View>
           </View>
           <TouchableOpacity
@@ -71,6 +155,12 @@ export default function MyProfileScreen() {
       >
         <Text style={styles.sectionTitle}>Health</Text>
         <View style={styles.listContainer}>
+          <ProfileListItem 
+            icon="person-outline" 
+            title="Profile Info" 
+            sub="Edit your basic details and photo" 
+            onPress={() => navigation.navigate("ProfileEdit")}
+          />
           <ProfileListItem 
             icon="folder-open-outline" 
             title="Medical Reports" 
@@ -173,13 +263,43 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  headerProfileIcon: {
+  avatarButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: "visible",
+  },
+  avatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: THEME.softBlue,
+  },
+  avatarFallback: {
     width: 44,
     height: 44,
     borderRadius: 22,
     backgroundColor: THEME.softBlue,
     justifyContent: "center",
     alignItems: "center",
+  },
+  avatarInitials: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.primary,
+  },
+  avatarCameraBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: THEME.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: THEME.white,
   },
 
   // Quick Actions

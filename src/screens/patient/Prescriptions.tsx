@@ -10,7 +10,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { apiFetch } from "../../config/api";
+import type { PatientStackParamList } from "../../types/navigation";
 
 const THEME = {
   background: "#F2F5F9",
@@ -98,7 +100,7 @@ const formatDoseDisplay = (dose: any) => {
 };
 
 export default function Prescriptions() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const [activeTab, setActiveTab] = useState<"active" | "past">("active");
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,7 +186,7 @@ export default function Prescriptions() {
             key={item.id}
             style={styles.card}
             activeOpacity={0.9}
-            onPress={() => navigation.navigate("PrescriptionDetails" as never, { id: item.id } as never)}
+            onPress={() => navigation.navigate("PrescriptionDetails", { id: item.id })}
           >
             {/* Top Row: Doctor Info & Status */}
             <View style={styles.rowBetween}>
@@ -247,14 +249,14 @@ export default function Prescriptions() {
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.downloadBtn}
-                onPress={() => navigation.navigate("MedicineTracker" as never)}
+                onPress={() => navigation.navigate("MedicineTracker")}
               >
                 <Ionicons name="pulse-outline" size={18} color={THEME.white} />
                 <Text style={styles.downloadText}>Track Prescription</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.viewBtn}
-                onPress={() => navigation.navigate("PrescriptionDetails" as never, { id: item.id } as never)}
+                onPress={() => navigation.navigate("PrescriptionDetails", { id: item.id })}
               >
                 <Text style={styles.viewBtnText}>View pharmacy QR</Text>
               </TouchableOpacity>

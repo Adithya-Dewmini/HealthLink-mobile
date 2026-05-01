@@ -1,5 +1,8 @@
 import React, { useContext, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
+  Image,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -11,6 +14,8 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../../utils/AuthContext";
+import { apiFetch } from "../../config/api";
+import { uploadClinicCover, uploadClinicLogo } from "../../services/mediaUploadService";
 
 const THEME = {
   primary: "#2563EB",
@@ -29,6 +34,86 @@ export default function MedicalCenterSettings() {
   const [queueAlerts, setQueueAlerts] = useState(true);
   const [doctorStatusAlerts, setDoctorStatusAlerts] = useState(true);
   const [dailyReports, setDailyReports] = useState(false);
+  const [uploading, setUploading] = useState<"logo" | "cover" | null>(null);
+  const [center, setCenter] = useState<{
+    id: string;
+    name: string;
+    city?: string | null;
+    address?: string | null;
+    logo_url?: string | null;
+    cover_image_url?: string | null;
+    image_url?: string | null;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const loadCenter = async () => {
+      try {
+        const response = await apiFetch("/api/center/dashboard");
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setCenter(data?.center ?? null);
+      } catch (error) {
+        console.log("Medical center settings load error:", error);
+      }
+    };
+
+    void loadCenter();
+  }, []);
+
+  const handleLogoUpload = async () => {
+    if (!center?.id) {
+      return;
+    }
+
+    Alert.alert("Change Image", "Do you want to update this image?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Upload",
+        onPress: async () => {
+          try {
+            setUploading("logo");
+            const response = await uploadClinicLogo(center.id);
+            const logoUrl = response?.data?.logoUrl ?? null;
+            if (logoUrl) {
+              setCenter((prev) => (prev ? { ...prev, logo_url: logoUrl } : prev));
+            }
+          } finally {
+            setUploading(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleCoverUpload = async () => {
+    if (!center?.id) {
+      return;
+    }
+
+    Alert.alert("Change Image", "Do you want to update this image?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Upload",
+        onPress: async () => {
+          try {
+            setUploading("cover");
+            const response = await uploadClinicCover(center.id);
+            const coverUrl = response?.data?.coverUrl ?? null;
+            if (coverUrl) {
+              setCenter((prev) =>
+                prev ? { ...prev, cover_image_url: coverUrl, image_url: coverUrl } : prev
+              );
+            }
+          } finally {
+            setUploading(null);
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -47,13 +132,53 @@ export default function MedicalCenterSettings() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
-          <View style={styles.profileRow}>
-            <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="hospital-building" size={30} color={THEME.primary} />
+          <TouchableOpacity style={styles.coverShell} onPress={handleCoverUpload} activeOpacity={0.9}>
+            {center?.cover_image_url || center?.image_url ? (
+              <Image
+                source={{ uri: center?.cover_image_url || center?.image_url || undefined }}
+                style={styles.coverImage}
+              />
+            ) : (
+              <View style={styles.coverFallback}>
+                <MaterialCommunityIcons
+                  name="hospital-building"
+                  size={42}
+                  color={THEME.primary}
+                />
+              </View>
+            )}
+            <View style={styles.editIcon}>
+              {uploading === "cover" ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.editIconText}>✏️</Text>
+              )}
             </View>
+          </TouchableOpacity>
+          <View style={styles.profileRow}>
+            <TouchableOpacity
+              style={styles.logoContainer}
+              onPress={handleLogoUpload}
+              activeOpacity={0.9}
+            >
+              {center?.logo_url ? (
+                <Image source={{ uri: center.logo_url }} style={styles.logoImage} />
+              ) : (
+                <MaterialCommunityIcons name="hospital-building" size={30} color={THEME.primary} />
+              )}
+              <View style={styles.logoEditIcon}>
+                {uploading === "logo" ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.editIconText}>✏️</Text>
+                )}
+              </View>
+            </TouchableOpacity>
             <View style={styles.profileInfo}>
-              <Text style={styles.centerName}>HealthLink Medical Center</Text>
-              <Text style={styles.centerMeta}>Colombo, Sri Lanka</Text>
+              <Text style={styles.centerName}>{center?.name || "HealthLink Medical Center"}</Text>
+              <Text style={styles.centerMeta}>
+                {center?.city || center?.address || "Colombo, Sri Lanka"}
+              </Text>
             </View>
             <TouchableOpacity style={styles.editBtn}>
               <Text style={styles.editBtnText}>Edit</Text>
@@ -197,6 +322,25 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 2 },
   },
+  coverShell: {
+    height: 148,
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 18,
+    position: "relative",
+    backgroundColor: "#EFF6FF",
+  },
+  coverImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  coverFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFF6FF",
+  },
   profileRow: { flexDirection: "row", alignItems: "center", gap: 15 },
   logoContainer: {
     width: 60,
@@ -205,6 +349,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#EFF6FF",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
   },
   profileInfo: { flex: 1 },
   centerName: { fontSize: 18, fontWeight: "800", color: THEME.textPrimary },
@@ -216,6 +367,31 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   editBtnText: { fontSize: 12, fontWeight: "700", color: THEME.primary },
+  editIcon: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(37, 99, 235, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoEditIcon: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(37, 99, 235, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editIconText: {
+    fontSize: 12,
+  },
   groupContainer: { marginBottom: 25 },
   groupTitle: {
     fontSize: 13,

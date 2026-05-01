@@ -1,10 +1,7 @@
-import axios from "axios";
-import { API_BASE_URL } from "../config/api";
-
-const API_URL = `${API_BASE_URL}/api`;
+import { api } from "./apiClient";
 
 export const getQueueDashboard = async (token: string) => {
-  const res = await axios.get(`${API_URL}/doctor/queue/dashboard`, {
+  const res = await api.get("/api/doctor/queue/dashboard", {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -14,8 +11,8 @@ export const getQueueDashboard = async (token: string) => {
 };
 
 export const startQueue = async (token: string) => {
-  const res = await axios.post(
-    `${API_URL}/doctor/queue/start`,
+  const res = await api.post(
+    "/api/doctor/queue/start",
     {},
     {
       headers: {
@@ -28,8 +25,8 @@ export const startQueue = async (token: string) => {
 };
 
 export const callNextPatient = async (token: string) => {
-  const res = await axios.post(
-    `${API_URL}/doctor/queue/next`,
+  const res = await api.post(
+    "/api/doctor/queue/next",
     {},
     {
       headers: {
@@ -42,8 +39,8 @@ export const callNextPatient = async (token: string) => {
 };
 
 export const skipPatient = async (token: string) => {
-  const res = await axios.post(
-    `${API_URL}/doctor/queue/skip`,
+  const res = await api.post(
+    "/api/doctor/queue/skip",
     {},
     {
       headers: {
@@ -56,8 +53,8 @@ export const skipPatient = async (token: string) => {
 };
 
 export const endClinic = async (token: string) => {
-  const res = await axios.post(
-    `${API_URL}/doctor/queue/end`,
+  const res = await api.post(
+    "/api/doctor/queue/end",
     {},
     {
       headers: {
@@ -70,7 +67,7 @@ export const endClinic = async (token: string) => {
 };
 
 export const getDailyReport = async (token: string, date?: string) => {
-  const res = await axios.get(`${API_URL}/doctor/reports/daily`, {
+  const res = await api.get("/api/doctor/reports/daily", {
     params: date ? { date } : undefined,
     headers: {
       Authorization: `Bearer ${token}`,

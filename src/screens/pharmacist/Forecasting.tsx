@@ -3,27 +3,29 @@ import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
+type IoniconName = keyof typeof Ionicons.glyphMap;
+
 const forecastCards = [
   {
     label: "Expected fills (7d)",
     value: "642",
     note: "10% higher than last week",
     color: "#1976D2",
-    icon: "receipt-outline",
+    icon: "receipt-outline" as IoniconName,
   },
   {
     label: "Stockout risk",
     value: "6%",
     note: "Focus on antibiotics",
     color: "#F57C00",
-    icon: "alert-circle-outline",
+    icon: "alert-circle-outline" as IoniconName,
   },
   {
     label: "Slow movers",
     value: "14",
     note: "Review aging inventory",
     color: "#2E7D32",
-    icon: "trending-down-outline",
+    icon: "trending-down-outline" as IoniconName,
   },
 ];
 
@@ -45,17 +47,17 @@ const supplyPlan = [
   {
     title: "Reorder focus",
     detail: "Increase antibiotics stock by 18%",
-    icon: "cube-outline",
+    icon: "cube-outline" as IoniconName,
   },
   {
     title: "Shelf optimization",
     detail: "Move top 12 items to front-line bins",
-    icon: "grid-outline",
+    icon: "grid-outline" as IoniconName,
   },
   {
     title: "Expiry watch",
     detail: "Audit items expiring within 45 days",
-    icon: "time-outline",
+    icon: "time-outline" as IoniconName,
   },
 ];
 

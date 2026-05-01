@@ -1,20 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
+  ActivityIndicator,
   SafeAreaView,
+  ScrollView,
   StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useRoute, type RouteProp } from "@react-navigation/native";
 import type { PatientStackParamList } from "../../types/navigation";
-import { apiFetch } from "../../config/api";
-import { Alert } from "react-native";
+import {
+  fetchClinicDoctorSchedule,
+  generateSessionSlots,
+  type ClinicDoctorScheduleResponse,
+} from "../../services/patientClinicScheduleService";
 
 const THEME = {
   background: "#F2F5F9",
@@ -23,141 +26,58 @@ const THEME = {
   textGray: "#6A6D7C",
   accentBlue: "#2196F3",
   softBlue: "#E3F2FD",
-  accentGreen: "#4CAF50",
-  softGreen: "#E8F5E9",
   accentAmber: "#FF9800",
   softAmber: "#FFF3E0",
+  accentGreen: "#16A34A",
+  softGreen: "#E8F5E9",
   border: "#E0E6ED",
 };
+
+const formatTime = (value: string) => {
+  const [hourStr, minute] = String(value).slice(0, 5).split(":");
+  const hour = Number(hourStr);
+  if (Number.isNaN(hour)) return value;
+  const period = hour >= 12 ? "PM" : "AM";
+  const normalized = hour % 12 || 12;
+  return `${String(normalized).padStart(2, "0")}:${minute} ${period}`;
+};
+
+const formatDate = (value: string) =>
+  new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
 
 export default function DoctorAvailabilityScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const route = useRoute<RouteProp<PatientStackParamList, "DoctorAvailabilityScreen">>();
-  const { doctorId } = route.params;
+  const { doctorId, clinicId, clinicName: clinicNameParam, doctorName, specialty } = route.params;
 
-  const [schedule, setSchedule] = useState<
-    { day: string; start_time: string; end_time: string; max_patients?: number | null }[]
-  >([]);
+  const [schedule, setSchedule] = useState<ClinicDoctorScheduleResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bookedTimes, setBookedTimes] = useState<string[]>([]);
-  const [workingDays, setWorkingDays] = useState<string[]>([]);
-
-  const today = useMemo(() => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }, []);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await apiFetch(`/api/patients/doctor/availability/${doctorId}`);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || "Failed to load availability");
-        }
-        const data = await res.json();
-        setSchedule(Array.isArray(data) ? data : []);
-        const daysRes = await apiFetch(`/api/patients/doctor/working-days/${doctorId}`);
-        if (daysRes.ok) {
-          const daysData = await daysRes.json();
-          setWorkingDays(Array.isArray(daysData) ? daysData : []);
-        }
-        const bookedRes = await apiFetch(
-          `/api/patients/doctor/bookings/${doctorId}?date=${today}`
-        );
-        if (bookedRes.ok) {
-          const booked = await bookedRes.json();
-          setBookedTimes(
-            Array.isArray(booked)
-              ? booked.map((b: any) => String(b.time).slice(0, 5))
-              : []
-          );
-        }
+        setLoading(true);
+        setError(null);
+        setSchedule(await fetchClinicDoctorSchedule(clinicId, doctorId));
       } catch (err) {
-        console.error("Failed to load availability:", err);
-        setSchedule([]);
+        setError(err instanceof Error ? err.message : "Failed to load clinic schedule");
+        setSchedule(null);
       } finally {
         setLoading(false);
       }
     };
-    load();
-  }, [doctorId]);
 
-  const generateSlots = (start: string, end: string, count: number) => {
-    if (!count || count <= 0) return [];
-    const startTime = new Date(`1970-01-01T${start}`);
-    const endTime = new Date(`1970-01-01T${end}`);
-    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) return [];
-    const interval = (endTime.getTime() - startTime.getTime()) / count;
-    if (interval <= 0) return [];
-    const slots: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const slotTime = new Date(startTime.getTime() + interval * i);
-      const hours = String(slotTime.getHours()).padStart(2, "0");
-      const minutes = String(slotTime.getMinutes()).padStart(2, "0");
-      slots.push(`${hours}:${minutes}`);
-    }
-    return slots;
-  };
+    void load();
+  }, [clinicId, doctorId]);
 
-  const handleBook = async (time: string) => {
-    try {
-      const res = await apiFetch("/api/patients/bookings", {
-        method: "POST",
-        body: JSON.stringify({
-          doctor_id: doctorId,
-          date: today,
-          time,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to book slot");
-      }
-      Alert.alert("Booked", "Slot booked successfully");
-      setBookedTimes((prev) => [...prev, time]);
-    } catch (err) {
-      Alert.alert("Booking Failed", err instanceof Error ? err.message : "Failed to book");
-    }
-  };
-
-  const formatTime = (value: string) => {
-    if (!value) return "";
-    const [hourStr, minute] = value.split(":");
-    const hour = Number(hourStr);
-    if (Number.isNaN(hour)) return value;
-    const period = hour >= 12 ? "PM" : "AM";
-    const normalized = hour % 12 || 12;
-    return `${normalized.toString().padStart(2, "0")}:${minute} ${period}`;
-  };
-
-  const normalizeDay = (value?: string | null) => {
-    if (!value) return "";
-    const map: Record<string, string> = {
-      Mon: "Monday",
-      Tue: "Tuesday",
-      Wed: "Wednesday",
-      Thu: "Thursday",
-      Fri: "Friday",
-      Sat: "Saturday",
-      Sun: "Sunday",
-    };
-    return map[value] || value;
-  };
-
-  const getDayName = (dateStr: string) => {
-    const date = new Date(dateStr);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleDateString("en-US", { weekday: "long" });
-  };
-
-  const dayName = getDayName(today);
-  const workingDaysNormalized = workingDays.map((d) => normalizeDay(d));
-  const isWorkingToday =
-    workingDaysNormalized.length === 0 ? true : workingDaysNormalized.includes(dayName);
+  const upcomingSessions = useMemo(() => (schedule?.sessions ?? []).slice(0, 7), [schedule]);
+  const clinicName = schedule?.clinic_name || clinicNameParam || "Clinic";
+  const nextSession = schedule?.next_session ?? null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -167,103 +87,130 @@ export default function DoctorAvailabilityScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={24} color={THEME.textDark} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Doctor's Schedule</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.headerTitle}>Clinic Schedule</Text>
+        <View style={styles.headerSpacer} />
       </View>
 
-      <View style={styles.body}>
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.docProfile}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.heroCard}>
           <View style={styles.avatar}>
-            <Ionicons name="person" size={30} color={THEME.accentBlue} />
+            <Ionicons name="medkit-outline" size={24} color={THEME.accentBlue} />
           </View>
-          <View>
-            <Text style={styles.docName}>Dr. Silva</Text>
-            <Text style={styles.docSpec}>General Physician • Cardiologist</Text>
+          <View style={styles.heroCopy}>
+            <Text style={styles.doctorName}>{doctorName || schedule?.doctor_name || "Doctor"}</Text>
+            <Text style={styles.specialty}>{specialty || schedule?.specialization || "General Physician"}</Text>
+            <Text style={styles.clinicLabel}>Available at {clinicName}</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Weekly Availability</Text>
-        <Text style={styles.sectionSub}>Join the queue during these hours</Text>
-
-        {!loading && !isWorkingToday && dayName ? (
-          <View style={styles.offDayBanner}>
-            <Ionicons name="information-circle" size={18} color={THEME.accentAmber} />
-            <Text style={styles.offDayText}>
-              Doctor does not operate on {dayName}s.
-            </Text>
+        {loading ? (
+          <View style={styles.feedbackCard}>
+            <ActivityIndicator size="small" color={THEME.accentBlue} />
+            <Text style={styles.feedbackText}>Loading clinic schedule</Text>
           </View>
-        ) : null}
-
-        {!loading && schedule.length === 0 && (
-          <Text style={styles.sectionSub}>No availability set for this doctor.</Text>
-        )}
-
-        {schedule.map((item, index) => {
-          const slotCount = item.max_patients ?? 0;
-          const timeRange = `${formatTime(item.start_time)} - ${formatTime(
-            item.end_time
-          )}`;
-          const slots = generateSlots(
-            String(item.start_time).slice(0, 5),
-            String(item.end_time).slice(0, 5),
-            slotCount
-          );
-          const bookedCount =
-            item.day === dayName
-              ? slots.filter((slot) => bookedTimes.includes(slot)).length
-              : 0;
-          const isFull = slotCount > 0 && bookedCount >= slotCount;
-          const slotsLeft = Math.max(0, slotCount - bookedCount);
-
-          return (
-            <View key={index} style={[styles.scheduleCard, isFull && styles.fullCard]}>
-              <View style={styles.cardMain}>
-                <View style={styles.dayBadge}>
-                  <Text style={styles.dayText}>{item.day}</Text>
-                </View>
-
-                <View style={styles.timeInfo}>
-                  <View style={styles.row}>
-                    <Ionicons name="time-outline" size={16} color={THEME.textGray} />
-                    <Text style={styles.timeText}>{timeRange}</Text>
-                  </View>
-                  <Text style={styles.limitText}>
-                    Max Patients: {item.max_patients ?? "Not set"}
+        ) : error ? (
+          <View style={styles.feedbackCard}>
+            <Text style={styles.feedbackTitle}>Not available at this clinic</Text>
+            <Text style={styles.feedbackText}>{error}</Text>
+          </View>
+        ) : !schedule || schedule.sessions.length === 0 ? (
+          <View style={styles.feedbackCard}>
+            <Text style={styles.feedbackTitle}>Not available at this clinic</Text>
+            <Text style={styles.feedbackText}>No clinic-defined sessions are open for booking right now.</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.summaryCard}>
+              <Text style={styles.sectionTitle}>Next session</Text>
+              {nextSession ? (
+                <>
+                  <Text style={styles.summaryPrimary}>{formatDate(nextSession.date)}</Text>
+                  <Text style={styles.summarySecondary}>
+                    {formatTime(nextSession.start_time)} - {formatTime(nextSession.end_time)}
                   </Text>
-
-                  <Text style={styles.capacityText}>
-                    {slotCount === 0
-                      ? "Slots not set"
-                      : isFull
-                        ? "No slots left"
-                        : ""}
+                  <Text style={styles.summaryMeta}>
+                    {nextSession.available_slots} slots left • {nextSession.slot_duration} min slots
                   </Text>
-              </View>
+                </>
+              ) : (
+                <Text style={styles.summarySecondary}>No upcoming session</Text>
+              )}
             </View>
 
-            {/* Slots are shown in the booking screen; keep this view as schedule-only. */}
+            <Text style={styles.sectionTitle}>Upcoming clinic sessions</Text>
 
-          </View>
-        );
-      })}
+            {upcomingSessions.map((session) => {
+              const generatedSlots = generateSessionSlots(session);
+              const isClosed = session.status === "CLOSED";
+              const isLive = session.status === "LIVE";
+              const isFull = session.is_fully_booked;
 
-        <View style={styles.infoBox}>
-          <Ionicons name="information-circle" size={20} color={THEME.accentBlue} />
-          <Text style={styles.infoText}>
-            Patients are served on a first-come, first-served basis within the clinic hours.
-          </Text>
-        </View>
-        </ScrollView>
-      </View>
+              return (
+                <View key={session.id} style={styles.sessionCard}>
+                  <View style={styles.sessionTopRow}>
+                    <View>
+                      <Text style={styles.sessionDate}>{formatDate(session.date)}</Text>
+                      <Text style={styles.sessionTime}>
+                        {formatTime(session.start_time)} - {formatTime(session.end_time)}
+                      </Text>
+                    </View>
+                    <View
+                        style={[
+                        styles.statusBadge,
+                        isClosed
+                          ? styles.closedBadge
+                          : isLive
+                            ? styles.openBadge
+                          : isFull
+                            ? styles.fullBadge
+                            : styles.openBadge,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusBadgeText,
+                          isClosed
+                            ? styles.closedBadgeText
+                            : isLive
+                              ? styles.openBadgeText
+                            : isFull
+                              ? styles.fullBadgeText
+                              : styles.openBadgeText,
+                        ]}
+                      >
+                        {isClosed ? "Session Ended" : isLive ? "Join Queue" : isFull ? "Fully booked" : "Book Slot"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.sessionMeta}>
+                    Working hours: {formatTime(session.start_time)} - {formatTime(session.end_time)}
+                  </Text>
+                  <Text style={styles.sessionMeta}>
+                    Available slots: {Math.max(0, session.available_slots)} / {generatedSlots.length || session.max_patients}
+                  </Text>
+                </View>
+              );
+            })}
+          </>
+        )}
+      </ScrollView>
 
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.mainActionBtn}
-          onPress={() => navigation.navigate("BookAppointmentScreen", { doctorId })}
+          onPress={() =>
+            navigation.navigate("BookAppointmentScreen", {
+              doctorId,
+              clinicId,
+              clinicName,
+              doctorName: doctorName || schedule?.doctor_name,
+              specialty: specialty || schedule?.specialization,
+            })
+          }
         >
-          <Text style={styles.actionBtnText}>Book This Doctor</Text>
-          <Ionicons name="arrow-forward" size={20} color={THEME.white} />
+          <Text style={styles.actionBtnText}>Book at {clinicName}</Text>
+          <Ionicons name="arrow-forward" size={18} color={THEME.white} />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -279,105 +226,93 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: THEME.white,
   },
-  body: { flex: 1, backgroundColor: THEME.background },
-  headerTitle: { fontSize: 18, fontWeight: "bold", color: THEME.textDark },
   backBtn: { padding: 4 },
-  container: { padding: 20 },
-
-  docProfile: {
+  headerTitle: { fontSize: 18, fontWeight: "700", color: THEME.textDark },
+  headerSpacer: { width: 32 },
+  content: {
+    padding: 20,
+    backgroundColor: THEME.background,
+    paddingBottom: 120,
+  },
+  heroCard: {
     flexDirection: "row",
-    alignItems: "center",
+    gap: 14,
     backgroundColor: THEME.white,
-    padding: 16,
     borderRadius: 20,
-    marginBottom: 25,
-    gap: 15,
+    padding: 18,
+    marginBottom: 18,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 15,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: THEME.softBlue,
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
   },
-  docName: { fontSize: 18, fontWeight: "bold", color: THEME.textDark },
-  docSpec: { fontSize: 13, color: THEME.textGray },
-
-  sectionTitle: { fontSize: 20, fontWeight: "bold", color: THEME.textDark },
-  sectionSub: { fontSize: 14, color: THEME.textGray, marginTop: 4, marginBottom: 20 },
-  offDayBanner: {
+  heroCopy: { flex: 1 },
+  doctorName: { fontSize: 18, fontWeight: "700", color: THEME.textDark },
+  specialty: { fontSize: 13, color: THEME.textGray, marginTop: 4 },
+  clinicLabel: { fontSize: 14, color: THEME.accentBlue, fontWeight: "600", marginTop: 6 },
+  feedbackCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 20,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  feedbackTitle: { fontSize: 18, fontWeight: "700", color: THEME.textDark, marginBottom: 8 },
+  feedbackText: { fontSize: 14, color: THEME.textGray, textAlign: "center", lineHeight: 21, marginTop: 10 },
+  summaryCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+  },
+  sectionTitle: { fontSize: 18, fontWeight: "700", color: THEME.textDark, marginBottom: 12 },
+  summaryPrimary: { fontSize: 16, fontWeight: "700", color: THEME.textDark },
+  summarySecondary: { fontSize: 14, color: THEME.textGray, marginTop: 4 },
+  summaryMeta: { fontSize: 13, color: THEME.accentBlue, marginTop: 8, fontWeight: "600" },
+  sessionCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
+  },
+  sessionTopRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: THEME.softAmber,
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 20,
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
   },
-  offDayText: { color: THEME.accentAmber, fontSize: 13, fontWeight: "600" },
-
-  scheduleCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "transparent",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-  },
-  fullCard: { opacity: 0.7, backgroundColor: "#F8FAFC" },
-  cardMain: { flexDirection: "row", gap: 15, marginBottom: 20 },
-
-  dayBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: THEME.softBlue,
-    alignSelf: "flex-start",
-  },
-  dayText: { fontWeight: "700", color: THEME.accentBlue, fontSize: 13 },
-
-  timeInfo: { flex: 1 },
-  row: { flexDirection: "row", alignItems: "center", gap: 6 },
-  timeText: { fontSize: 15, fontWeight: "600", color: THEME.textDark },
-  limitText: { marginTop: 4, color: "#999", fontSize: 13 },
-
-  capacityContainer: { marginTop: 12 },
-  capacityText: { fontSize: 12, color: THEME.textGray, fontWeight: "500" },
-  actionBtnText: { color: THEME.white, fontWeight: "bold", fontSize: 14 },
+  sessionDate: { fontSize: 16, fontWeight: "700", color: THEME.textDark },
+  sessionTime: { fontSize: 14, color: THEME.textGray, marginTop: 5 },
+  sessionMeta: { fontSize: 13, color: THEME.textGray, marginTop: 8 },
+  statusBadge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  statusBadgeText: { fontSize: 12, fontWeight: "700" },
+  openBadge: { backgroundColor: THEME.softGreen },
+  openBadgeText: { color: THEME.accentGreen },
+  fullBadge: { backgroundColor: THEME.softAmber },
+  fullBadgeText: { color: THEME.accentAmber },
+  closedBadge: { backgroundColor: "#EEF2F7" },
+  closedBadgeText: { color: THEME.textGray },
   footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: THEME.white,
     padding: 20,
-    paddingBottom: 34,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    elevation: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
+    paddingBottom: 32,
   },
   mainActionBtn: {
     backgroundColor: THEME.accentBlue,
-    height: 56,
     borderRadius: 18,
+    paddingVertical: 16,
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
-
-  infoBox: {
-    flexDirection: "row",
-    backgroundColor: THEME.softBlue,
-    padding: 16,
-    borderRadius: 18,
-    gap: 12,
-    marginTop: 10,
-    alignItems: "center",
-  },
-  infoText: { flex: 1, fontSize: 13, color: THEME.textGray, lineHeight: 18 },
+  actionBtnText: { color: THEME.white, fontSize: 15, fontWeight: "700" },
 });

@@ -1,19 +1,22 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { jwtDecode } from "jwt-decode";
 import { AuthContext } from "../../utils/AuthContext";
-import { apiFetch } from "../../config/api";
+import { api } from "../../api/client";
+import AuthLayout from "../../components/auth/AuthLayout";
+import AuthHeader from "../../components/auth/AuthHeader";
+import AuthCard from "../../components/auth/AuthCard";
+import AuthInput from "../../components/auth/AuthInput";
+import { AUTH_COLORS } from "../../components/auth/authTheme";
 
-const steps = ["Personal", "Medical", "Emergency"];
+const steps = ["Personal", "Medical", "Emergency"] as const;
 
 export default function RegisterPatient({ navigation }: any) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
@@ -32,8 +35,11 @@ export default function RegisterPatient({ navigation }: any) {
   const [emergencyName, setEmergencyName] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [error, setError] = useState("");
   const { refreshAuth } = useContext(AuthContext);
+  const rootNavigation = navigation.getParent();
+
+  const stepTitle = useMemo(() => steps[step], [step]);
 
   const validateStep = () => {
     if (step === 0) {
@@ -52,76 +58,70 @@ export default function RegisterPatient({ navigation }: any) {
     if (step === 1) {
       return bloodGroup && allergies !== undefined && conditions !== undefined;
     }
-    if (step === 2) {
-      return emergencyName && emergencyPhone;
-    }
-    return false;
+    return emergencyName && emergencyPhone;
   };
 
-  const handleNext = () => {
+  const handleSubmit = async () => {
     if (!validateStep()) {
-      Alert.alert("Missing info", "Please complete all fields for this step.");
-      return;
-    }
-    if (step < 2) {
-      setStep((prev) => (prev + 1) as 0 | 1 | 2);
-    } else {
-      handleRegister();
-    }
-  };
-
-  const handleRegister = async () => {
-    if (!validateStep()) {
-      Alert.alert("Missing info", "Please complete all fields for this step.");
+      setError("Please complete all fields for this step.");
       return;
     }
 
     setLoading(true);
+    setError("");
 
     try {
-      const response = await apiFetch("/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: fullName,
-          email,
-          password,
-          phone,
-          dob,
-          gender,
-          nic,
-          address,
-          city,
-          bloodGroup,
-          allergies,
-          conditions,
-          emergencyName,
-          emergencyPhone,
-          role: "patient",
-        }),
+      const response = await api.post("/auth/register", {
+        name: fullName,
+        email,
+        password,
+        phone,
+        dob,
+        gender,
+        nic,
+        address,
+        city,
+        bloodGroup,
+        allergies,
+        conditions,
+        emergencyName,
+        emergencyPhone,
+        role: "patient",
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setLoading(false);
-        Alert.alert("Registration Failed", data.message || "Unable to register");
-        return;
-      }
-
-      await AsyncStorage.setItem("token", data.token);
-
-      const decoded: any = jwtDecode(data.token);
-      console.log("Registered as:", decoded.role);
-
+      await AsyncStorage.setItem("token", response.data.token);
       await refreshAuth();
 
+      rootNavigation?.navigate("AuthSuccess", {
+        icon: "checkmark-circle",
+        title: "Account created",
+        subtitle: "Your HealthLink patient account is ready.",
+        message: "You can now continue to your dashboard and start using the platform.",
+        actionLabel: "Go to Dashboard",
+        target: "PatientStack",
+      });
+    } catch (caughtError: any) {
+      const message =
+        typeof caughtError?.response?.data?.message === "string"
+          ? caughtError.response.data.message
+          : "Unable to register right now";
+      setError(message);
+      Alert.alert("Registration failed", message);
+    } finally {
       setLoading(false);
-      Alert.alert("Success", "Account created! Redirecting to your dashboard.");
-    } catch (error) {
-      setLoading(false);
-      Alert.alert("Error", "Unable to connect to server");
-      console.log("Register patient error:", error);
+    }
+  };
+
+  const handleNext = () => {
+    if (!validateStep()) {
+      setError("Please complete all fields for this step.");
+      return;
+    }
+    setError("");
+    if (step < 2) {
+      setStep((prev) => (prev + 1) as 0 | 1 | 2);
+    } else {
+      void handleSubmit();
     }
   };
 
@@ -134,289 +134,174 @@ export default function RegisterPatient({ navigation }: any) {
   }) => (
     <TouchableOpacity
       onPress={() => setGender(value)}
-      style={[
-        styles.pill,
-        gender === value && styles.pillActive,
-      ]}
+      style={[styles.pill, gender === value && styles.pillActive]}
     >
-      <Text
-        style={[
-          styles.pillText,
-          gender === value && styles.pillTextActive,
-        ]}
-      >
-        {label}
-      </Text>
+      <Text style={[styles.pillText, gender === value && styles.pillTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
 
-  const renderStep = () => {
-    if (step === 0) {
-      return (
-        <>
-          <Text style={styles.label}>Personal info</Text>
-          <TextInput
-            placeholder="Full Name"
-            style={styles.input}
-            value={fullName}
-            onChangeText={setFullName}
-          />
-
-          <TextInput
-            placeholder="Email"
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-
-          <TextInput
-            placeholder="Password"
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-
-          <TextInput
-            placeholder="Phone"
-            style={styles.input}
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-
-          <TextInput
-            placeholder="Date of Birth (YYYY-MM-DD)"
-            style={styles.input}
-            value={dob}
-            onChangeText={setDob}
-          />
-
-          <Text style={styles.label}>Gender</Text>
-          <View style={styles.row}>
-            <GenderButton value="male" label="Male" />
-            <GenderButton value="female" label="Female" />
-            <GenderButton value="other" label="Other" />
-          </View>
-
-          <TextInput
-            placeholder="NIC"
-            style={styles.input}
-            value={nic}
-            onChangeText={setNic}
-          />
-
-          <TextInput
-            placeholder="Address"
-            style={styles.input}
-            value={address}
-            onChangeText={setAddress}
-          />
-
-          <TextInput
-            placeholder="City"
-            style={styles.input}
-            value={city}
-            onChangeText={setCity}
-          />
-        </>
-      );
-    }
-
-    if (step === 1) {
-      return (
-        <>
-          <Text style={styles.label}>Medical info</Text>
-          <TextInput
-            placeholder="Blood Group (e.g., A+, O-)"
-            style={styles.input}
-            value={bloodGroup}
-            onChangeText={setBloodGroup}
-          />
-
-          <TextInput
-            placeholder="Allergies"
-            style={styles.input}
-            value={allergies}
-            onChangeText={setAllergies}
-          />
-
-          <TextInput
-            placeholder="Existing conditions"
-            style={styles.input}
-            value={conditions}
-            onChangeText={setConditions}
-          />
-        </>
-      );
-    }
-
-    return (
-      <>
-        <Text style={styles.label}>Emergency contact</Text>
-        <TextInput
-          placeholder="Contact Name"
-          style={styles.input}
-          value={emergencyName}
-          onChangeText={setEmergencyName}
-        />
-
-        <TextInput
-          placeholder="Contact Phone"
-          style={styles.input}
-          value={emergencyPhone}
-          onChangeText={setEmergencyPhone}
-          keyboardType="phone-pad"
-        />
-      </>
-    );
-  };
-
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Patient Registration</Text>
-      <Text style={styles.subtitle}>
-        Step {step + 1} of 3 — {steps[step]}
-      </Text>
+    <AuthLayout>
+      <AuthHeader
+        icon="person-add-outline"
+        title="Patient Registration"
+        subtitle={`Step ${step + 1} of 3 · ${stepTitle}`}
+      />
 
-      {renderStep()}
+      <AuthCard>
+        {step === 0 ? (
+          <>
+            <AuthInput label="Full Name" value={fullName} onChangeText={setFullName} placeholder="Jane Doe" icon="person-outline" />
+            <AuthInput label="Email" value={email} onChangeText={setEmail} placeholder="name@example.com" keyboardType="email-address" icon="mail-outline" />
+            <AuthInput label="Password" value={password} onChangeText={setPassword} placeholder="Create a password" secureTextEntry icon="lock-closed-outline" />
+            <AuthInput label="Phone" value={phone} onChangeText={setPhone} placeholder="+94 77 123 4567" keyboardType="phone-pad" icon="call-outline" />
+            <AuthInput label="Date of Birth" value={dob} onChangeText={setDob} placeholder="YYYY-MM-DD" icon="calendar-outline" />
+            <Text style={styles.groupLabel}>Gender</Text>
+            <View style={styles.row}>
+              <GenderButton value="male" label="Male" />
+              <GenderButton value="female" label="Female" />
+              <GenderButton value="other" label="Other" />
+            </View>
+            <AuthInput label="NIC" value={nic} onChangeText={setNic} placeholder="NIC number" icon="card-outline" />
+            <AuthInput label="Address" value={address} onChangeText={setAddress} placeholder="Street address" icon="location-outline" />
+            <AuthInput label="City" value={city} onChangeText={setCity} placeholder="City" icon="business-outline" />
+          </>
+        ) : null}
 
-      <View style={styles.progressRow}>
-        {steps.map((_, idx) => (
-          <View
-            key={idx}
-            style={[
-              styles.dot,
-              idx === step && styles.dotActive,
-            ]}
-          />
-        ))}
+        {step === 1 ? (
+          <>
+            <AuthInput label="Blood Group" value={bloodGroup} onChangeText={setBloodGroup} placeholder="A+, O-, B+" />
+            <AuthInput label="Allergies" value={allergies} onChangeText={setAllergies} placeholder="List allergies if any" />
+            <AuthInput label="Existing Conditions" value={conditions} onChangeText={setConditions} placeholder="Medical conditions" />
+          </>
+        ) : null}
+
+        {step === 2 ? (
+          <>
+            <AuthInput label="Emergency Contact Name" value={emergencyName} onChangeText={setEmergencyName} placeholder="Contact name" icon="person-outline" />
+            <AuthInput label="Emergency Contact Phone" value={emergencyPhone} onChangeText={setEmergencyPhone} placeholder="+94 77 123 4567" keyboardType="phone-pad" icon="call-outline" />
+          </>
+        ) : null}
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        <View style={styles.progressRow}>
+          {steps.map((_, index) => (
+            <View key={index} style={[styles.dot, index === step && styles.dotActive]} />
+          ))}
+        </View>
+      </AuthCard>
+
+      <View style={styles.footerActions}>
+        <TouchableOpacity
+          style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+          activeOpacity={0.88}
+          onPress={handleNext}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.primaryButtonText}>{step === 2 ? "Submit" : "Next"}</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() =>
+            step === 0 ? navigation.goBack() : setStep((prev) => (prev - 1) as 0 | 1 | 2)
+          }
+        >
+          <Text style={styles.footerLink}>{step === 0 ? "Back to role selection" : "Back"}</Text>
+        </TouchableOpacity>
       </View>
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleNext}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>
-            {step === 2 ? "Submit" : "Next"}
-          </Text>
-        )}
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        onPress={() =>
-          step === 0 ? navigation.goBack() : setStep((prev) => (prev - 1) as 0 | 1 | 2)
-        }
-      >
-        <Text style={styles.loginText}>
-          {step === 0 ? "Back to role selection" : "Back"}
-        </Text>
-      </TouchableOpacity>
-    </View>
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 30,
-    backgroundColor: "#F5F7FA",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 6,
-    color: "#1976D2",
-  },
-  subtitle: {
-    fontSize: 14,
-    textAlign: "center",
-    color: "#555",
-    marginBottom: 20,
-  },
-  input: {
-    width: "100%",
-    height: 50,
-    backgroundColor: "white",
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#d9d9d9",
-  },
-  label: {
+  groupLabel: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#444",
+    color: AUTH_COLORS.textPrimary,
     marginBottom: 8,
   },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 18,
+    gap: 8,
+  },
+  pill: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: AUTH_COLORS.border,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+  },
+  pillActive: {
+    borderColor: AUTH_COLORS.accent,
+    backgroundColor: "#E6F7FB",
+  },
+  pillText: {
+    color: AUTH_COLORS.textSecondary,
+    fontWeight: "600",
+  },
+  pillTextActive: {
+    color: AUTH_COLORS.primaryDark,
   },
   progressRow: {
     flexDirection: "row",
     justifyContent: "center",
-    marginVertical: 10,
     gap: 8,
+    marginBottom: 18,
   },
   dot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#d0d0d0",
+    backgroundColor: "#B7C8D8",
   },
   dotActive: {
-    backgroundColor: "#1976D2",
+    backgroundColor: AUTH_COLORS.primary,
   },
-  pill: {
-    flex: 1,
-    paddingVertical: 12,
-    marginHorizontal: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#d9d9d9",
-    backgroundColor: "white",
+  footerActions: {
+    width: "100%",
+    marginTop: 16,
+  },
+  primaryButton: {
+    width: "100%",
+    minHeight: 56,
+    borderRadius: 14,
+    backgroundColor: AUTH_COLORS.primary,
     alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    shadowColor: AUTH_COLORS.primaryDark,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
-  pillActive: {
-    borderColor: "#1976D2",
-    backgroundColor: "#E3F2FD",
+  primaryButtonDisabled: {
+    opacity: 0.7,
   },
-  pillText: {
-    color: "#555",
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
     fontWeight: "600",
   },
-  pillTextActive: {
-    color: "#1976D2",
-  },
-  button: {
-    width: "100%",
-    height: 50,
-    backgroundColor: "#1976D2",
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 10,
-    marginTop: 10,
-  },
-  buttonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  loginText: {
-    color: "#1976D2",
+  errorText: {
+    color: AUTH_COLORS.danger,
+    fontSize: 13,
+    marginBottom: 14,
     textAlign: "center",
-    marginTop: 20,
-    fontSize: 16,
+  },
+  footerLink: {
+    marginTop: 18,
+    textAlign: "center",
+    color: AUTH_COLORS.primaryDark,
+    fontWeight: "600",
   },
 });

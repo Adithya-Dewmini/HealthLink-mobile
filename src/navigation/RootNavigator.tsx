@@ -8,7 +8,6 @@ import ReceptionistTabs from "./ReceptionistTabs";
 import { View, ActivityIndicator } from "react-native";
 import { AuthContext } from "../utils/AuthContext";
 import DoctorStack from "./DoctorStack";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
 import {
   connectSocket,
@@ -18,26 +17,44 @@ import {
   getSocket,
 } from "../services/socket";
 import MedicalCenterStack from "./MedicalCenterStack";
+import SetPasswordScreen from "../screens/auth/SetPasswordScreen";
+import PasswordSetupSuccessScreen from "../screens/auth/PasswordSetupSuccessScreen";
+import PasswordSetupWelcomeScreen from "../screens/auth/PasswordSetupWelcomeScreen";
+import SuccessScreen from "../screens/auth/SuccessScreen";
+import type { RootStackParamList } from "../types/navigation";
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { role, loading } = useContext(AuthContext);
+  const { role, token, isAuthenticated, loading } = useContext(AuthContext);
+  const initialRouteName =
+    isAuthenticated && role === "patient"
+      ? "PatientStack"
+      : isAuthenticated && role === "doctor"
+        ? "Doctor"
+        : isAuthenticated && role === "pharmacist"
+          ? "PharmacistStack"
+          : isAuthenticated && role === "admin"
+            ? "AdminTabs"
+            : isAuthenticated && role === "receptionist"
+              ? "ReceptionistTabs"
+              : isAuthenticated && role === "medical_center_admin"
+                ? "MedicalCenterTabs"
+                : "AuthStack";
 
   useEffect(() => {
     const initSocket = async () => {
-      const token = await AsyncStorage.getItem("token");
       if (!token) return;
       const decoded: any = jwtDecode(token);
       const decodedRole = String(decoded?.role || "").trim().toLowerCase();
-      connectSocket();
+      connectSocket(token);
       if (decodedRole === "doctor" && decoded?.id) {
         joinDoctorRoom(decoded.id);
       }
       if (decodedRole === "patient" && decoded?.id) {
         joinPatientRoom(decoded.id);
       }
-      if (decodedRole === "medical_center_admin" && decoded?.medicalCenterId) {
+      if (["medical_center_admin", "receptionist"].includes(decodedRole) && decoded?.medicalCenterId) {
         joinCenterRoom(decoded.medicalCenterId);
       }
     };
@@ -46,7 +63,7 @@ export default function RootNavigator() {
       const socket = getSocket();
       if (socket?.connected) socket.disconnect();
     };
-  }, [role]);
+  }, [role, token]);
 
   if (loading) {
     return (
@@ -57,30 +74,28 @@ export default function RootNavigator() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!role && (
-        <Stack.Screen name="AuthStack" component={AuthNavigator} />
-      )}
-      {role === "patient" && (
+    <Stack.Navigator
+      key={isAuthenticated ? role ?? "authenticated" : "guest"}
+      initialRouteName={initialRouteName}
+      screenOptions={{ headerShown: false, animation: "fade_from_bottom" }}
+    >
+      <Stack.Screen name="SetPassword" component={SetPasswordScreen} />
+      <Stack.Screen name="PasswordSetupSuccess" component={PasswordSetupSuccessScreen} />
+      <Stack.Screen name="PasswordSetupWelcome" component={PasswordSetupWelcomeScreen} />
+      <Stack.Screen name="AuthSuccess" component={SuccessScreen} />
+      {!isAuthenticated && <Stack.Screen name="AuthStack" component={AuthNavigator} />}
+      {isAuthenticated && role === "patient" && (
         <Stack.Screen name="PatientStack" component={PatientStack} />
       )}
-      {role === "doctor" && <Stack.Screen name="Doctor" component={DoctorStack} />}
-
-      {role === "pharmacist" && (
+      {isAuthenticated && role === "doctor" && <Stack.Screen name="Doctor" component={DoctorStack} />}
+      {isAuthenticated && role === "pharmacist" && (
         <Stack.Screen name="PharmacistStack" component={PharmacistStack} />
       )}
-
-      {role === "admin" && (
-        <Stack.Screen name="AdminTabs" component={AdminTabs} />
+      {isAuthenticated && role === "admin" && <Stack.Screen name="AdminTabs" component={AdminTabs} />}
+      {isAuthenticated && role === "receptionist" && (
+        <Stack.Screen name="ReceptionistTabs" component={ReceptionistTabs} />
       )}
-
-      {role === "receptionist" && (
-        <Stack.Screen
-          name="ReceptionistTabs"
-          component={ReceptionistTabs}
-        />
-      )}
-      {role === "medical_center_admin" && (
+      {isAuthenticated && role === "medical_center_admin" && (
         <Stack.Screen name="MedicalCenterTabs" component={MedicalCenterStack} />
       )}
     </Stack.Navigator>

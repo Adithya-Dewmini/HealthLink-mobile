@@ -22,6 +22,8 @@ const THEME = {
   cardRadius: 20,
 };
 
+type ExpiryUrgency = "danger" | "warning" | "success";
+
 export default function ExpiryTrackerScreen() {
   const [activeTab, setActiveTab] = useState("Expiring Soon");
   const navigation = useNavigation<any>();
@@ -103,8 +105,20 @@ export default function ExpiryTrackerScreen() {
   );
 }
 
-const ExpiryCard = ({ name, date, statusText, urgency, actions }: any) => {
-  const color = THEME[urgency as keyof typeof THEME];
+const ExpiryCard = ({
+  name,
+  date,
+  statusText,
+  urgency,
+  actions,
+}: {
+  name: string;
+  date: string;
+  statusText: string;
+  urgency: ExpiryUrgency;
+  actions: string[];
+}) => {
+  const color = THEME[urgency];
 
   return (
     <View style={styles.card}>

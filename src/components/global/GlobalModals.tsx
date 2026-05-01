@@ -45,7 +45,7 @@ export default function GlobalModals() {
         const decodedId = decoded?.id ?? null;
         setPatientId(decodedId);
         if (decoded?.role === "patient" || decoded?.role === "user") {
-          connectSocket();
+          connectSocket(token);
           if (decodedId) joinPatientRoom(decodedId);
         }
       } catch {
@@ -95,7 +95,7 @@ export default function GlobalModals() {
         setIsPatient(isPatientRole);
         setPatientId(decoded?.id ?? null);
         if (isPatientRole && decoded?.id) {
-          connectSocket();
+          connectSocket(token);
           joinPatientRoom(decoded.id);
         }
       } catch {
@@ -198,7 +198,10 @@ export default function GlobalModals() {
         onView={async () => {
           setShowQR(false);
           if (prescription?.id && navigationRef.isReady()) {
-            navigationRef.navigate("PrescriptionDetails", { id: prescription.id });
+            navigationRef.navigate("PatientStack", {
+              screen: "PrescriptionDetails",
+              params: { id: String(prescription.id) },
+            });
           }
         }}
       />

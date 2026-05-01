@@ -5,14 +5,15 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import FormInput from "../../components/medicalCenter/FormInput";
 import { apiFetch } from "../../config/api";
@@ -31,6 +32,36 @@ const THEME = {
 };
 
 const loadClipboard = async () => import("expo-clipboard");
+
+const getExpoHostUri = () => {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest?.debuggerHost ||
+    (Constants as any).manifest2?.extra?.expoClient?.hostUri;
+
+  return typeof hostUri === "string" && hostUri.trim().length > 0 ? hostUri.trim() : null;
+};
+
+const isRunningInExpoGo = () => Constants.executionEnvironment === "storeClient";
+
+const buildExpoGoInviteLink = (setupLink: string) => {
+  const hostUri = getExpoHostUri();
+  if (!hostUri || !setupLink) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(setupLink);
+    const token = parsed.searchParams.get("token")?.trim() || "";
+    if (!token) {
+      return "";
+    }
+
+    return `exp://${hostUri}/--/set-password?token=${encodeURIComponent(token)}`;
+  } catch {
+    return "";
+  }
+};
 
 export default function AddReceptionistScreen({ navigation }: Props) {
   const [name, setName] = useState("");
@@ -93,7 +124,11 @@ export default function AddReceptionistScreen({ navigation }: Props) {
   };
 
   const handleCopyLink = async () => {
-    const linkToCopy = inviteLinks?.setupLink?.trim() || inviteLinks?.webLink?.trim() || "";
+    const expoGoLink = buildExpoGoInviteLink(inviteLinks?.setupLink?.trim() || "");
+    const linkToCopy =
+      (isRunningInExpoGo() ? expoGoLink : inviteLinks?.setupLink?.trim()) ||
+      inviteLinks?.webLink?.trim() ||
+      "";
     if (!linkToCopy) {
       Alert.alert("Copy Failed", "Invite link is not available.");
       return;
@@ -195,6 +230,11 @@ export default function AddReceptionistScreen({ navigation }: Props) {
                     inviteLinks?.emailError ? `: ${inviteLinks.emailError}` : "."
                   } Copy the app link and share it manually.`}
             </Text>
+            {isRunningInExpoGo() ? (
+              <Text style={styles.modalHelperText}>
+                Copy Link will generate an Expo Go link for the current local session.
+              </Text>
+            ) : null}
 
             <TouchableOpacity style={styles.modalPrimaryButton} onPress={handleCopyLink}>
               <Ionicons name="copy-outline" size={18} color={THEME.white} />
@@ -305,6 +345,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 14,
     lineHeight: 21,
+    color: THEME.textSecondary,
+    textAlign: "center",
+  },
+  modalHelperText: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
     color: THEME.textSecondary,
     textAlign: "center",
   },

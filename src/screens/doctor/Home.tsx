@@ -1,62 +1,114 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
   Alert,
-  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation } from "@react-navigation/native";
-import { getQueueDashboard, getDailyReport, startQueue } from "../../services/doctorQueueService";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { getDailyReport, getQueueDashboard, startQueue } from "../../services/doctorQueueService";
 import { apiFetch } from "../../config/api";
-
-const { width } = Dimensions.get("window");
+import QueueCard from "./components/QueueCard";
+import ScheduleCard, { type ScheduleCardItem } from "./components/ScheduleCard";
+import StatCard from "./components/StatCard";
 
 const THEME = {
-  background: "#F2F5F9",
+  background: "#F5F7FC",
   white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  accentGreen: "#4CAF50",
-  accentPurple: "#9C27B0",
-  accentBlue: "#2196F3",
-  softBlue: "#E3F2FD",
-  softPurple: "#F3E5F5",
-  softGreen: "#E8F5E9",
-  border: "#E0E6ED",
+  textDark: "#182033",
+  textGray: "#6B7280",
+  textMuted: "#94A3B8",
+  accentBlue: "#2F6FED",
+  accentBlueSoft: "#EAF1FF",
+  accentGreen: "#18B67A",
+  accentGreenSoft: "#E8FBF3",
+  accentAmber: "#F59E0B",
+  accentAmberSoft: "#FEF3C7",
+  border: "#E2E8F0",
 };
 
-export default function DoctorDashboard() {
-  const navigation = useNavigation<any>();
-  const [patients, setPatients] = useState<any[]>([]);
+const MOCK_SCHEDULE: ScheduleCardItem[] = [
+  {
+    clinic: "HealthLink Kurunegala",
+    start: "12:00",
+    end: "15:00",
+    label: "Today",
+    patients: 12,
+  },
+  {
+    clinic: "HealthLink Kandy",
+    start: "09:00",
+    end: "12:30",
+    label: "Tomorrow",
+    patients: 9,
+  },
+  {
+    clinic: "City Specialist Center",
+    start: "16:00",
+    end: "19:00",
+    label: "Thu",
+    patients: 7,
+  },
+];
+
+type DoctorDashboardResponse = {
+  doctor?: {
+    name?: string;
+    specialization?: string;
+  };
+  queue?: {
+    status?: string | null;
+    waitingCount?: number | null;
+  } | null;
+};
+
+type QueuePatient = {
+  name?: string | null;
+  token_number?: number | string | null;
+};
+
+export default function DoctorHomeScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const [patients, setPatients] = useState<QueuePatient[]>([]);
   const [stats, setStats] = useState({
     totalPatients: 0,
     waiting: 0,
-    completed: 0,
   });
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [doctorProfile, setDoctorProfile] = useState<{ name?: string; specialization?: string } | null>(null);
+  const [doctorProfile, setDoctorProfile] = useState<{ name?: string; specialization?: string } | null>(
+    null
+  );
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [queueStarting, setQueueStarting] = useState(false);
 
-  const formatTime = (value?: string) => {
-    if (!value) return "--:--";
-    const date = new Date(value);
-    return Number.isNaN(date.getTime())
-      ? "--:--"
-      : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    return "Good Evening";
+  }, []);
 
-  const loadDashboard = async () => {
-    try {
+  const loadDashboard = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "refresh") {
+      setRefreshing(true);
+    } else {
       setLoading(true);
+    }
+
+    try {
       const token = await AsyncStorage.getItem("token");
-      if (!token) return;
+      if (!token) {
+        return;
+      }
 
       const [dashboard, report, doctorRes] = await Promise.all([
         getQueueDashboard(token),
@@ -64,39 +116,65 @@ export default function DoctorDashboard() {
         apiFetch("/api/doctor/dashboard"),
       ]);
 
-      setPatients(dashboard?.patients ?? []);
-      setQueueStatus(dashboard?.queue?.status ?? null);
+      const doctorDashboard = doctorRes.ok
+        ? ((await doctorRes.json()) as DoctorDashboardResponse)
+        : null;
+
+      setPatients(Array.isArray(dashboard?.patients) ? dashboard.patients : []);
+      setQueueStatus(
+        typeof dashboard?.queue?.status === "string"
+          ? dashboard.queue.status
+          : doctorDashboard?.queue?.status || null
+      );
       setStats({
-        totalPatients: report?.dailySummary?.totalPatients ?? 0,
-        waiting: dashboard?.queue?.waitingCount ?? 0,
-        completed: report?.dailySummary?.patientsCompleted ?? 0,
+        totalPatients: Number(report?.dailySummary?.totalPatients ?? 0),
+        waiting: Number(dashboard?.queue?.waitingCount ?? doctorDashboard?.queue?.waitingCount ?? 0),
       });
-      if (doctorRes.ok) {
-        const data = await doctorRes.json();
-        setDoctorProfile({
-          name: data?.doctor?.name,
-          specialization: data?.doctor?.specialization,
-        });
-      }
+      setDoctorProfile({
+        name: doctorDashboard?.doctor?.name,
+        specialization: doctorDashboard?.doctor?.specialization,
+      });
     } catch (error) {
       console.log("Doctor home load error:", error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
 
-  const handleStartConsultation = async () => {
+  useFocusEffect(
+    useCallback(() => {
+      void loadDashboard("initial");
+    }, [loadDashboard])
+  );
+
+  const nextPatient = patients[0];
+  const isQueueLive = queueStatus === "LIVE";
+  const queueButtonLabel = isQueueLive ? "Open Queue" : "Start Consultation";
+  const queueHelperText = nextPatient
+    ? "Patient is ready for consultation"
+    : isQueueLive
+      ? "Queue is active. Open the control panel to continue."
+      : "Start the clinic to begin today’s consultation flow.";
+
+  const handleQueueAction = async () => {
+    if (isQueueLive) {
+      navigation.navigate("DoctorQueueControl");
+      return;
+    }
+
     try {
+      setQueueStarting(true);
       const token = await AsyncStorage.getItem("token");
-      if (!token) return;
-      const res = await startQueue(token);
-      Alert.alert("Clinic Status", res?.message ?? "Queue started");
-      await loadDashboard();
+      if (!token) {
+        return;
+      }
+
+      const response = await startQueue(token);
+      Alert.alert("Clinic Status", response?.message ?? "Queue started");
+      await loadDashboard("refresh");
       navigation.navigate("DoctorQueueControl");
     } catch (error: any) {
-      console.log("Start consultation error:", error);
-      console.log("Start consultation error status:", error?.response?.status);
-      console.log("Start consultation error data:", error?.response?.data);
       const backendMessage = error?.response?.data?.message;
       if (backendMessage === "No active shift found for this time") {
         Alert.alert(
@@ -106,224 +184,197 @@ export default function DoctorDashboard() {
       } else {
         Alert.alert("Error", backendMessage || "Unable to start queue");
       }
+    } finally {
+      setQueueStarting(false);
     }
   };
 
-  useEffect(() => {
-    void loadDashboard();
-  }, []);
-
-  const nextPatient = patients[0];
+  const openSchedule = () => {
+    navigation.navigate("DoctorSchedule");
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
+
       <View style={styles.header}>
-        <View style={styles.profileRow}>
-          <View style={styles.avatarCircle}>
-            <Ionicons name="person" size={24} color={THEME.accentBlue} />
-          </View>
-          <View>
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.docName}>{doctorProfile?.name ?? "Doctor"}</Text>
-          </View>
+        <View style={styles.headerText}>
+          <Text style={styles.greetingText}>{greeting}</Text>
+          <Text style={styles.userName}>{doctorProfile?.name ?? "Doctor"}</Text>
+          <Text style={styles.specializationText}>
+            {doctorProfile?.specialization || "Clinic dashboard"}
+          </Text>
         </View>
+
         <TouchableOpacity
-          style={styles.settingsBtn}
+          style={styles.settingsButton}
           onPress={() => navigation.navigate("DoctorSettings")}
         >
-          <Ionicons name="settings-outline" size={22} color={THEME.textDark} />
+          <Ionicons name="settings-outline" size={22} color={THEME.accentBlue} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.body}>
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.focusCard}>
-          <View style={styles.focusHeader}>
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>NEXT PATIENT</Text>
-            </View>
-            <Text style={styles.tokenText}>
-              {nextPatient ? `Token #${nextPatient?.token_number ?? "—"}` : "No Queue"}
-            </Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadDashboard("refresh")} />}
+      >
+        <QueueCard
+          queueStatus={queueStatus}
+          patientName={nextPatient?.name || "No patient in queue"}
+          patientToken={
+            nextPatient?.token_number !== undefined && nextPatient?.token_number !== null
+              ? String(nextPatient.token_number)
+              : "--"
+          }
+          helperText={queueHelperText}
+          buttonLabel={queueButtonLabel}
+          loading={queueStarting}
+          onPress={handleQueueAction}
+        />
+
+        <View style={styles.sectionRow}>
+          <View>
+            <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
+            <Text style={styles.sectionSubtitle}>Your next clinic sessions at a glance</Text>
           </View>
-          <Text style={styles.patientName}>
-            {nextPatient?.name ?? "No patient in queue"}
-          </Text>
-          <Text style={styles.patientCondition}>
-            {nextPatient ? "Ready for consultation" : "Start the clinic to begin"}
-          </Text>
-          <TouchableOpacity
-            style={styles.startBtn}
-            onPress={handleStartConsultation}
-            disabled={queueStatus === "LIVE" || queueStatus === "ENDED" || loading}
-          >
-            <Text style={styles.startBtnText}>Start Consultation</Text>
-            <Ionicons name="play-circle" size={24} color={THEME.white} />
+          <TouchableOpacity onPress={openSchedule}>
+            <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
 
-          <View style={styles.statsGrid}>
-          <View style={[styles.statCard, { backgroundColor: THEME.softBlue }]}>
-            <Text style={styles.statNum}>{stats.totalPatients}</Text>
-            <Text style={styles.statLabel}>Total Patients</Text>
-            <View style={styles.statGraphStub}>
-              <View style={[styles.graphBar, { height: "40%", backgroundColor: THEME.accentBlue }]} />
-              <View style={[styles.graphBar, { height: "70%", backgroundColor: THEME.accentBlue }]} />
-              <View style={[styles.graphBar, { height: "50%", backgroundColor: THEME.accentBlue }]} />
-            </View>
-          </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scheduleRow}
+        >
+          {MOCK_SCHEDULE.map((item, index) => (
+            <ScheduleCard key={`${item.clinic}-${item.start}-${index}`} item={item} onPress={openSchedule} />
+          ))}
+        </ScrollView>
 
-          <View style={[styles.statCard, { backgroundColor: THEME.softPurple }]}>
-            <Text style={[styles.statNum, { color: THEME.accentPurple }]}>
-              {stats.waiting.toString().padStart(2, "0")}
-            </Text>
-            <Text style={styles.statLabel}>Waiting Now</Text>
-            <Ionicons name="people" size={24} color={THEME.accentPurple} style={styles.statIcon} />
+        <View style={styles.sectionRow}>
+          <View>
+            <Text style={styles.sectionTitle}>Today’s Snapshot</Text>
+            <Text style={styles.sectionSubtitle}>Live queue numbers and daily totals</Text>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Command Center</Text>
-        <View style={styles.actionGrid}>
-          <ActionTile
-            icon="calendar"
-            label="My Schedule"
+        <View style={styles.statsGrid}>
+          <StatCard
+            label="Total Patients"
+            value={String(stats.totalPatients)}
+            icon="people-outline"
+            tint={THEME.accentBlueSoft}
             color={THEME.accentBlue}
-            sub="Add / Update"
-            onPress={() => navigation.navigate("AddScheduleScreen")}
           />
-          <ActionTile
-            icon="list"
-            label="View Queue"
-            color={THEME.accentPurple}
-            sub={`${stats.waiting} Waiting`}
-            onPress={() => navigation.navigate("DoctorQueueControl")}
+          <StatCard
+            label="Waiting Now"
+            value={String(stats.waiting)}
+            icon="time-outline"
+            tint={THEME.accentAmberSoft}
+            color={THEME.accentAmber}
           />
-          <ActionTile
-            icon="search"
-            label="Search Patient"
-            color={THEME.textGray}
-            sub="Records"
-            onPress={() => navigation.navigate("DoctorPatients")}
-          />
-          <ActionTile
-            icon="receipt"
-            label="Prescriptions"
-            color={THEME.accentGreen}
-            sub="History"
-            onPress={() => navigation.navigate("DoctorPrescriptions")}
-          />
+        </View>
+
+        {loading && !refreshing ? (
+          <View style={styles.loadingState}>
+            <Text style={styles.loadingText}>Refreshing dashboard...</Text>
           </View>
-        </ScrollView>
-      </View>
+        ) : null}
+
+        <View style={{ height: 110 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-// Helper component for buttons
-const ActionTile = ({ icon, label, color, sub, onPress }: any) => (
-  <TouchableOpacity style={styles.tile} onPress={onPress}>
-    <View style={[styles.tileIcon, { backgroundColor: `${color}15` }]}>
-      <Ionicons name={icon} size={24} color={color} />
-    </View>
-    <Text style={styles.tileLabel}>{label}</Text>
-    <Text style={styles.tileSub}>{sub}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
-  container: { padding: 20 },
+  safe: {
+    flex: 1,
+    backgroundColor: THEME.white,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 16,
     backgroundColor: THEME.white,
+    gap: 12,
   },
-  body: { flex: 1, backgroundColor: THEME.background },
-  profileRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: THEME.background,
-    justifyContent: "center",
+  headerText: {
+    flex: 1,
+  },
+  greetingText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: THEME.textGray,
+  },
+  userName: {
+    marginTop: 4,
+    fontSize: 28,
+    fontWeight: "900",
+    color: THEME.textDark,
+  },
+  specializationText: {
+    marginTop: 6,
+    fontSize: 14,
+    color: THEME.textMuted,
+  },
+  settingsButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 18,
     alignItems: "center",
-  },
-  welcomeText: { fontSize: 13, color: THEME.textGray },
-  docName: { fontSize: 18, fontWeight: "800", color: THEME.textDark },
-  settingsBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: THEME.background,
     justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: THEME.accentBlueSoft,
   },
-
-  statsGrid: { flexDirection: "row", gap: 15, marginBottom: 20 },
-  statCard: { flex: 1, padding: 20, borderRadius: 28, height: 160, justifyContent: "space-between" },
-  statNum: { fontSize: 32, fontWeight: "900", color: THEME.accentBlue },
-  statLabel: { fontSize: 14, fontWeight: "700", color: THEME.textDark },
-  statGraphStub: { flexDirection: "row", alignItems: "flex-end", gap: 4, height: 30 },
-  graphBar: { width: 6, borderRadius: 3 },
-  statIcon: { alignSelf: "flex-end" },
-
-  focusCard: {
-    backgroundColor: THEME.textDark,
-    borderRadius: 32,
-    padding: 24,
-    marginBottom: 30,
-    elevation: 2,
-    shadowColor: THEME.textDark,
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
+  scroll: {
+    flex: 1,
+    backgroundColor: THEME.background,
   },
-  focusHeader: {
+  content: {
+    padding: 16,
+    gap: 16,
+  },
+  sectionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 15,
+    marginTop: 4,
   },
-  liveBadge: {
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: THEME.textDark,
+  },
+  sectionSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    color: THEME.textGray,
+  },
+  viewAllText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: THEME.accentBlue,
+  },
+  scheduleRow: {
+    paddingTop: 2,
+    gap: 14,
+  },
+  statsGrid: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    gap: 6,
+    gap: 14,
   },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: THEME.accentGreen },
-  liveText: { fontSize: 10, fontWeight: "800", color: THEME.white },
-  tokenText: { fontSize: 14, color: THEME.white, opacity: 0.7, fontWeight: "700" },
-  patientName: { fontSize: 24, fontWeight: "bold", color: THEME.white },
-  patientCondition: { fontSize: 14, color: THEME.white, opacity: 0.6, marginTop: 4, marginBottom: 20 },
-  startBtn: {
-    backgroundColor: THEME.accentBlue,
-    height: 56,
-    borderRadius: 18,
-    flexDirection: "row",
-    justifyContent: "center",
+  loadingState: {
     alignItems: "center",
-    gap: 10,
+    paddingTop: 6,
   },
-  startBtnText: { color: THEME.white, fontWeight: "bold", fontSize: 16 },
-
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: THEME.textDark, marginBottom: 15 },
-  actionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 15 },
-  tile: { width: (width - 55) / 2, backgroundColor: THEME.white, padding: 20, borderRadius: 24 },
-  tileIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 15,
+  loadingText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.textGray,
   },
-  tileLabel: { fontSize: 15, fontWeight: "700", color: THEME.textDark },
-  tileSub: { fontSize: 12, color: THEME.textGray, marginTop: 2 },
 });

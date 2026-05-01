@@ -91,7 +91,7 @@ export default function ExploreScreen() {
   const navigation = useNavigation<any>();
   const mapRef = useRef<MapView>(null);
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const listRef = useRef<FlatList<LocationItem>>(null);
+  const listRef = useRef<any>(null);
   const markerPressRef = useRef(false);
   const [selectedLocation, setSelectedLocation] = useState<LocationItem | null>(null);
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);

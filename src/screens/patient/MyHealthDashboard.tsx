@@ -166,6 +166,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 15,
   },
+  chartWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
   circularProgress: {
     width: 100,
     height: 100,

@@ -1,29 +1,31 @@
-import React, { useState, useContext } from "react";
+import React, { useContext, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { jwtDecode } from "jwt-decode";
+import { LinearGradient } from "expo-linear-gradient";
+import axios from "axios";
 import { AuthContext } from "../../utils/AuthContext";
-import { apiFetch } from "../../config/api";
+import { api } from "../../api/client";
 import { getExpoPushToken } from "../../services/notifications";
+import AuthLayout from "../../components/auth/AuthLayout";
+import AuthCard from "../../components/auth/AuthCard";
+import AuthHeader from "../../components/auth/AuthHeader";
+import AuthInput from "../../components/auth/AuthInput";
+import { AUTH_COLORS } from "../../components/auth/authTheme";
 
 export default function Login({ navigation }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const { refreshAuth } = useContext(AuthContext);
+  const { login } = useContext(AuthContext);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+    if (!email.trim() || !password.trim()) {
+      Alert.alert("Missing details", "Please enter both your email and password.");
       return;
     }
 
@@ -31,121 +33,133 @@ export default function Login({ navigation }: any) {
 
     try {
       const expoPushToken = await getExpoPushToken();
-      const response = await apiFetch("/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, expoPushToken }),
+      const response = await api.post("/auth/login", {
+        email: email.trim().toLowerCase(),
+        password,
+        expoPushToken,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setLoading(false);
-        Alert.alert("Login Failed", data.message || "Invalid credentials");
-        return;
-      }
-
-      // Save token
-      await AsyncStorage.setItem("token", data.token);
-
-      // Decode role
-      const decoded: any = jwtDecode(data.token);
-      console.log("Logged in as:", decoded.role);
-
-      // 🔥 Very important — refresh RootNavigator to show correct role tabs
-      await refreshAuth();
-
-      setLoading(false);
-      Alert.alert("Success", "Logged in successfully!");
-
+      await login(response.data.user ?? null, response.data.token);
     } catch (error) {
+      const message =
+        axios.isAxiosError(error) && typeof error.response?.data?.message === "string"
+          ? error.response.data.message
+          : "Unable to connect to server";
+      Alert.alert("Sign in failed", message);
+    } finally {
       setLoading(false);
-      Alert.alert("Error", "Unable to connect to server");
-      console.log("Login error:", error);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>HealthLink Login</Text>
+    <AuthLayout contentContainerStyle={styles.layoutContent}>
+      <LinearGradient colors={[AUTH_COLORS.background, "#FFFFFF"]} style={styles.hero}>
+        <AuthHeader
+          icon="pulse"
+          title="Welcome back"
+          subtitle="Sign in to continue with your HealthLink workspace."
+        />
+      </LinearGradient>
 
-      <TextInput
-        placeholder="Email"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-      />
+      <AuthCard style={styles.card}>
+            <AuthInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="name@healthlink.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              icon="mail-outline"
+              editable={!loading}
+            />
 
-      <TextInput
-        placeholder="Password"
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+            <AuthInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Enter your password"
+              secureTextEntry
+              icon="lock-closed-outline"
+              editable={!loading}
+            />
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleLogin}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Login</Text>
-        )}
-      </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.linkRow}
+              onPress={() => navigation.navigate("ForgotPassword")}
+            >
+              <Text style={styles.linkText}>Forgot password?</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+              activeOpacity={0.88}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Sign In</Text>
+              )}
+            </TouchableOpacity>
+      </AuthCard>
 
       <TouchableOpacity onPress={() => navigation.navigate("Register")}>
-        <Text style={styles.registerText}>Create an account</Text>
+        <Text style={styles.footerLink}>Create an account</Text>
       </TouchableOpacity>
-    </View>
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 30,
-    backgroundColor: "#F5F7FA",
+  layoutContent: {
+    paddingTop: 20,
+    paddingBottom: 28,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 40,
-    color: "#1976D2",
+  hero: {
+    borderRadius: 28,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    marginBottom: 14,
   },
-  input: {
-    width: "100%",
-    height: 50,
-    backgroundColor: "white",
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: "#d9d9d9",
+  card: {
+    marginBottom: 14,
   },
-  button: {
-    width: "100%",
-    height: 50,
-    backgroundColor: "#1976D2",
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 10,
-    marginTop: 10,
+  linkRow: {
+    alignSelf: "flex-end",
+    marginBottom: 14,
   },
-  buttonText: {
-    color: "white",
-    fontSize: 18,
+  linkText: {
+    color: AUTH_COLORS.primary,
+    fontSize: 14,
     fontWeight: "600",
   },
-  registerText: {
-    color: "#1976D2",
-    textAlign: "center",
-    marginTop: 20,
+  primaryButton: {
+    width: "100%",
+    minHeight: 56,
+    borderRadius: 14,
+    backgroundColor: AUTH_COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    shadowColor: AUTH_COLORS.primaryDark,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryButtonText: {
+    color: "#FFFFFF",
     fontSize: 16,
+    fontWeight: "600",
+  },
+  footerLink: {
+    textAlign: "center",
+    color: AUTH_COLORS.primaryDark,
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

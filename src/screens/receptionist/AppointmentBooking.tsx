@@ -1,25 +1,25 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
-  Dimensions,
+  ActivityIndicator,
+  Alert,
   FlatList,
+  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-
-const { width } = Dimensions.get("window");
+import { useFocusEffect } from "@react-navigation/native";
+import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
+import { useAuth } from "../../utils/AuthContext";
+import { createReceptionAppointment, fetchReceptionAppointments } from "../../services/receptionService";
 
 const THEME = {
   primary: "#2196F3",
-  primaryDark: "#1D4ED8",
-  secondary: "#2BB673",
   background: "#F5F7FB",
   white: "#FFFFFF",
   textPrimary: "#1A1C1E",
@@ -28,260 +28,263 @@ const THEME = {
   softBlue: "#E3F2FD",
 };
 
-type Doctor = {
-  id: string;
-  name: string;
-  specialty: string;
+type SessionItem = {
+  id: number;
+  date: string;
+  start_time: string;
+  end_time: string;
+  slot_duration: number;
+  max_patients: number;
+  doctor_name: string;
 };
 
-const DOCTORS: Doctor[] = [
-  { id: "1", name: "Dr. Silva", specialty: "Cardiologist" },
-  { id: "2", name: "Dr. Perera", specialty: "Dermatologist" },
-  { id: "3", name: "Dr. Fernando", specialty: "General Physician" },
-];
+type AppointmentItem = {
+  session_id: number | null;
+  time: string;
+  status: string;
+};
 
-const DATES = ["Mon 12", "Tue 13", "Wed 14", "Thu 15", "Fri 16", "Sat 17"];
-const SLOTS = ["09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "02:00 PM", "02:30 PM"];
+const buildSlots = (session: SessionItem | null) => {
+  if (!session) return [];
+  const [startHour, startMinute] = session.start_time.split(":").map(Number);
+  const [endHour, endMinute] = session.end_time.split(":").map(Number);
+  const slots: string[] = [];
+  const startTotal = startHour * 60 + startMinute;
+  const endTotal = endHour * 60 + endMinute;
+
+  for (
+    let total = startTotal, index = 0;
+    total + session.slot_duration <= endTotal && index < session.max_patients;
+    total += session.slot_duration, index += 1
+  ) {
+    const hour = Math.floor(total / 60);
+    const minute = total % 60;
+    slots.push(`${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`);
+  }
+
+  return slots;
+};
 
 export default function AppointmentBooking() {
-  const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
-
-  const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  useReceptionPermissionGuard("booking", "can_manage_appointments");
+  const { receptionistPermissions } = useAuth();
+  const canManageAppointments = receptionistPermissions.can_manage_appointments;
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [patientName, setPatientName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const isFormValid = Boolean(selectedDoc && selectedDate && selectedTime);
+  const loadBookingData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchReceptionAppointments();
+      setSessions(Array.isArray((data as any).sessions) ? (data as any).sessions : []);
+      setAppointments(Array.isArray((data as any).appointments) ? (data as any).appointments : []);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load booking data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const selectedDoctor = useMemo(
-    () => DOCTORS.find((doctor) => doctor.id === selectedDoc) ?? null,
-    [selectedDoc]
+  useFocusEffect(
+    useCallback(() => {
+      void loadBookingData();
+    }, [loadBookingData])
   );
 
-  const footerPadding = insets.bottom + tabBarHeight + 16;
+  const selectedSession = useMemo(
+    () => sessions.find((item) => item.id === selectedSessionId) ?? null,
+    [selectedSessionId, sessions]
+  );
+
+  const slots = useMemo(() => buildSlots(selectedSession), [selectedSession]);
+  const bookedTimes = useMemo(
+    () =>
+      new Set(
+        appointments
+          .filter((item) => item.session_id === selectedSessionId && String(item.status || "").toUpperCase() !== "CANCELLED")
+          .map((item) => item.time)
+      ),
+    [appointments, selectedSessionId]
+  );
+
+  const availableSlots = useMemo(
+    () => slots.filter((slot) => !bookedTimes.has(slot)),
+    [bookedTimes, slots]
+  );
+
+  const handleBook = async () => {
+    if (!selectedSessionId || !selectedTime || !patientName.trim()) {
+      Alert.alert("Missing Info", "Select a session, a time, and enter a patient name.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createReceptionAppointment({
+        sessionId: selectedSessionId,
+        time: selectedTime,
+        patientName: patientName.trim(),
+        phone: phone.trim() || undefined,
+      });
+      Alert.alert("Appointment Created", "The booking was created successfully.");
+      setSelectedTime(null);
+      setPatientName("");
+      setPhone("");
+      await loadBookingData();
+    } catch (bookingError) {
+      Alert.alert("Booking Failed", bookingError instanceof Error ? bookingError.message : "Unable to create booking.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-
-      <View style={styles.header}>
-        <View style={styles.headerText}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
           <Text style={styles.title}>Book Appointment</Text>
-          <Text style={styles.subtitle}>Assist patient booking</Text>
-        </View>
-        <TouchableOpacity style={styles.headerIcon}>
-          <Ionicons name="calendar-outline" size={22} color={THEME.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: footerPadding + 84 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.sectionLabel}>Select Doctor</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={DOCTORS}
-          contentContainerStyle={styles.listPadding}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => {
-            const active = selectedDoc === item.id;
-            return (
-              <TouchableOpacity
-                style={[styles.docCard, active && styles.activeDocCard]}
-                onPress={() => setSelectedDoc(item.id)}
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{item.name.charAt(3)}</Text>
-                </View>
-                <Text style={styles.docName}>{item.name}</Text>
-                <Text style={styles.docSpec}>{item.specialty}</Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-
-        <Text style={styles.sectionLabel}>Select Date</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={DATES}
-          contentContainerStyle={styles.listPadding}
-          keyExtractor={(item) => item}
-          renderItem={({ item }) => {
-            const active = selectedDate === item;
-            return (
-              <TouchableOpacity
-                style={[styles.datePill, active && styles.activePill]}
-                onPress={() => setSelectedDate(item)}
-              >
-                <Text style={[styles.dateText, active && styles.activeText]}>{item}</Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-
-        <Text style={styles.sectionLabel}>Available Slots</Text>
-        <View style={styles.slotGrid}>
-          {SLOTS.map((slot) => {
-            const active = selectedTime === slot;
-            return (
-              <TouchableOpacity
-                key={slot}
-                style={[styles.slot, active && styles.activeSlot]}
-                onPress={() => setSelectedTime(slot)}
-              >
-                <Text style={[styles.slotText, active && styles.activeSlotText]}>{slot}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          <Text style={styles.subtitle}>Create a clinic booking with live session slots</Text>
         </View>
 
-        {isFormValid ? (
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.sumLabel}>Appointment Summary</Text>
-              <Ionicons name="clipboard-outline" size={20} color={THEME.textSecondary} />
-            </View>
-            <Text style={styles.sumText}>
-              {selectedDate} • {selectedTime}
-            </Text>
-            <Text style={styles.sumText}>With {selectedDoctor?.name}</Text>
+        {loading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator size="large" color={THEME.primary} />
           </View>
-        ) : null}
-      </ScrollView>
+        ) : error ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorTitle}>Booking unavailable</Text>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : (
+          <>
+            {!canManageAppointments ? (
+              <View style={styles.infoCard}>
+                <Text style={styles.infoTitle}>Booking access removed</Text>
+                <Text style={styles.infoText}>
+                  You can review existing availability, but new booking actions are disabled.
+                </Text>
+              </View>
+            ) : null}
+            <Text style={styles.sectionLabel}>Select Session</Text>
+            <FlatList
+              horizontal
+              data={sessions}
+              keyExtractor={(item) => String(item.id)}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              renderItem={({ item }) => {
+                const active = selectedSessionId === item.id;
+                return (
+                  <TouchableOpacity
+                    style={[styles.sessionCard, active && styles.sessionCardActive, !canManageAppointments && styles.disabledCard]}
+                    onPress={() => setSelectedSessionId(item.id)}
+                    disabled={!canManageAppointments}
+                  >
+                    <Text style={[styles.sessionDoctor, active && styles.sessionDoctorActive]}>{item.doctor_name}</Text>
+                    <Text style={[styles.sessionMeta, active && styles.sessionMetaActive]}>{item.date}</Text>
+                    <Text style={[styles.sessionMeta, active && styles.sessionMetaActive]}>{item.start_time}-{item.end_time}</Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
 
-      <View style={[styles.footer, { paddingBottom: footerPadding }]}>
-        <TouchableOpacity
-          disabled={!isFormValid}
-          style={[styles.confirmBtn, !isFormValid && styles.disabledConfirmBtn]}
-        >
-          <LinearGradient
-            colors={isFormValid ? [THEME.primary, THEME.primaryDark] : ["#CBD5E1", "#CBD5E1"]}
-            style={styles.gradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Text style={styles.btnText}>Book Appointment</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
+            <Text style={styles.sectionLabel}>Available Slots</Text>
+            <View style={styles.slotsGrid}>
+              {availableSlots.map((slot) => {
+                const active = selectedTime === slot;
+                return (
+                  <TouchableOpacity
+                    key={slot}
+                    style={[styles.slotChip, active && styles.slotChipActive, !canManageAppointments && styles.disabledCard]}
+                    onPress={() => setSelectedTime(slot)}
+                    disabled={!canManageAppointments}
+                  >
+                    <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>{slot}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {selectedSession && availableSlots.length === 0 ? (
+                <Text style={styles.helperText}>No remaining slots for the selected session.</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.formCard}>
+              <Text style={styles.inputLabel}>Patient Name</Text>
+              <TextInput
+                value={patientName}
+                onChangeText={setPatientName}
+                placeholder="Enter patient name"
+                placeholderTextColor={THEME.textSecondary}
+                style={styles.input}
+                editable={canManageAppointments}
+              />
+              <Text style={styles.inputLabel}>Phone Number</Text>
+              <TextInput
+                value={phone}
+                onChangeText={setPhone}
+                placeholder="Enter phone number"
+                placeholderTextColor={THEME.textSecondary}
+                style={styles.input}
+                keyboardType="phone-pad"
+                editable={canManageAppointments}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.bookButton, (submitting || !canManageAppointments) && styles.bookButtonDisabled]}
+              onPress={() => void handleBook()}
+              disabled={submitting || !canManageAppointments}
+            >
+              {submitting ? <ActivityIndicator color={THEME.white} /> : <Text style={styles.bookButtonText}>Book Appointment</Text>}
+            </TouchableOpacity>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.background },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: THEME.white,
-    gap: 12,
-  },
-  headerText: { flex: 1 },
-  title: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
-  subtitle: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: THEME.background,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  scrollContent: { paddingBottom: 40 },
-  listPadding: { paddingHorizontal: 16, gap: 14 },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: THEME.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginLeft: 16,
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  docCard: {
-    width: 130,
-    minHeight: 156,
-    backgroundColor: THEME.white,
-    borderRadius: 20,
-    padding: 16,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    borderWidth: 1.5,
-    borderColor: "transparent",
-  },
-  activeDocCard: { borderColor: THEME.primary },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: THEME.softBlue,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  avatarText: { fontWeight: "800", color: THEME.primary },
-  docName: { fontSize: 15, fontWeight: "800", color: THEME.textPrimary, textAlign: "center" },
-  docSpec: { fontSize: 12, color: THEME.textSecondary, textAlign: "center", marginTop: 2 },
-  datePill: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: THEME.white,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  activePill: { backgroundColor: THEME.primary, borderColor: THEME.primary },
-  dateText: { fontWeight: "700", color: THEME.textSecondary },
-  activeText: { color: THEME.white },
-  slotGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 16, gap: 10 },
-  slot: {
-    width: (width - 64) / 3,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: THEME.white,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  activeSlot: { backgroundColor: THEME.primary, borderColor: THEME.primary },
-  slotText: { fontWeight: "700", color: THEME.textPrimary },
-  activeSlotText: { color: THEME.white },
-  summaryCard: {
-    backgroundColor: THEME.white,
-    margin: 16,
-    padding: 20,
-    borderRadius: 20,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  summaryRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-  sumLabel: { fontSize: 14, fontWeight: "800", color: THEME.textPrimary },
-  sumText: { fontSize: 14, color: THEME.textSecondary, marginTop: 4 },
-  footer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    backgroundColor: THEME.white,
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
-  },
-  confirmBtn: { height: 52, borderRadius: 26, overflow: "hidden" },
-  disabledConfirmBtn: { opacity: 0.6 },
-  gradient: { flex: 1, justifyContent: "center", alignItems: "center" },
-  btnText: { color: THEME.white, fontSize: 16, fontWeight: "800" },
+  content: { padding: 16, paddingBottom: 32 },
+  header: { marginBottom: 18 },
+  title: { fontSize: 26, fontWeight: "800", color: THEME.textPrimary },
+  subtitle: { marginTop: 6, fontSize: 14, color: THEME.textSecondary },
+  centerState: { paddingVertical: 72, alignItems: "center" },
+  errorCard: { backgroundColor: "#FEF2F2", borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#FECACA" },
+  errorTitle: { fontSize: 16, fontWeight: "800", color: "#B91C1C" },
+  errorText: { marginTop: 8, fontSize: 13, color: "#991B1B" },
+  infoCard: { backgroundColor: "#FFF7ED", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#FED7AA", marginBottom: 16 },
+  infoTitle: { fontSize: 14, fontWeight: "800", color: "#9A3412" },
+  infoText: { marginTop: 6, fontSize: 13, color: "#9A3412", lineHeight: 19 },
+  sectionLabel: { fontSize: 13, fontWeight: "800", color: THEME.textSecondary, marginBottom: 10, textTransform: "uppercase" },
+  horizontalList: { gap: 10, marginBottom: 18 },
+  sessionCard: { width: 180, backgroundColor: THEME.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: THEME.border },
+  sessionCardActive: { backgroundColor: THEME.primary, borderColor: THEME.primary },
+  disabledCard: { opacity: 0.5 },
+  sessionDoctor: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
+  sessionDoctorActive: { color: THEME.white },
+  sessionMeta: { marginTop: 6, fontSize: 13, color: THEME.textSecondary },
+  sessionMetaActive: { color: "#EAF1FF" },
+  slotsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
+  slotChip: { paddingHorizontal: 14, height: 38, borderRadius: 999, backgroundColor: THEME.white, borderWidth: 1, borderColor: THEME.border, alignItems: "center", justifyContent: "center" },
+  slotChipActive: { backgroundColor: THEME.primary, borderColor: THEME.primary },
+  slotChipText: { fontSize: 13, fontWeight: "700", color: THEME.textPrimary },
+  slotChipTextActive: { color: THEME.white },
+  helperText: { fontSize: 13, color: THEME.textSecondary },
+  formCard: { backgroundColor: THEME.white, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: THEME.border },
+  inputLabel: { fontSize: 13, fontWeight: "800", color: THEME.textSecondary, marginBottom: 8, marginTop: 4 },
+  input: { height: 48, borderRadius: 14, borderWidth: 1, borderColor: THEME.border, paddingHorizontal: 14, fontSize: 15, color: THEME.textPrimary, backgroundColor: "#FAFCFF", marginBottom: 14 },
+  bookButton: { height: 52, borderRadius: 18, backgroundColor: THEME.primary, alignItems: "center", justifyContent: "center", marginTop: 18 },
+  bookButtonDisabled: { opacity: 0.7 },
+  bookButtonText: { color: THEME.white, fontSize: 15, fontWeight: "800" },
 });

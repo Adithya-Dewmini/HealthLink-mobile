@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Toast from "react-native-toast-message";
 import { useNavigation } from "@react-navigation/native";
 import ClinicEndedModal from "../../components/ClinicEndedModal";
+import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
 import { notifyLocal } from "../../services/notifications";
 import { apiFetch } from "../../config/api";
 import {
@@ -23,7 +24,8 @@ import {
   skipPatient,
   endClinic,
 } from "../../services/doctorQueueService";
-import { socket } from "../../services/socket";
+import { connectSocket, joinDoctorRoom, joinSessionRoom, leaveSessionRoom, socket } from "../../services/socket";
+import { useAuth } from "../../utils/AuthContext";
 
 const THEME = {
   background: "#F3F6FB",
@@ -46,47 +48,97 @@ const THEME = {
 
 export default function QueueScreen() {
   const navigation = useNavigation<any>();
+  const { user } = useAuth();
   const [queue, setQueue] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [currentPatient, setCurrentPatient] = useState<any>(null);
   const [doctorId, setDoctorId] = useState<number | string | null>(null);
   const [showClinicEndedModal, setShowClinicEndedModal] = useState(false);
   const [todayShift, setTodayShift] = useState<{ start: string; end: string } | null>(null);
+  const sessionId = queue?.sessionId ?? null;
+  const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
+  const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
+
+  const showApprovalRequiredToast = () => {
+    Toast.show({
+      type: "info",
+      text1: "Approval required",
+      text2: "This feature is available after admin approval",
+    });
+  };
+
+  const isNotVerifiedError = (error: any) => {
+    return (
+      error?.response?.status === 403 &&
+      String(error?.response?.data?.message || "").toLowerCase().includes("not verified")
+    );
+  };
 
   const loadDashboard = async () => {
+    if (!isVerifiedDoctor) {
+      setQueue(null);
+      setPatients([]);
+      setCurrentPatient(null);
+      return;
+    }
+
     try {
       const token = await AsyncStorage.getItem("token"); // Ensure token is retrieved before API call
-      console.log("Stored token:", token);
       if (!token) return;
       const data = await getQueueDashboard(token);
       setQueue(data.queue ?? null);
       setPatients(data.patients ?? []);
       setCurrentPatient(data.currentPatient ?? null);
       setDoctorId(data?.doctor?.id ?? null);
-    } catch (error) {
-      console.log("Dashboard load error:", error);
+    } catch (error: any) {
+      if (isNotVerifiedError(error)) {
+        showApprovalRequiredToast();
+        return;
+      }
+      Toast.show({ type: "error", text1: "Unable to load queue" });
     }
   };
 
   const loadTodayShift = async () => {
+    if (!isVerifiedDoctor) {
+      setTodayShift(null);
+      return;
+    }
+
     try {
-      const res = await apiFetch("/api/doctor/availability");
-      if (!res.ok) return;
+      const res = await apiFetch("/api/doctors/availability");
+      if (!res.ok) {
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          const message = String(data?.message || "");
+          if (message.toLowerCase().includes("not verified")) {
+            showApprovalRequiredToast();
+            return;
+          }
+        }
+        return;
+      }
       const data = await res.json();
-      const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
-      const today = (Array.isArray(data) ? data : []).find(
-        (shift: any) => String(shift.day) === dayName
-      );
-      if (today?.start_time && today?.end_time) {
+      const dayKeys = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ] as const;
+      const todayKey = dayKeys[new Date().getDay()];
+      const today = Array.isArray(data?.availability?.[todayKey]) ? data.availability[todayKey][0] : null;
+      if (today?.start && today?.end) {
         setTodayShift({
-          start: String(today.start_time).slice(0, 5),
-          end: String(today.end_time).slice(0, 5),
+          start: String(today.start).slice(0, 5),
+          end: String(today.end).slice(0, 5),
         });
       } else {
         setTodayShift(null);
       }
-    } catch (error) {
-      console.log("Today shift load error:", error);
+    } catch {
       setTodayShift(null);
     }
   };
@@ -97,17 +149,21 @@ export default function QueueScreen() {
       await loadTodayShift();
     };
     void init();
-  }, []);
+  }, [isVerifiedDoctor]);
 
   useEffect(() => {
+    if (!isVerifiedDoctor) return;
     if (!doctorId) return;
-    socket.emit("joinDoctorRoom", { doctorId });
+    connectSocket();
+    joinDoctorRoom(doctorId);
+    if (sessionId) {
+      joinSessionRoom(sessionId);
+    }
 
     const handleQueueUpdated = async (data: any) => {
-      if (data?.doctorId !== doctorId) return;
-      if (!data?.queueId) return;
-
-      console.log("Queue update:", data);
+      if (sessionId && data?.sessionId && String(data.sessionId) !== String(sessionId)) return;
+      if (!sessionId && data?.doctorId !== doctorId) return;
+      if (!data?.queueId && !data?.sessionId) return;
 
       if (data?.type === "QUEUE_STARTED") {
         Toast.show({
@@ -140,13 +196,28 @@ export default function QueueScreen() {
       await loadDashboard();
     };
 
+    const handleReconnect = async () => {
+      joinDoctorRoom(doctorId);
+      if (sessionId) {
+        joinSessionRoom(sessionId);
+      }
+      await loadDashboard();
+    };
+
     socket.on("queue:update", handleQueueUpdated);
-    socket.on("queueUpdated", handleQueueUpdated);
+    socket.on("queue:next", handleQueueUpdated);
+    socket.on("session:start", handleQueueUpdated);
+    socket.on("connect", handleReconnect);
     return () => {
       socket.off("queue:update", handleQueueUpdated);
-      socket.off("queueUpdated", handleQueueUpdated);
+      socket.off("queue:next", handleQueueUpdated);
+      socket.off("session:start", handleQueueUpdated);
+      socket.off("connect", handleReconnect);
+      if (sessionId) {
+        leaveSessionRoom(sessionId);
+      }
     };
-  }, [doctorId]);
+  }, [doctorId, isVerifiedDoctor, sessionId]);
 
   const queueStatus = queue?.status || "NOT_STARTED";
   const isQueueEnded = queueStatus === "ENDED";
@@ -193,14 +264,15 @@ export default function QueueScreen() {
 
   // API Action Handlers
   const handleStartQueue = async () => {
-    console.log("START BUTTON CLICKED");
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     const token = await AsyncStorage.getItem("token");
     if (!token) return;
     try {
       const confirmStart = async () => {
-        console.log("Calling start queue API");
         const res = await startQueue(token);
-        console.log("API response:", res);
         Alert.alert("Clinic Status", res?.message ?? "Queue started");
         await loadDashboard();
       };
@@ -227,9 +299,10 @@ export default function QueueScreen() {
 
       await confirmStart();
     } catch (err: any) {
-      console.log("Start queue error:", err);
-      console.log("Start queue error status:", err?.response?.status);
-      console.log("Start queue error data:", err?.response?.data);
+      if (isNotVerifiedError(err)) {
+        showApprovalRequiredToast();
+        return;
+      }
       const backendMessage = err?.response?.data?.message;
       if (backendMessage === "No active shift found for this time") {
         Alert.alert(
@@ -243,6 +316,10 @@ export default function QueueScreen() {
   };
 
   const handleNextPatient = async () => {
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     try {
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
@@ -255,8 +332,11 @@ export default function QueueScreen() {
         navigation.navigate("ConsultationPage", { queueId: res.queueId });
       }
       await loadDashboard();
-    } catch (error) {
-      console.log("Failed to call next patient", error);
+    } catch (error: any) {
+      if (isNotVerifiedError(error)) {
+        showApprovalRequiredToast();
+        return;
+      }
       const err: any = error;
       if (err?.response?.status === 409) {
         void notifyLocal("Queue Empty", "There are no patients waiting.");
@@ -265,6 +345,10 @@ export default function QueueScreen() {
   };
 
   const handleCompleteConsultation = async () => {
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     try {
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
@@ -275,8 +359,11 @@ export default function QueueScreen() {
         Toast.show({ type: "success", text1: "Patient marked completed" });
       }
       await loadDashboard();
-    } catch (error) {
-      console.log("Failed to complete consultation", error);
+    } catch (error: any) {
+      if (isNotVerifiedError(error)) {
+        showApprovalRequiredToast();
+        return;
+      }
       Toast.show({
         type: "error",
         text1: "Unable to complete consultation",
@@ -285,6 +372,10 @@ export default function QueueScreen() {
   };
 
   const handleOpenConsultation = async () => {
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     const targetQueueId = currentPatient?.queue_id || queue?.id;
     if (!targetQueueId) {
       if (!isQueueActive) {
@@ -300,8 +391,11 @@ export default function QueueScreen() {
         }
         await loadDashboard();
         return;
-      } catch (error) {
-        console.log("Failed to open consultation", error);
+      } catch (error: any) {
+        if (isNotVerifiedError(error)) {
+          showApprovalRequiredToast();
+          return;
+        }
         Toast.show({ type: "error", text1: "Unable to open consultation" });
         return;
       }
@@ -309,6 +403,10 @@ export default function QueueScreen() {
     navigation.navigate("ConsultationPage", { queueId: targetQueueId });
   };
   const handleSkipPatient = async () => {
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     Alert.alert(
       "Skip Patient",
       "Are you sure you want to skip the current patient?",
@@ -318,15 +416,23 @@ export default function QueueScreen() {
           text: "Skip",
           style: "destructive",
           onPress: async () => {
-            const token = await AsyncStorage.getItem("token");
-            if (token) {
-              const res = await skipPatient(token);
-              if (res?.message === "No more patients in queue") {
-                void notifyLocal("Queue Empty", "No more patients waiting.");
-              } else {
-                void notifyLocal("Patient Skipped", "The current patient was marked as skipped.");
+            try {
+              const token = await AsyncStorage.getItem("token");
+              if (token) {
+                const res = await skipPatient(token);
+                if (res?.message === "No more patients in queue") {
+                  void notifyLocal("Queue Empty", "No more patients waiting.");
+                } else {
+                  void notifyLocal("Patient Skipped", "The current patient was marked as skipped.");
+                }
+                await loadDashboard();
               }
-              await loadDashboard();
+            } catch (error: any) {
+              if (isNotVerifiedError(error)) {
+                showApprovalRequiredToast();
+                return;
+              }
+              Toast.show({ type: "error", text1: "Unable to skip patient" });
             }
           },
         },
@@ -335,6 +441,10 @@ export default function QueueScreen() {
   };
 
   const handleEndClinic = async () => {
+    if (!isVerifiedDoctor) {
+      showApprovalRequiredToast();
+      return;
+    }
     Alert.alert(
       "End Clinic",
       "Are you sure you want to end today's clinic? This will mark remaining patients as MISSED.",
@@ -347,11 +457,15 @@ export default function QueueScreen() {
             const token = await AsyncStorage.getItem("token");
             if (!token) return;
             try {
-              const res = await endClinic(token);
+              await endClinic(token);
               setShowClinicEndedModal(true);
               await loadDashboard();
-            } catch (error) {
-              console.log("End clinic error:", error);
+            } catch (error: any) {
+              if (isNotVerifiedError(error)) {
+                showApprovalRequiredToast();
+                return;
+              }
+              Toast.show({ type: "error", text1: "Unable to end clinic" });
             }
           },
         },
@@ -405,6 +519,18 @@ export default function QueueScreen() {
           </View>
         </View>
 
+        {!isVerifiedDoctor ? <PendingApprovalBanner /> : null}
+
+        {!isVerifiedDoctor ? (
+          <View style={styles.pendingInfoCard}>
+            <Text style={styles.pendingInfoTitle}>Limited access</Text>
+            <Text style={styles.pendingInfoText}>
+              Your account is under review. You can explore your profile while waiting
+              for approval.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>CLINIC STATUS</Text>
           <Text style={styles.heroTitle}>{clinicStatusTitle}</Text>
@@ -413,7 +539,7 @@ export default function QueueScreen() {
           <View style={styles.heroActions}>
             <ActionTile
               icon="play"
-              label="Start"
+              label={isVerifiedDoctor ? "Start" : "Approval"}
               color={THEME.accentBlue}
               disabled={isQueueEnded}
               onPress={handleStartQueue}
@@ -473,7 +599,7 @@ export default function QueueScreen() {
               <TouchableOpacity
                 style={[styles.focusActionSecondary, styles.focusActionPrimaryAlt]}
                 onPress={handleOpenConsultation}
-                disabled={!currentPatient && !isQueueActive}
+                disabled={!isVerifiedDoctor ? false : (!currentPatient && !isQueueActive)}
               >
                 <Ionicons name="document-text-outline" size={16} color={THEME.white} />
                 <Text style={[styles.focusActionSecondaryText, styles.focusActionPrimaryAltText]}>
@@ -634,6 +760,25 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   heroActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
+  pendingInfoCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    padding: 16,
+    marginBottom: 16,
+  },
+  pendingInfoTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#B45309",
+    marginBottom: 6,
+  },
+  pendingInfoText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: THEME.textGray,
+  },
 
   actionTile: {
     backgroundColor: THEME.white,

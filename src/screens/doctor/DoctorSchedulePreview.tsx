@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
 
 const THEME = {
   background: "#F8FAFC",
@@ -29,9 +30,9 @@ type Shift = {
 };
 
 type Props = {
-  shifts: Shift[];
-  onConfirm: () => void;
-  onClose: () => void;
+  shifts?: Shift[];
+  onConfirm?: () => void;
+  onClose?: () => void;
 };
 
 const formatTime = (value: string) => {
@@ -41,7 +42,15 @@ const formatTime = (value: string) => {
   return `${hour12.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")} ${period}`;
 };
 
-export default function DoctorSchedulePreview({ shifts, onConfirm, onClose }: Props) {
+export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, onClose }: Props) {
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const shifts = useMemo<Shift[]>(
+    () => (Array.isArray(propShifts) ? propShifts : Array.isArray(route.params?.shifts) ? route.params.shifts : []),
+    [propShifts, route.params?.shifts]
+  );
+  const handleClose = onClose || (() => navigation.goBack());
+  const handleConfirm = onConfirm || (() => navigation.goBack());
   const totalHours = shifts.reduce((acc, shift) => {
     const start = new Date(`1970-01-01T${shift.start_time}`);
     const end = new Date(`1970-01-01T${shift.end_time}`);
@@ -55,11 +64,11 @@ export default function DoctorSchedulePreview({ shifts, onConfirm, onClose }: Pr
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onClose}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleClose}>
           <Ionicons name="chevron-back" size={24} color={THEME.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Weekly Schedule</Text>
-        <TouchableOpacity style={styles.editBtn} onPress={onClose}>
+        <TouchableOpacity style={styles.editBtn} onPress={handleClose}>
           <Text style={styles.editBtnText}>Edit</Text>
         </TouchableOpacity>
       </View>
@@ -115,6 +124,12 @@ export default function DoctorSchedulePreview({ shifts, onConfirm, onClose }: Pr
           </View>
         ))}
 
+        {!onConfirm && shifts.length > 0 ? (
+          <TouchableOpacity style={styles.doneButton} activeOpacity={0.9} onPress={handleConfirm}>
+            <Text style={styles.doneButtonText}>Done</Text>
+          </TouchableOpacity>
+        ) : null}
+
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -151,6 +166,10 @@ const styles = StyleSheet.create({
     shadowColor: "#000",
     shadowOpacity: 0.2,
     shadowRadius: 15,
+  },
+  heroInfo: {
+    flex: 1,
+    paddingRight: 16,
   },
   heroLabel: { color: THEME.white, opacity: 0.7, fontSize: 12, fontWeight: "600", textTransform: "uppercase" },
   heroValue: { color: THEME.white, fontSize: 28, fontWeight: "800", marginTop: 4 },
@@ -203,5 +222,18 @@ const styles = StyleSheet.create({
   timeText: { fontSize: 14, fontWeight: "700", color: THEME.textDark },
   capacityRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   capacityText: { fontSize: 13, color: THEME.textGray, fontWeight: "500" },
-
+  doneButton: {
+    backgroundColor: THEME.accentBlue,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  doneButtonText: {
+    color: THEME.white,
+    fontSize: 15,
+    fontWeight: "800",
+  },
 });

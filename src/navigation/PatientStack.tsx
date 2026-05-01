@@ -3,6 +3,7 @@ import type { PatientStackParamList } from "../types/navigation";
 import PatientTabs from "./PatientTabs";
 import Settings from "../screens/patient/Settings";
 import Queue from "../screens/patient/Queue";
+import ClinicDetailsScreen from "../screens/patient/ClinicDetailsScreen";
 import HeartRate from "../screens/patient/HeartRate";
 import Sleep from "../screens/patient/Sleep";
 import MedicalHistoryScreen from "../screens/patient/MedicalHistoryScreen";
@@ -11,7 +12,7 @@ import DoctorAvailabilityScreen from "../screens/patient/DoctorAvailabilityScree
 import Appointments from "../screens/patient/Appointments";
 import BookAppointmentScreen from "../screens/patient/BookAppointmentScreen";
 import AppointmentSummaryScreen from "../screens/patient/AppointmentSummaryScreen";
-import PrescriptionScreen from "../screens/patient/PrescriptionScreen";
+import ProfileEditScreen from "../screens/profile/ProfileEditScreen";
 import PrescriptionDetails from "../screens/patient/PrescriptionDetails";
 import Prescriptions from "../screens/patient/Prescriptions";
 import MedicineTracker from "../screens/patient/MedicineTracker";
@@ -20,10 +21,8 @@ import FavoriteScreen from "../screens/patient/FavoriteScreen";
 import SymptomCheckerScreen from "../screens/patient/SymptomCheckerScreen";
 import MedicineSearchScreen from "../screens/patient/MedicineSearchScreen";
 import PharmacyMarketplace from "../screens/patient/PharmacyMarketplace";
-import QuickActionsFab from "../screens/patient/QuickActionsFab";
 import PharmacyStoreScreen from "../screens/patient/PharmacyStoreScreen";
 import MyHealthDashboard from "../screens/patient/MyHealthDashboard";
-import ExploreScreen from "../screens/patient/ExploreScreen";
 
 const Stack = createNativeStackNavigator<PatientStackParamList>();
 
@@ -39,6 +38,18 @@ export default function PatientStack() {
       <Stack.Screen
         name="PatientSettings"
         component={Settings}
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
+        name="ProfileEdit"
+        component={ProfileEditScreen}
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
+        name="PatientClinicDetails"
+        component={ClinicDetailsScreen}
         options={{ headerShown: false }}
       />
 
@@ -97,12 +108,6 @@ export default function PatientStack() {
       />
 
       <Stack.Screen
-        name="PrescriptionScreen"
-        component={PrescriptionScreen}
-        options={{ headerShown: false }}
-      />
-
-      <Stack.Screen
         name="PrescriptionDetails"
         component={PrescriptionDetails}
         options={{ headerShown: false }}
@@ -149,13 +154,6 @@ export default function PatientStack() {
         component={PharmacyMarketplace}
         options={{ headerShown: false }}
       />
-
-      <Stack.Screen
-        name="QuickActionsFab"
-        component={QuickActionsFab}
-        options={{ headerShown: false }}
-      />
-
       <Stack.Screen
         name="PharmacyStore"
         component={PharmacyStoreScreen}
@@ -168,11 +166,6 @@ export default function PatientStack() {
         options={{ headerShown: false }}
       />
 
-      <Stack.Screen
-        name="ExploreScreen"
-        component={ExploreScreen}
-        options={{ headerShown: false }}
-      />
     </Stack.Navigator>
   );
 }

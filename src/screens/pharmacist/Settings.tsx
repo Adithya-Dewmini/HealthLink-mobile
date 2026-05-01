@@ -1,5 +1,8 @@
 import React, { useContext, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
+  Image,
   View,
   Text,
   StyleSheet,
@@ -11,6 +14,8 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../../utils/AuthContext";
+import { apiFetch } from "../../config/api";
+import { uploadPharmacyCover, uploadPharmacyLogo } from "../../services/mediaUploadService";
 
 const THEME = {
   primary: "#2BB673",
@@ -29,6 +34,85 @@ export default function SettingsScreen() {
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [expiryAlert, setExpiryAlert] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
+  const [uploading, setUploading] = useState<"logo" | "cover" | null>(null);
+  const [pharmacy, setPharmacy] = useState<{
+    id: number;
+    name: string;
+    location?: string | null;
+    image_url?: string | null;
+    logo_url?: string | null;
+    cover_image_url?: string | null;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const loadPharmacy = async () => {
+      try {
+        const response = await apiFetch("/api/pharmacy/profile");
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        setPharmacy(data ?? null);
+      } catch (error) {
+        console.log("Pharmacy settings load error:", error);
+      }
+    };
+
+    void loadPharmacy();
+  }, []);
+
+  const handleLogoUpload = async () => {
+    if (!pharmacy?.id) {
+      return;
+    }
+
+    Alert.alert("Change Image", "Do you want to update this image?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Upload",
+        onPress: async () => {
+          try {
+            setUploading("logo");
+            const response = await uploadPharmacyLogo(String(pharmacy.id));
+            const logoUrl = response?.data?.logoUrl ?? null;
+            if (logoUrl) {
+              setPharmacy((prev) => (prev ? { ...prev, logo_url: logoUrl } : prev));
+            }
+          } finally {
+            setUploading(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleCoverUpload = async () => {
+    if (!pharmacy?.id) {
+      return;
+    }
+
+    Alert.alert("Change Image", "Do you want to update this image?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Upload",
+        onPress: async () => {
+          try {
+            setUploading("cover");
+            const response = await uploadPharmacyCover(String(pharmacy.id));
+            const coverUrl = response?.data?.coverUrl ?? null;
+            if (coverUrl) {
+              setPharmacy((prev) =>
+                prev ? { ...prev, cover_image_url: coverUrl, image_url: coverUrl } : prev
+              );
+            }
+          } finally {
+            setUploading(null);
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -47,13 +131,47 @@ export default function SettingsScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>
-          <View style={styles.profileRow}>
-            <View style={styles.logoContainer}>
-              <MaterialCommunityIcons name="plus-box" size={32} color={THEME.primary} />
+          <TouchableOpacity style={styles.coverShell} onPress={handleCoverUpload} activeOpacity={0.9}>
+            {pharmacy?.cover_image_url || pharmacy?.image_url ? (
+              <Image
+                source={{ uri: pharmacy?.cover_image_url || pharmacy?.image_url || undefined }}
+                style={styles.coverImage}
+              />
+            ) : (
+              <View style={styles.coverFallback}>
+                <MaterialCommunityIcons name="plus-box" size={42} color={THEME.primary} />
+              </View>
+            )}
+            <View style={styles.editIcon}>
+              {uploading === "cover" ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.editIconText}>✏️</Text>
+              )}
             </View>
+          </TouchableOpacity>
+          <View style={styles.profileRow}>
+            <TouchableOpacity
+              style={styles.logoContainer}
+              onPress={handleLogoUpload}
+              activeOpacity={0.9}
+            >
+              {pharmacy?.logo_url ? (
+                <Image source={{ uri: pharmacy.logo_url }} style={styles.logoImage} />
+              ) : (
+                <MaterialCommunityIcons name="plus-box" size={32} color={THEME.primary} />
+              )}
+              <View style={styles.logoEditIcon}>
+                {uploading === "logo" ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.editIconText}>✏️</Text>
+                )}
+              </View>
+            </TouchableOpacity>
             <View style={{ flex: 1 }}>
-              <Text style={styles.pharmacyName}>HealthLink Pharmacy</Text>
-              <Text style={styles.pharmacyLoc}>Colombo, Sri Lanka</Text>
+              <Text style={styles.pharmacyName}>{pharmacy?.name || "HealthLink Pharmacy"}</Text>
+              <Text style={styles.pharmacyLoc}>{pharmacy?.location || "Colombo, Sri Lanka"}</Text>
             </View>
             <TouchableOpacity style={styles.editBtn}>
               <Text style={styles.editBtnText}>Edit</Text>
@@ -166,12 +284,64 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 20, paddingBottom: 40 },
 
   profileCard: { backgroundColor: THEME.white, borderRadius: THEME.cardRadius, padding: 20, marginBottom: 25, elevation: 3, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 10 },
+  coverShell: {
+    height: 148,
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 18,
+    position: "relative",
+    backgroundColor: "#ECFDF5",
+  },
+  coverImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  coverFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ECFDF5",
+  },
   profileRow: { flexDirection: "row", alignItems: "center", gap: 15 },
-  logoContainer: { width: 60, height: 60, borderRadius: 15, backgroundColor: THEME.background, justifyContent: "center", alignItems: "center" },
+  logoContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 15,
+    backgroundColor: THEME.background,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  logoImage: { width: "100%", height: "100%", resizeMode: "cover" },
   pharmacyName: { fontSize: 18, fontWeight: "800", color: THEME.textPrimary },
   pharmacyLoc: { fontSize: 13, color: THEME.textMuted, marginTop: 2 },
   editBtn: { backgroundColor: THEME.background, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   editBtnText: { fontSize: 12, fontWeight: "700", color: THEME.primary },
+  editIcon: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(43, 182, 115, 0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoEditIcon: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(43, 182, 115, 0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editIconText: { fontSize: 12 },
 
   groupContainer: { marginBottom: 25 },
   groupTitle: { fontSize: 13, fontWeight: "800", color: THEME.textMuted, textTransform: "uppercase", marginBottom: 12, marginLeft: 5, letterSpacing: 0.8 },

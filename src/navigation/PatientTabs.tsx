@@ -1,20 +1,17 @@
-import React, { useContext } from "react";
+import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import Dashboard from "../screens/patient/Dashboard";
-import DoctorSearchScreen from "../screens/patient/DoctorSearchScreen";
+import MedicalCenterHubScreen from "../screens/patient/MedicalCenterHubScreen";
 import PharmacyMarketplace from "../screens/patient/PharmacyMarketplace";
 import ExploreScreen from "../screens/patient/ExploreScreen";
 import MyProfile from "../screens/patient/MyProfile";
 import { TouchableOpacity, View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { AuthContext } from "../utils/AuthContext";
 import type { PatientTabParamList } from "../types/navigation";
 
 const Tab = createBottomTabNavigator<PatientTabParamList>();
 
 export default function PatientTabs() {
-  useContext(AuthContext); // keep context ready for children
-
   return (
     <Tab.Navigator
       screenOptions={({ route, navigation }) => ({
@@ -72,12 +69,12 @@ export default function PatientTabs() {
       />
       <Tab.Screen
         name="PatientAppointments"
-        component={DoctorSearchScreen}
+        component={MedicalCenterHubScreen}
         options={{
-          tabBarLabel: "Doctor Hub",
+          tabBarLabel: "Centers",
           headerShown: false,
           tabBarIcon: ({ color }) => (
-            <Ionicons name="search" size={22} color={color} />
+            <Ionicons name="business-outline" size={22} color={color} />
           ),
         }}
       />

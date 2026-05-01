@@ -2,19 +2,97 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 
 export type AuthStackParamList = {
   Login: undefined;
+  ForgotPassword: undefined;
   Register: undefined;
   RegisterPatient: undefined;
   RegisterDoctor: undefined;
+  RegisterDoctorSuccess: {
+    doctorId: number;
+    status: "pending";
+    email: string;
+    setupToken?: string;
+  };
   RegisterPharmacist: undefined;
-  RegisterReceptionist: undefined;
-  RegisterMedicalCenterAdmin: undefined;
-  SetPassword: { token?: string } | undefined;
+  RegisterMedicalCenter: undefined;
+};
+
+export type RootStackParamList = {
+  AuthStack: NavigatorScreenParams<AuthStackParamList> | undefined;
+  SetPassword:
+    | {
+        token?: string;
+        email?: string;
+        role?: string;
+        autoLogin?: boolean;
+      }
+    | undefined;
+  PasswordSetupSuccess:
+    | {
+        role?: string;
+        email?: string;
+        autoLogin?: boolean;
+      }
+    | undefined;
+  PasswordSetupWelcome:
+    | {
+        role?: string;
+        email?: string;
+      }
+    | undefined;
+  AuthSuccess:
+    | {
+        icon?: "checkmark-circle" | "shield-checkmark" | "sparkles";
+        title: string;
+        subtitle: string;
+        message?: string;
+        actionLabel: string;
+        target:
+          | "Login"
+          | "PatientStack"
+          | "Doctor"
+          | "PharmacistStack"
+          | "AdminTabs"
+          | "ReceptionistTabs"
+          | "MedicalCenterTabs";
+      }
+    | undefined;
+  PatientStack: NavigatorScreenParams<PatientStackParamList> | undefined;
+  Doctor: undefined;
+  PharmacistStack: undefined;
+  AdminTabs: undefined;
+  ReceptionistTabs: undefined;
+  MedicalCenterTabs: NavigatorScreenParams<MedicalCenterStackParamList> | undefined;
 };
 
 export type MedicalCenterStackParamList = {
   MedicalCenterTabsRoot: undefined;
   MedicalCenterSettings: undefined;
+  MedicalCenterSpecialties: undefined;
   MedicalCenterAddReceptionist: undefined;
+  MedicalCenterAddDoctor: undefined;
+  MedicalCenterDoctorProfile: { doctorId: number };
+  MedicalCenterDoctorDetails: {
+    doctorId: number;
+    doctorUserId: number;
+    status: "ACTIVE" | "PENDING" | "INACTIVE";
+  };
+  MedicalCenterDoctorSchedule: {
+    doctorId: number;
+    doctorUserId: number;
+    doctorName?: string;
+    specialization?: string | null;
+    initialTab?: "routine" | "manual";
+    suggestedDate?: string;
+    suggestedStartTime?: string;
+    suggestedEndTime?: string;
+    suggestedMaxPatients?: number | null;
+  };
+  MedicalCenterDoctorAvailability: {
+    doctorId: number;
+    doctorUserId: number;
+    doctorName?: string;
+    specialization?: string | null;
+  };
 };
 
 export type PatientTabParamList = {
@@ -27,8 +105,20 @@ export type PatientTabParamList = {
 
 export type PatientStackParamList = {
   PatientTabs: NavigatorScreenParams<PatientTabParamList> | undefined;
+  ProfileEdit: undefined;
   PatientSettings: undefined;
-  PatientQueue: { doctorId?: number };
+  PatientClinicDetails: {
+    clinicId: string;
+    clinicName: string;
+    location: string;
+    status: string;
+    image: string;
+    rating: number;
+    waitTime: string;
+    nextAvailable: string;
+    specialty: string;
+  };
+  PatientQueue: { doctorId?: number; clinicId?: string; sessionId?: number };
   HeartRateScreen: undefined;
   SleepTrackerScreen: undefined;
   MedicalHistoryScreen: undefined;
@@ -38,10 +128,18 @@ export type PatientStackParamList = {
         doctorId?: number;
       }
     | undefined;
-  DoctorAvailabilityScreen: { doctorId: number };
+  DoctorAvailabilityScreen: {
+    doctorId: number;
+    clinicId: string;
+    clinicName?: string;
+    doctorName?: string;
+    specialty?: string;
+  };
   Appointments: undefined;
   BookAppointmentScreen: {
     doctorId?: number;
+    clinicId?: string;
+    clinicName?: string;
     doctorName?: string;
     specialty?: string;
     experienceYears?: number;
@@ -60,7 +158,6 @@ export type PatientStackParamList = {
     queueOpensAt?: string;
     doctorId?: number;
   };
-  PrescriptionScreen: { token: string };
   PrescriptionDetails: { id: string };
   PatientPrescriptions: undefined;
   MedicineTracker: undefined;
@@ -69,8 +166,6 @@ export type PatientStackParamList = {
   SymptomChecker: undefined;
   MedicineSearch: undefined;
   PharmacyMarketplace: undefined;
-  QuickActionsFab: undefined;
   PharmacyStore: { pharmacyId: number };
   MyHealthDashboard: undefined;
-  ExploreScreen: undefined;
 };

@@ -1,20 +1,19 @@
+import type { LinkingOptions } from "@react-navigation/native";
+import type { RootStackParamList } from "../types/navigation";
+
 const prefixes = [
   "healthlink://",
   ...(process.env.EXPO_PUBLIC_APP_WEB_URL ? [process.env.EXPO_PUBLIC_APP_WEB_URL] : []),
 ];
 
-export const linking: any = {
+export const linking: LinkingOptions<RootStackParamList> = {
   prefixes,
   config: {
     screens: {
-      AuthStack: {
-        screens: {
-          SetPassword: {
-            path: "set-password",
-            parse: {
-              token: (value: string) => value,
-            },
-          },
+      SetPassword: {
+        path: "set-password",
+        parse: {
+          token: (value: string) => value,
         },
       },
     },

@@ -31,6 +31,7 @@ const THEME = {
 };
 
 type QueueStatus = {
+  sessionId?: number | null;
   status?: string;
   queueStarted?: boolean;
   currentToken?: number | null;
@@ -47,6 +48,7 @@ export default function BluePatientDashboard() {
   const [nextBooking, setNextBooking] = useState<any | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -57,17 +59,22 @@ export default function BluePatientDashboard() {
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const profileRes = await apiFetch("/api/patients/me");
-      if (profileRes.ok) {
-        const profile = await profileRes.json();
+      const [profileResult, bookingResult, prescriptionResult] = await Promise.allSettled([
+        apiFetch("/api/patients/me"),
+        apiFetch("/api/patients/bookings"),
+        apiFetch("/api/patients/prescriptions?latest=true"),
+      ]);
+
+      if (profileResult.status === "fulfilled" && profileResult.value.ok) {
+        const profile = await profileResult.value.json();
         setProfileName(profile?.name ?? "Patient");
       }
 
-      const bookingRes = await apiFetch("/api/patients/bookings");
       let selectedBooking: any | null = null;
-      if (bookingRes.ok) {
-        const bookingData = await bookingRes.json();
+      if (bookingResult.status === "fulfilled" && bookingResult.value.ok) {
+        const bookingData = await bookingResult.value.json();
         const upcoming = (Array.isArray(bookingData) ? bookingData : [])
           .filter((item: any) => String(item?.status ?? "booked") !== "cancelled")
           .map((item: any) => {
@@ -85,17 +92,20 @@ export default function BluePatientDashboard() {
         setNextBooking(null);
       }
 
-      const prescriptionRes = await apiFetch("/api/patients/prescriptions?latest=true");
-      if (prescriptionRes.ok) {
-        const data = await prescriptionRes.json();
+      if (prescriptionResult.status === "fulfilled" && prescriptionResult.value.ok) {
+        const data = await prescriptionResult.value.json();
         setLatestPrescription(data ?? null);
       } else {
         setLatestPrescription(null);
       }
 
       if (selectedBooking?.doctor_id) {
+        const selectedClinicId =
+          selectedBooking?.medical_center_id ?? selectedBooking?.clinic_id ?? null;
         const queueRes = await apiFetch(
-          `/api/patients/doctor/queue-status/${selectedBooking.doctor_id}`
+          `/api/patients/doctor/queue-status/${selectedBooking.doctor_id}${
+            selectedClinicId ? `?clinicId=${encodeURIComponent(selectedClinicId)}` : ""
+          }`
         );
         if (queueRes.ok) {
           const queueData = await queueRes.json();
@@ -106,8 +116,22 @@ export default function BluePatientDashboard() {
       } else {
         setQueueStatus(null);
       }
+
+      const failedRequests = [profileResult, bookingResult, prescriptionResult].filter(
+        (result) => result.status === "rejected"
+      );
+
+      if (failedRequests.length > 0) {
+        const firstError = failedRequests[0] as PromiseRejectedResult;
+        const message =
+          firstError.reason instanceof Error
+            ? firstError.reason.message
+            : "Some dashboard data could not be loaded";
+        setLoadError(message);
+      }
     } catch (err) {
       console.error("Dashboard load error:", err);
+      setLoadError(err instanceof Error ? err.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
     }
@@ -176,6 +200,12 @@ export default function BluePatientDashboard() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {loadError ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
+            <Text style={styles.errorBannerText}>{loadError}</Text>
+          </View>
+        ) : null}
         
         {/* 2. Dynamic Main Card (Blue Gradient) */}
         {currentStatus === "queue" && (
@@ -214,6 +244,8 @@ export default function BluePatientDashboard() {
               onPress={() =>
                 navigation.navigate("PatientQueue", {
                   doctorId: nextBooking?.doctor_id,
+                  clinicId: nextBooking?.medical_center_id ?? nextBooking?.clinic_id,
+                  sessionId: queueStatus?.sessionId ? Number(queueStatus.sessionId) : undefined,
                 })
               }
             >
@@ -383,6 +415,22 @@ const styles = StyleSheet.create({
   notifDot: { position: 'absolute', top: 14, right: 15, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 2, borderColor: THEME.white },
 
   scrollContent: { paddingHorizontal: 20, paddingTop: 12 },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#991B1B",
+  },
   
   // Main Status Card
   mainCard: {

@@ -33,6 +33,14 @@ const THEME = {
   danger: "#DC2626",
 };
 
+type AppointmentRoute = {
+  key: string;
+  title: string;
+  status: AppointmentStatus;
+};
+
+const LooseTabBar = TabBar as any;
+
 export default function Appointments() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
@@ -43,7 +51,7 @@ export default function Appointments() {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduleBooking, setRescheduleBooking] = useState<AppointmentItem | null>(null);
-  const routes = useMemo(
+  const routes = useMemo<AppointmentRoute[]>(
     () => [
       { key: "upcoming", title: "Upcoming", status: "UPCOMING" as AppointmentStatus },
       { key: "completed", title: "Completed", status: "COMPLETED" as AppointmentStatus },
@@ -167,12 +175,12 @@ export default function Appointments() {
 
   const handleRebook = useCallback(
     (appointment: AppointmentItem) => {
-      navigation.navigate("BookAppointmentScreen", {
-        doctorId: appointment.doctorId ?? undefined,
-        doctorName: appointment.doctor,
-      });
+      Alert.alert(
+        "Clinic Required",
+        "Rebooking now requires a clinic context. Open the doctor from a clinic to rebook."
+      );
     },
-    [navigation]
+    []
   );
 
   const handleViewSummary = useCallback((appointment: AppointmentItem) => {
@@ -230,13 +238,13 @@ export default function Appointments() {
   );
 
   const renderScene = useCallback(
-    ({ route }: { route: (typeof routes)[number] }) => renderAppointmentList(route.status),
-    [renderAppointmentList, routes]
+    ({ route }: { route: AppointmentRoute }) => renderAppointmentList(route.status),
+    [renderAppointmentList]
   );
 
   const renderTabBar = useCallback(
     (props: Parameters<typeof TabBar>[0]) => (
-      <TabBar
+      <LooseTabBar
         {...props}
         scrollEnabled
         style={styles.tabBar}
@@ -245,15 +253,12 @@ export default function Appointments() {
         indicatorStyle={styles.tabIndicator}
         activeColor={THEME.primary}
         inactiveColor={THEME.textMuted}
-        labelStyle={styles.tabLabelBase}
         pressColor="transparent"
-        renderLabel={({ route, focused }) => (
+        renderLabel={({ route, focused }: any) => (
           <View style={styles.tabInner}>
             <Text style={[styles.tabText, focused && styles.tabTextActive]}>{route.title}</Text>
             <View style={[styles.countBadge, focused && styles.countBadgeActive]}>
-              <Text style={[styles.countText, focused && styles.countTextActive]}>
-                {counts[(route as (typeof routes)[number]).status]}
-              </Text>
+              <Text style={[styles.countText, focused && styles.countTextActive]}>{counts[(route as AppointmentRoute).status]}</Text>
             </View>
           </View>
         )}
@@ -284,7 +289,7 @@ export default function Appointments() {
 
       <TabView
         navigationState={{ index, routes }}
-        renderScene={renderScene}
+        renderScene={renderScene as any}
         onIndexChange={setIndex}
         renderTabBar={renderTabBar}
         initialLayout={{ width: Dimensions.get("window").width }}

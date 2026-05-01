@@ -10,6 +10,7 @@ import {
   StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
 
 const THEME = {
   background: "#F2F5F9",
@@ -26,6 +27,7 @@ const THEME = {
 };
 
 export default function PatientsScreen() {
+  const navigation = useNavigation<any>();
   const [filter, setFilter] = useState("All");
 
   const patients = [
@@ -60,9 +62,14 @@ export default function PatientsScreen() {
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.88}>
+            <Ionicons name="arrow-back" size={22} color={THEME.textDark} />
+          </TouchableOpacity>
+          <View>
           <Text style={styles.headerTitle}>Patient Records</Text>
           <Text style={styles.headerSub}>Search and manage history</Text>
+          </View>
         </View>
       </View>
 
@@ -136,8 +143,21 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     backgroundColor: THEME.white,
   },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   headerTitle: { fontSize: 24, fontWeight: "800", color: THEME.textDark },
   headerSub: { fontSize: 13, color: THEME.textGray, marginTop: 2 },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: THEME.background,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   settingsBtn: {
     width: 44,
     height: 44,

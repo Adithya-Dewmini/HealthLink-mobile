@@ -1,10 +1,7 @@
-import axios from "axios";
-import { API_BASE_URL } from "../config/api";
-
-const API_URL = `${API_BASE_URL}/api`;
+import { api } from "./apiClient";
 
 export const createConsultationDraft = async (token: string, payload: any) => {
-  const res = await axios.post(`${API_URL}/consultations`, payload, {
+  const res = await api.post("/api/consultations", payload, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
@@ -15,8 +12,8 @@ export const updateConsultationDraft = async (
   consultationId: number | string,
   payload: any
 ) => {
-  const res = await axios.patch(
-    `${API_URL}/consultations/${consultationId}`,
+  const res = await api.patch(
+    `/api/consultations/${consultationId}`,
     payload,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -28,8 +25,8 @@ export const saveConsultationMedicines = async (
   consultationId: number | string,
   medicines: any[]
 ) => {
-  const res = await axios.post(
-    `${API_URL}/consultations/${consultationId}/medicines`,
+  const res = await api.post(
+    `/api/consultations/${consultationId}/medicines`,
     { medicines },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -41,8 +38,8 @@ export const completeConsultation = async (
   consultationId: number | string,
   medicines: any[]
 ) => {
-  const res = await axios.post(
-    `${API_URL}/consultations/${consultationId}/complete`,
+  const res = await api.post(
+    `/api/consultations/${consultationId}/complete`,
     { medicines },
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -50,7 +47,7 @@ export const completeConsultation = async (
 };
 
 export const searchMedicines = async (token: string, q: string) => {
-  const res = await axios.get(`${API_URL}/medicines`, {
+  const res = await api.get("/api/medicines", {
     headers: { Authorization: `Bearer ${token}` },
     params: { q },
   });

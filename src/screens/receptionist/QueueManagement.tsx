@@ -1,6 +1,9 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
+  RefreshControl,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -8,13 +11,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import QueueHeroCard from "../../components/receptionist/queue/QueueHeroCard";
-import QueueListItem from "../../components/receptionist/queue/QueueListItem";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
+import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
+import { useAuth } from "../../utils/AuthContext";
 import {
-  DEFAULT_RECEPTION_QUEUE,
-  normalizeReceptionQueueData,
-} from "../../utils/receptionistQueue";
+  fetchReceptionQueue,
+  queueCompletePatient,
+  queueMissPatient,
+  queueNextPatient,
+} from "../../services/receptionService";
 
 const THEME = {
   primary: "#2196F3",
@@ -23,190 +29,249 @@ const THEME = {
   textPrimary: "#1A1C1E",
   textSecondary: "#6B7280",
   border: "#E2E8F0",
-  muted: "#E2E8F0",
-  tabInactive: "#F1F5F9",
+  success: "#2BB673",
+  warning: "#F59E0B",
+  danger: "#EF4444",
+};
+
+type QueuePayload = {
+  session: {
+    id: number;
+    doctorName: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+  } | null;
+  currentPatient: QueuePatient | null;
+  nextPatient: QueuePatient | null;
+  patients: QueuePatient[];
+  waitingCount: number;
+  averageWaitMinutes: number;
+};
+
+type QueuePatient = {
+  id: number;
+  patient_id: number;
+  token_number: number;
+  status: string;
+  patient_name: string;
+  phone?: string | null;
+  booking_time?: string | null;
 };
 
 export default function QueueManagement() {
-  const queueState = useMemo(
-    () => normalizeReceptionQueueData(DEFAULT_RECEPTION_QUEUE),
-    []
+  useReceptionPermissionGuard("queue", "can_manage_queue");
+  const { receptionistPermissions } = useAuth();
+  const canManageQueue = receptionistPermissions.can_manage_queue;
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busyAction, setBusyAction] = useState<"next" | "complete" | "miss" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [queue, setQueue] = useState<QueuePayload | null>(null);
+
+  const loadQueue = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "refresh") {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const data = (await fetchReceptionQueue()) as QueuePayload;
+      setQueue(data);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load queue");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadQueue("initial");
+    }, [loadQueue])
   );
 
-  if (!queueState.ok) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.errorState}>
-          <Ionicons name="alert-circle-outline" size={24} color="#DC2626" />
-          <Text style={styles.errorTitle}>Queue unavailable</Text>
-          <Text style={styles.errorMessage}>{queueState.message}</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const runAction = useCallback(
+    async (type: "next" | "complete" | "miss") => {
+      const sessionId = queue?.session?.id;
+      if (!sessionId || busyAction) {
+        return;
+      }
 
-  const queue = queueState.data;
-  const listData = queue.isQueueLive ? queue.patients : [];
+      setBusyAction(type);
+      try {
+        if (type === "next") {
+          await queueNextPatient(sessionId);
+        } else if (type === "complete") {
+          await queueCompletePatient(sessionId);
+        } else {
+          await queueMissPatient(sessionId);
+        }
+
+        await loadQueue("refresh");
+      } catch (actionError) {
+        Alert.alert("Queue Action Failed", actionError instanceof Error ? actionError.message : "Unable to update queue");
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [busyAction, loadQueue, queue?.session?.id]
+  );
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.header}>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.headerTitle}>Queue Management</Text>
-          <Text style={styles.headerSub}>Real-time patient flow</Text>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Queue Management</Text>
+          <Text style={styles.subtitle}>
+            {queue?.session ? `${queue.session.doctorName} • ${queue.session.startTime}-${queue.session.endTime}` : "No active clinic session"}
+          </Text>
         </View>
-        <TouchableOpacity style={styles.iconBtn}>
-          <Ionicons name="notifications-outline" size={22} color={THEME.textPrimary} />
+        <TouchableOpacity
+          style={[styles.headerButton, !canManageQueue && styles.disabledButton]}
+          onPress={() => void loadQueue("refresh")}
+          disabled={!canManageQueue}
+        >
+          <Ionicons name="refresh-outline" size={20} color={THEME.primary} />
         </TouchableOpacity>
-      </SafeAreaView>
-
-      <View style={styles.heroContainer}>
-        <QueueHeroCard
-          doctorName={queue.doctorName}
-          sessionLabel={queue.sessionLabel}
-          startTimeLabel={queue.startTimeLabel}
-          patientCountLabel={queue.patientCountLabel}
-          isQueueLive={queue.isQueueLive}
-        />
       </View>
 
-      <FlatList
-        data={listData}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <QueueListItem
-            item={item}
-            isActive={Boolean(queue.activePatientId && item.id === queue.activePatientId)}
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color={THEME.primary} />
+        </View>
+      ) : error ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorTitle}>Queue unavailable</Text>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : (
+        <>
+          {!canManageQueue ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>Queue access removed</Text>
+              <Text style={styles.infoText}>
+                You can view the current queue, but queue actions are now disabled.
+              </Text>
+            </View>
+          ) : null}
+          <FlatList
+            data={queue?.patients || []}
+            keyExtractor={(item) => String(item.id)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadQueue("refresh")} />}
+            contentContainerStyle={styles.listContent}
+            ListHeaderComponent={
+              <View style={styles.heroCard}>
+                <Text style={styles.heroTitle}>{queue?.session?.doctorName || "No queue active"}</Text>
+                <Text style={styles.heroMeta}>Waiting {queue?.waitingCount ?? 0} patients</Text>
+                <Text style={styles.heroMeta}>Average wait {queue?.averageWaitMinutes ?? 0} minutes</Text>
+                <Text style={styles.heroCurrent}>
+                  Current: {queue?.currentPatient?.patient_name || "No patient with doctor"}
+                </Text>
+              </View>
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={56} color={THEME.border} />
+                <Text style={styles.emptyTitle}>No queue entries yet</Text>
+                <Text style={styles.emptyText}>Patients added to the active session queue will appear here.</Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              const tone =
+                item.status === "WITH_DOCTOR"
+                  ? { bg: "#E3F2FD", color: THEME.primary, label: "With Doctor" }
+                  : item.status === "COMPLETED"
+                    ? { bg: "#E8F8EF", color: THEME.success, label: "Completed" }
+                    : item.status === "MISSED"
+                      ? { bg: "#FEF2F2", color: THEME.danger, label: "Missed" }
+                      : { bg: "#FEF7E6", color: THEME.warning, label: "Waiting" };
+
+              return (
+                <View style={styles.patientCard}>
+                  <View style={styles.tokenWrap}>
+                    <Text style={styles.tokenText}>#{item.token_number}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.patientName}>{item.patient_name}</Text>
+                    <Text style={styles.patientMeta}>
+                      {item.phone || "No phone"}{item.booking_time ? ` • ${item.booking_time}` : ""}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: tone.bg }]}>
+                    <Text style={[styles.statusText, { color: tone.color }]}>{tone.label}</Text>
+                  </View>
+                </View>
+              );
+            }}
           />
-        )}
-        ListHeaderComponent={
-          listData.length > 0 ? <Text style={styles.sectionTitle}>Queue List</Text> : null
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="calendar-blank" size={72} color={THEME.muted} />
-            <Text style={styles.emptyTitle}>No active queue</Text>
-            <Text style={styles.emptyText}>Start a new clinic session to begin patient flow.</Text>
-            <TouchableOpacity style={styles.startBtn}>
-              <Text style={styles.startBtnText}>Start Queue</Text>
+
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[styles.footerButton, styles.secondaryFooterButton, !queue?.session && styles.disabledButton]}
+              disabled={!canManageQueue || !queue?.session || busyAction !== null}
+              onPress={() => void runAction("miss")}
+            >
+              {busyAction === "miss" ? <ActivityIndicator color={THEME.danger} /> : <Text style={styles.secondaryFooterText}>Miss</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.footerButton, styles.secondaryFooterButton, !queue?.session && styles.disabledButton]}
+              disabled={!canManageQueue || !queue?.session || busyAction !== null}
+              onPress={() => void runAction("complete")}
+            >
+              {busyAction === "complete" ? <ActivityIndicator color={THEME.success} /> : <Text style={[styles.secondaryFooterText, { color: THEME.success }]}>Complete</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.footerButton, styles.primaryFooterButton, !queue?.session && styles.disabledButton]}
+              disabled={!canManageQueue || !queue?.session || busyAction !== null}
+              onPress={() => void runAction("next")}
+            >
+              {busyAction === "next" ? <ActivityIndicator color={THEME.white} /> : <Text style={styles.primaryFooterText}>Call Next</Text>}
             </TouchableOpacity>
           </View>
-        }
-        showsVerticalScrollIndicator={false}
-      />
-
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.footerAction}>
-          <Text style={styles.footerBtnText}>End Session</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.footerAction, styles.footerPrimary]}>
-          <Text style={styles.footerPrimaryText}>Next Patient</Text>
-        </TouchableOpacity>
-      </View>
-
-      <StatusBar barStyle="dark-content" />
-    </View>
+        </>
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.background },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 14,
-    backgroundColor: THEME.white,
-  },
-  headerTextWrap: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  headerTitle: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
-  headerSub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: THEME.tabInactive,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  heroContainer: { paddingHorizontal: 16, paddingTop: 16 },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: THEME.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 12,
-  },
-  listContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 110 },
-  footer: {
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
-    flexDirection: "row",
-    padding: 16,
-    backgroundColor: THEME.white,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
-  },
-  footerAction: {
-    flex: 1,
-    height: 52,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: THEME.tabInactive,
-  },
-  footerPrimary: { backgroundColor: THEME.primary },
-  footerBtnText: { fontWeight: "800", fontSize: 14, color: THEME.textSecondary },
-  footerPrimaryText: { fontWeight: "800", fontSize: 14, color: THEME.white },
-  emptyState: { alignItems: "center", marginTop: 96, paddingHorizontal: 24 },
-  emptyTitle: {
-    marginTop: 16,
-    fontSize: 18,
-    fontWeight: "700",
-    color: THEME.textPrimary,
-  },
-  emptyText: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
-    color: THEME.textSecondary,
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  startBtn: {
-    backgroundColor: THEME.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 16,
-  },
-  startBtnText: { color: THEME.white, fontWeight: "800" },
-  errorState: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  errorTitle: {
-    marginTop: 12,
-    fontSize: 18,
-    fontWeight: "700",
-    color: THEME.textPrimary,
-  },
-  errorMessage: {
-    marginTop: 8,
-    textAlign: "center",
-    fontSize: 14,
-    lineHeight: 20,
-    color: THEME.textSecondary,
-  },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 16, backgroundColor: THEME.white, borderBottomWidth: 1, borderBottomColor: "#EEF2F7" },
+  title: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
+  subtitle: { marginTop: 4, fontSize: 13, color: THEME.textSecondary },
+  headerButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#EEF4FF", alignItems: "center", justifyContent: "center" },
+  centerState: { flex: 1, alignItems: "center", justifyContent: "center" },
+  errorCard: { margin: 16, backgroundColor: "#FEF2F2", borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#FECACA" },
+  errorTitle: { fontSize: 16, fontWeight: "800", color: "#B91C1C" },
+  errorText: { marginTop: 8, fontSize: 13, color: "#991B1B" },
+  listContent: { padding: 16, paddingBottom: 120 },
+  infoCard: { backgroundColor: "#FFF7ED", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#FED7AA", marginBottom: 12 },
+  infoTitle: { fontSize: 14, fontWeight: "800", color: "#9A3412" },
+  infoText: { marginTop: 6, fontSize: 13, color: "#9A3412", lineHeight: 19 },
+  heroCard: { backgroundColor: THEME.white, borderRadius: 22, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: THEME.border },
+  heroTitle: { fontSize: 22, fontWeight: "800", color: THEME.textPrimary },
+  heroMeta: { marginTop: 6, fontSize: 14, color: THEME.textSecondary },
+  heroCurrent: { marginTop: 12, fontSize: 15, fontWeight: "700", color: THEME.textPrimary },
+  emptyState: { paddingTop: 80, alignItems: "center", paddingHorizontal: 24 },
+  emptyTitle: { marginTop: 14, fontSize: 18, fontWeight: "800", color: THEME.textPrimary },
+  emptyText: { marginTop: 8, textAlign: "center", fontSize: 14, color: THEME.textSecondary, lineHeight: 20 },
+  patientCard: { backgroundColor: THEME.white, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: THEME.border, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  tokenWrap: { width: 56, height: 56, borderRadius: 18, backgroundColor: "#E3F2FD", alignItems: "center", justifyContent: "center" },
+  tokenText: { fontSize: 20, fontWeight: "800", color: THEME.primary },
+  patientName: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
+  patientMeta: { marginTop: 4, fontSize: 13, color: THEME.textSecondary },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  statusText: { fontSize: 11, fontWeight: "800" },
+  footer: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: THEME.white, borderTopWidth: 1, borderTopColor: THEME.border, padding: 16, flexDirection: "row", gap: 10 },
+  footerButton: { flex: 1, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  secondaryFooterButton: { backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: THEME.border },
+  primaryFooterButton: { backgroundColor: THEME.primary },
+  secondaryFooterText: { fontSize: 14, fontWeight: "800", color: THEME.danger },
+  primaryFooterText: { fontSize: 14, fontWeight: "800", color: THEME.white },
+  disabledButton: { opacity: 0.45 },
 });

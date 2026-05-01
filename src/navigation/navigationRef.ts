@@ -1,42 +1,13 @@
-import { CommonActions, createNavigationContainerRef } from "@react-navigation/native";
+import { createNavigationContainerRef } from "@react-navigation/native";
+import type { RootStackParamList } from "../types/navigation";
 
-export const navigationRef = createNavigationContainerRef();
-let pendingSetPasswordToken: string | null = null;
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 export function resetToLogin() {
   if (navigationRef.isReady()) {
     navigationRef.reset({
       index: 0,
-      routes: [{ name: "Login" }],
+      routes: [{ name: "AuthStack", params: { screen: "Login" } }],
     });
   }
-}
-
-export function navigateToSetPassword(token: string) {
-  const trimmedToken = String(token || "").trim();
-  if (!trimmedToken) {
-    return;
-  }
-
-  if (!navigationRef.isReady()) {
-    pendingSetPasswordToken = trimmedToken;
-    return;
-  }
-
-  navigationRef.dispatch(
-    CommonActions.navigate("AuthStack" as never, {
-      screen: "SetPassword",
-      params: { token: trimmedToken },
-    } as never)
-  );
-}
-
-export function flushPendingSetPasswordLink() {
-  if (!pendingSetPasswordToken || !navigationRef.isReady()) {
-    return;
-  }
-
-  const token = pendingSetPasswordToken;
-  pendingSetPasswordToken = null;
-  navigateToSetPassword(token);
 }

@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -10,6 +11,10 @@ import {
   StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import Toast from "react-native-toast-message";
+import { useAuth } from "../../utils/AuthContext";
+import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
 
 const THEME = {
   background: "#F8FAFC",
@@ -24,6 +29,17 @@ const THEME = {
 };
 
 export default function ModernPrescriptionHub() {
+  const navigation = useNavigation<any>();
+  const { user } = useAuth();
+  const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
+  const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
+  const showApprovalRequiredToast = () => {
+    Toast.show({
+      type: "info",
+      text1: "Approval required",
+      text2: "Your account must be verified before using this feature",
+    });
+  };
   const prescriptions = [
     { id: "RX-9920", patient: "Nadun Peiris", med: "Amoxicillin 500mg", status: "Issued", date: "Today" },
     { id: "RX-4412", patient: "Sarah Jenkins", med: "Metformin 850mg", status: "Pending", date: "15 Mar" },
@@ -36,16 +52,40 @@ export default function ModernPrescriptionHub() {
 
       {/* Header Section */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerSub}>Patient Care</Text>
-          <Text style={styles.headerTitle}>Prescriptions</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.88}>
+            <Ionicons name="arrow-back" size={22} color={THEME.textDark} />
+          </TouchableOpacity>
+          <View>
+            <Text style={styles.headerSub}>Patient Care</Text>
+            <Text style={styles.headerTitle}>Prescriptions</Text>
+          </View>
         </View>
-        <TouchableOpacity style={styles.headerAddBtn}>
+        <TouchableOpacity
+          style={[styles.headerAddBtn, !isVerifiedDoctor ? styles.headerAddBtnDisabled : null]}
+          onPress={() => {
+            if (!isVerifiedDoctor) {
+              showApprovalRequiredToast();
+              return;
+            }
+            Alert.alert("Not wired yet", "Prescription creation is not connected yet.");
+          }}
+        >
           <Ionicons name="add" size={26} color={THEME.white} />
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {!isVerifiedDoctor ? <PendingApprovalBanner /> : null}
+        {!isVerifiedDoctor ? (
+          <View style={styles.pendingInfoCard}>
+            <Text style={styles.pendingInfoTitle}>Limited access</Text>
+            <Text style={styles.pendingInfoText}>
+              Your account is under review. You can explore your profile while waiting
+              for approval.
+            </Text>
+          </View>
+        ) : null}
         
         {/* Modern Search */}
         <View style={styles.searchBox}>
@@ -127,11 +167,44 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     backgroundColor: THEME.white,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: THEME.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   headerSub: { fontSize: 12, fontWeight: '700', color: THEME.textGray, textTransform: 'uppercase', letterSpacing: 1 },
   headerTitle: { fontSize: 26, fontWeight: '800', color: THEME.textDark, marginTop: 2 },
   headerAddBtn: { width: 48, height: 48, borderRadius: 16, backgroundColor: THEME.textDark, justifyContent: 'center', alignItems: 'center', elevation: 4 },
+  headerAddBtnDisabled: { opacity: 0.45 },
 
   container: { padding: 20 },
+  pendingInfoCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    padding: 16,
+    marginBottom: 16,
+  },
+  pendingInfoTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#B45309',
+    marginBottom: 6,
+  },
+  pendingInfoText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: THEME.textGray,
+  },
   
   searchBox: {
     flexDirection: 'row',

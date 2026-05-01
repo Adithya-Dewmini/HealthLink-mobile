@@ -10,6 +10,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { AuthContext } from "../../utils/AuthContext";
+import { useNavigation } from "@react-navigation/native";
 
 
 const THEME = {
@@ -24,6 +25,7 @@ const THEME = {
 };
 
 export default function SettingsScreen() {
+  const navigation = useNavigation<any>();
   const { logout } = useContext(AuthContext);
 
   return (
@@ -43,7 +45,12 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>Profile & Clinic</Text>
         <View style={styles.card}>
           <SettingsItem icon="person-outline" label="Profile Info" color={THEME.softBlue} />
-          <SettingsItem icon="business-outline" label="Clinic Info" color={THEME.softGreen} />
+          <SettingsItem
+            icon="business-outline"
+            label="Clinic Info"
+            color={THEME.softGreen}
+            onPress={() => navigation.navigate("DoctorClinics")}
+          />
           <SettingsItem icon="lock-closed-outline" label="Password & Security" color={THEME.softPurple} />
         </View>
 
@@ -71,9 +78,10 @@ type SettingsItemProps = {
   icon: ComponentProps<typeof Ionicons>["name"];
   label: string;
   color: string;
+  onPress?: () => void;
 };
-const SettingsItem = ({ icon, label, color }: SettingsItemProps) => (
-  <TouchableOpacity style={styles.itemRow}>
+const SettingsItem = ({ icon, label, color, onPress }: SettingsItemProps) => (
+  <TouchableOpacity style={styles.itemRow} onPress={onPress} activeOpacity={0.85}>
     <View style={[styles.iconContainer, { backgroundColor: color }]}>
       <Ionicons name={icon as any} size={20} color={THEME.textDark} />
     </View>

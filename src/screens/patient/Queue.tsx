@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import type { PatientStackParamList } from "../../types/navigation";
 import { apiFetch } from "../../config/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useGlobalModal } from "../../context/GlobalModalContext";
+import { connectSocket, getSocket, joinSessionRoom, leaveSessionRoom } from "../../services/socket";
 
 type DoctorStatus = "active" | "break" | "paused";
 
@@ -38,6 +39,7 @@ export default function LiveQueue() {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<PatientStackParamList, "PatientQueue">>();
   const doctorId = route.params?.doctorId ?? 1;
+  const clinicId = route.params?.clinicId;
   const [currentNumber, setCurrentNumber] = useState(0);
   const [yourNumber, setYourNumber] = useState<number | null>(null);
   const [status, setStatus] = useState<DoctorStatus>("paused");
@@ -46,6 +48,7 @@ export default function LiveQueue() {
   const [estWaitMinutes, setEstWaitMinutes] = useState(0);
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
   const [patientStatus, setPatientStatus] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<number | null>(route.params?.sessionId ?? null);
   const completionHandledRef = useRef(false);
   const { triggerConsultationFlow } = useGlobalModal();
 
@@ -64,11 +67,17 @@ export default function LiveQueue() {
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   }, [remaining, estWaitMinutes]);
 
-  const loadQueue = async () => {
+  const loadQueue = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/patients/doctor/queue-status/${doctorId}`);
+      const query = clinicId ? `?clinicId=${encodeURIComponent(clinicId)}` : "";
+      const res = await apiFetch(`/api/patients/doctor/queue-status/${doctorId}${query}`);
       if (!res.ok) return;
       const data = await res.json();
+      const nextSessionId = Number(data?.sessionId ?? 0) || null;
+      setSessionId(nextSessionId);
+      if (nextSessionId) {
+        joinSessionRoom(nextSessionId);
+      }
       setQueueStatus(data?.status ?? null);
       setPatientStatus(data?.patientStatus ?? null);
       setCurrentNumber(Number(data?.currentToken ?? 0));
@@ -81,13 +90,49 @@ export default function LiveQueue() {
     } catch (err) {
       console.error("Load queue status error:", err);
     }
-  };
+  }, [clinicId, doctorId]);
 
   useEffect(() => {
     void loadQueue();
-    const id = setInterval(loadQueue, 8000);
-    return () => clearInterval(id);
-  }, [doctorId]);
+  }, [loadQueue]);
+
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const handleQueueUpdate = (payload?: { sessionId?: number | string }) => {
+      if (!payload?.sessionId) {
+        return;
+      }
+
+      if (sessionId && String(payload.sessionId) !== String(sessionId)) {
+        return;
+      }
+
+      void loadQueue();
+    };
+
+    const handleReconnect = () => {
+      if (sessionId) {
+        joinSessionRoom(sessionId);
+      }
+      void loadQueue();
+    };
+
+    socket.on("queue:update", handleQueueUpdate);
+    socket.on("queue:next", handleQueueUpdate);
+    socket.on("session:start", handleQueueUpdate);
+    socket.on("connect", handleReconnect);
+
+    return () => {
+      socket.off("queue:update", handleQueueUpdate);
+      socket.off("queue:next", handleQueueUpdate);
+      socket.off("session:start", handleQueueUpdate);
+      socket.off("connect", handleReconnect);
+      if (sessionId) {
+        leaveSessionRoom(sessionId);
+      }
+    };
+  }, [loadQueue, sessionId]);
 
   const fetchLatestPrescription = async () => {
     try {
@@ -125,7 +170,7 @@ export default function LiveQueue() {
     try {
       const res = await apiFetch("/api/patients/queue/join", {
         method: "POST",
-        body: JSON.stringify({ doctor_id: doctorId }),
+        body: JSON.stringify({ doctor_id: doctorId, clinic_id: clinicId }),
       });
       if (!res.ok) return;
       void loadQueue();

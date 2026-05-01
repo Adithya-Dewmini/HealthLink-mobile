@@ -1,62 +1,351 @@
-import React, { createContext, useState, useEffect } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
+import { apiFetch } from "../config/api";
+
+type ReceptionistPermissions = {
+  can_manage_queue: boolean;
+  can_manage_appointments: boolean;
+  can_check_in: boolean;
+};
+
+export type AuthUser = {
+  id?: number;
+  name?: string;
+  email?: string;
+  role?: string | null;
+  status?: string | null;
+  verification_status?: string | null;
+  phone?: string | null;
+  profile_image?: string | null;
+  specialization?: string | null;
+  experience_years?: number | null;
+  bio?: string | null;
+  qualifications?: string | null;
+  consultation_fee?: string | number | null;
+  short_description?: string | null;
+  medical_center_id?: string | null;
+  receptionist_permissions?: Partial<ReceptionistPermissions> | null;
+  is_password_set?: boolean;
+};
 
 interface AuthContextType {
+  token: string | null;
+  isAuthenticated: boolean;
   role: string | null;
+  user: AuthUser | null;
+  setUser: React.Dispatch<React.SetStateAction<AuthUser | null>>;
+  clinicId: string | null;
+  receptionistPermissions: ReceptionistPermissions;
+  pendingPermissionUpdate: boolean;
+  activeTask: string | null;
   loading: boolean;
+  login: (user: AuthUser | null, token: string) => Promise<void>;
+  refreshReceptionPermissions: () => Promise<ReceptionistPermissions>;
+  setPendingPermissionUpdate: React.Dispatch<React.SetStateAction<boolean>>;
+  setActiveTask: React.Dispatch<React.SetStateAction<string | null>>;
   refreshAuth: () => Promise<void> | void; // FIX
   logout: () => Promise<void> | void;      // FIX
 }
 
+const DEFAULT_RECEPTIONIST_PERMISSIONS: ReceptionistPermissions = {
+  can_manage_queue: false,
+  can_manage_appointments: false,
+  can_check_in: false,
+};
+
 export const AuthContext = createContext<AuthContextType>({
+  token: null,
+  isAuthenticated: false,
   role: null,
+  user: null,
+  setUser: () => null,
+  clinicId: null,
+  receptionistPermissions: DEFAULT_RECEPTIONIST_PERMISSIONS,
+  pendingPermissionUpdate: false,
+  activeTask: null,
   loading: true,
+  login: async () => {},
+  refreshReceptionPermissions: async () => DEFAULT_RECEPTIONIST_PERMISSIONS,
+  setPendingPermissionUpdate: () => null,
+  setActiveTask: () => null,
   refreshAuth: async () => {},
   logout: async () => {},
 });
 
 export function AuthProvider({ children }: any) {
+  const [token, setToken] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [clinicId, setClinicId] = useState<string | null>(null);
+  const [receptionistPermissions, setReceptionistPermissions] = useState<ReceptionistPermissions>(
+    DEFAULT_RECEPTIONIST_PERMISSIONS
+  );
+  const [pendingPermissionUpdate, setPendingPermissionUpdate] = useState(false);
+  const [activeTask, setActiveTask] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const normalizeRole = (value: unknown) => {
+  const normalizeRole = useCallback((value: unknown) => {
     const roleValue = String(value || "").trim().toLowerCase();
     return roleValue.length > 0 ? roleValue : null;
-  };
+  }, []);
+
+  const normalizeDoctorStatus = useCallback((value: unknown) => {
+    const statusValue = String(value || "").trim().toLowerCase();
+    if (statusValue === "approved") {
+      return "verified";
+    }
+    return statusValue.length > 0 ? statusValue : null;
+  }, []);
+
+  const applyAuthState = useCallback((input: {
+    token: string | null;
+    decoded?: any;
+    user?: AuthUser | null;
+    clinicId?: string | null;
+    receptionistPermissions?: Partial<ReceptionistPermissions> | null;
+  }) => {
+    const decodedRole = normalizeRole(input.decoded?.role ?? input.user?.role);
+    const resolvedClinicId =
+      typeof input.clinicId === "string"
+        ? input.clinicId
+        : typeof input.user?.medical_center_id === "string"
+          ? input.user.medical_center_id
+          : typeof input.decoded?.medicalCenterId === "string"
+            ? input.decoded.medicalCenterId
+            : null;
+
+    setToken(input.token);
+    setRole(decodedRole);
+    setUser((prev) => ({
+      ...(prev || {}),
+      ...(input.user || {}),
+      id:
+        typeof input.user?.id === "number"
+          ? input.user.id
+          : typeof input.decoded?.id === "number"
+            ? input.decoded.id
+            : prev?.id,
+      email:
+        typeof input.user?.email === "string"
+          ? input.user.email
+          : typeof input.decoded?.email === "string"
+            ? input.decoded.email
+            : prev?.email,
+      role: decodedRole,
+      status:
+        typeof input.user?.status === "string"
+          ? normalizeDoctorStatus(input.user.status)
+          : typeof input.user?.verification_status === "string"
+            ? normalizeDoctorStatus(input.user.verification_status)
+            : prev?.status ?? prev?.verification_status ?? null,
+      verification_status:
+        typeof input.user?.verification_status === "string"
+          ? normalizeDoctorStatus(input.user.verification_status)
+          : typeof input.user?.status === "string"
+            ? normalizeDoctorStatus(input.user.status)
+            : prev?.verification_status ?? prev?.status ?? null,
+    }));
+    setClinicId(resolvedClinicId);
+    setReceptionistPermissions({
+      can_manage_queue: Boolean(
+        input.receptionistPermissions?.can_manage_queue ??
+          input.decoded?.receptionistPermissions?.can_manage_queue
+      ),
+      can_manage_appointments: Boolean(
+        input.receptionistPermissions?.can_manage_appointments ??
+          input.decoded?.receptionistPermissions?.can_manage_appointments
+      ),
+      can_check_in: Boolean(
+        input.receptionistPermissions?.can_check_in ??
+          input.decoded?.receptionistPermissions?.can_check_in
+      ),
+    });
+  }, [normalizeDoctorStatus, normalizeRole]);
 
   // 🔥 Refresh token + decode role
-  const refreshAuth = async () => {
+  const refreshAuth = useCallback(async () => {
+    let decoded: any = null;
     try {
-      const token = await AsyncStorage.getItem("token");
+      const storedToken = await AsyncStorage.getItem("token");
 
-      if (!token) {
+      if (!storedToken) {
+        setToken(null);
         setRole(null);
+        setUser(null);
+        setClinicId(null);
+        setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
+        setPendingPermissionUpdate(false);
+        setActiveTask(null);
         return;
       }
 
-      const decoded: any = jwtDecode(token);
-      setRole(normalizeRole(decoded.role));
+      decoded = jwtDecode(storedToken);
+      applyAuthState({ token: storedToken, decoded });
+
+      const response = await apiFetch("/api/me/context");
+      if (response.ok) {
+        const context = await response.json().catch(() => null);
+        if (context && typeof context === "object") {
+          applyAuthState({
+            token: storedToken,
+            decoded,
+            user:
+              (context as any).user && typeof (context as any).user === "object"
+                ? ((context as any).user as AuthUser)
+                : null,
+            clinicId:
+              typeof (context as any).clinicId === "string" &&
+              (context as any).clinicId.trim().length > 0
+                ? (context as any).clinicId.trim()
+                : null,
+            receptionistPermissions:
+              (context as any).permissions && typeof (context as any).permissions === "object"
+                ? (context as any).permissions
+                : null,
+          });
+          return;
+        }
+      }
     } catch (err) {
-      console.log("Token decode error:", err);
-      setRole(null);
+      if (!decoded) {
+        console.log("Token decode error:", err);
+        setToken(null);
+        setRole(null);
+        setUser(null);
+        setClinicId(null);
+        setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
+        setPendingPermissionUpdate(false);
+        setActiveTask(null);
+        return;
+      }
+
+      console.log("Auth refresh error:", err);
     }
-  };
+  }, [applyAuthState]);
+
+  const refreshReceptionPermissions = useCallback(async () => {
+    const storedToken = token ?? (await AsyncStorage.getItem("token"));
+    if (!storedToken) {
+      setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
+      setPendingPermissionUpdate(false);
+      return DEFAULT_RECEPTIONIST_PERMISSIONS;
+    }
+
+    const decoded: any = jwtDecode(storedToken);
+    const decodedRole = normalizeRole(decoded?.role);
+    if (decodedRole !== "receptionist") {
+      setPendingPermissionUpdate(false);
+      return DEFAULT_RECEPTIONIST_PERMISSIONS;
+    }
+
+    const response = await apiFetch("/api/reception/permissions");
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof body?.message === "string" && body.message.trim().length > 0
+          ? body.message
+          : "Failed to refresh receptionist permissions"
+      );
+    }
+
+    const data = await response.json().catch(() => null);
+    const nextPermissions: ReceptionistPermissions =
+      data && typeof data === "object"
+        ? {
+            can_manage_queue: Boolean((data as any).can_manage_queue),
+            can_manage_appointments: Boolean((data as any).can_manage_appointments),
+            can_check_in: Boolean((data as any).can_check_in),
+          }
+        : DEFAULT_RECEPTIONIST_PERMISSIONS;
+
+    setReceptionistPermissions(nextPermissions);
+    setPendingPermissionUpdate(false);
+    return nextPermissions;
+  }, [normalizeRole, token]);
+
+  const login = useCallback(async (userData: AuthUser | null, tokenData: string) => {
+    const normalizedToken = String(tokenData || "").trim();
+    if (!normalizedToken) {
+      throw new Error("Token is required");
+    }
+
+    const decoded: any = jwtDecode(normalizedToken);
+    await AsyncStorage.setItem("token", normalizedToken);
+    applyAuthState({
+      token: normalizedToken,
+      decoded,
+      user: userData,
+      clinicId:
+        typeof userData?.medical_center_id === "string"
+          ? String(userData.medical_center_id)
+          : null,
+      receptionistPermissions:
+        userData?.receptionist_permissions &&
+        typeof userData.receptionist_permissions === "object"
+          ? userData.receptionist_permissions
+          : null,
+    });
+
+    void refreshAuth();
+  }, [applyAuthState, refreshAuth]);
 
   // 🔥 Logout clears token + resets role
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await AsyncStorage.removeItem("token");
+    setToken(null);
     setRole(null); // RootNavigator will switch to AuthStack
-  };
+    setUser(null);
+    setClinicId(null);
+    setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
+    setPendingPermissionUpdate(false);
+    setActiveTask(null);
+  }, []);
 
   // 🔥 Runs at app startup
   useEffect(() => {
     refreshAuth().finally(() => setLoading(false));
   }, []);
 
+  const contextValue = useMemo(() => ({
+    token,
+    isAuthenticated: Boolean(token && role),
+    role,
+    user,
+    setUser,
+    clinicId,
+    receptionistPermissions,
+    pendingPermissionUpdate,
+    activeTask,
+    loading,
+    login,
+    refreshReceptionPermissions,
+    setPendingPermissionUpdate,
+    setActiveTask,
+    refreshAuth,
+    logout,
+  }), [
+    activeTask,
+    clinicId,
+    loading,
+    login,
+    logout,
+    pendingPermissionUpdate,
+    receptionistPermissions,
+    refreshAuth,
+    refreshReceptionPermissions,
+    role,
+    token,
+    user,
+  ]);
+
   return (
-    <AuthContext.Provider value={{ role, loading, refreshAuth, logout }}>
+    <AuthContext.Provider
+      value={contextValue}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
+
+export const useAuth = () => useContext(AuthContext);
