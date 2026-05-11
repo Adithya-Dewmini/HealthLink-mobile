@@ -30,6 +30,8 @@ type DoctorSearchItem = {
   experience_years: number | null;
   profile_image: string | null;
   clinic_status: "PENDING" | "ACTIVE" | "REJECTED" | "INACTIVE" | null;
+  clinic_hidden?: boolean;
+  relationship_id?: string | null;
 };
 
 type DoctorFilters = {
@@ -91,6 +93,7 @@ const getResponseErrorMessage = async (response: Response, fallback: string) => 
 
 const getInviteButtonConfig = (
   status: DoctorSearchItem["clinic_status"],
+  isHidden: boolean,
   inviting: boolean
 ) => {
   if (inviting) {
@@ -120,6 +123,19 @@ const getInviteButtonConfig = (
   }
 
   if (status === "ACTIVE") {
+    if (isHidden) {
+      return {
+        label: "Unhide",
+        disabled: false,
+        containerStyle: styles.retryAction,
+        textStyle: styles.retryActionText,
+        spinnerColor: THEME.accentBlue,
+        badgeLabel: "Hidden from Clinic List",
+        badgeStyle: styles.neutralBadge,
+        badgeTextStyle: styles.neutralBadgeText,
+      };
+    }
+
     return {
       label: "Assigned",
       disabled: true,
@@ -322,6 +338,45 @@ export default function AddDoctorScreen({ navigation }: Props) {
     }
   };
 
+  const handleUnhide = async (doctor: DoctorSearchItem) => {
+    if (invitingId !== null) {
+      return;
+    }
+
+    if (!doctor.relationship_id) {
+      Alert.alert("Unhide Doctor", "Doctor relationship is missing for this clinic.");
+      return;
+    }
+
+    setInvitingId(doctor.id);
+    try {
+      const response = await apiFetch(`/api/center/doctors/${doctor.relationship_id}/hide`, {
+        method: "PATCH",
+        body: JSON.stringify({ hidden: false }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await getResponseErrorMessage(response, "Failed to unhide doctor"));
+      }
+
+      setDoctors((current) =>
+        current.map((item) =>
+          item.id === doctor.id
+            ? { ...item, clinic_hidden: false, clinic_status: item.clinic_status || "ACTIVE" }
+            : item
+        )
+      );
+      Alert.alert("Doctor Unhidden", "The doctor is visible in the clinic list again.");
+    } catch (actionError) {
+      Alert.alert(
+        "Unhide Failed",
+        actionError instanceof Error ? actionError.message : "Failed to unhide doctor"
+      );
+    } finally {
+      setInvitingId(null);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.white} />
@@ -447,6 +502,7 @@ export default function AddDoctorScreen({ navigation }: Props) {
             filteredDoctors.map((doctor) => {
               const inviteConfig = getInviteButtonConfig(
                 doctor.clinic_status,
+                Boolean(doctor.clinic_hidden),
                 invitingId === doctor.id
               );
 
@@ -506,7 +562,11 @@ export default function AddDoctorScreen({ navigation }: Props) {
 
                   <TouchableOpacity
                     style={inviteConfig.containerStyle}
-                    onPress={() => void handleInvite(doctor.id)}
+                    onPress={() =>
+                      doctor.clinic_status === "ACTIVE" && Boolean(doctor.clinic_hidden)
+                        ? void handleUnhide(doctor)
+                        : void handleInvite(doctor.id)
+                    }
                     disabled={inviteConfig.disabled}
                   >
                     {invitingId === doctor.id ? (

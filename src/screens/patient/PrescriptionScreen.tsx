@@ -13,16 +13,11 @@ import { apiFetch } from "../../config/api";
 import PrescriptionCard, {
   type PrescriptionCardData,
 } from "../../components/patient/prescriptions/PrescriptionCard";
+import { patientTheme } from "../../constants/patientTheme";
 
 const THEME = {
-  primary: "#2563EB",
-  background: "#F8FAFC",
-  white: "#FFFFFF",
-  textPrimary: "#0F172A",
-  textSecondary: "#64748B",
-  border: "#E2E8F0",
-  skeleton: "#E2E8F0",
-  danger: "#DC2626",
+  ...patientTheme.colors,
+  skeleton: patientTheme.colors.border,
 };
 
 type PrescriptionApiResponse = {

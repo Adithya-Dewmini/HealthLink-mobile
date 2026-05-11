@@ -139,7 +139,6 @@ export default function ExploreScreen() {
     if (item.type === "doctor") {
       navigation.navigate("PatientTabs", {
         screen: "PatientAppointments",
-        params: { doctorId: item.id },
       });
       return;
     }

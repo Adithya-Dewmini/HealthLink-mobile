@@ -58,6 +58,10 @@ export default function AddMedicineScreen() {
   const [brands, setBrands] = useState<LookupOption[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedBrandId, setSelectedBrandId] = useState<number | null>(null);
+  const [genericName, setGenericName] = useState("");
+  const [activeIngredient, setActiveIngredient] = useState("");
+  const [strength, setStrength] = useState("");
+  const [dosageForm, setDosageForm] = useState("");
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
@@ -88,6 +92,10 @@ export default function AddMedicineScreen() {
     setName("");
     setSelectedCategoryId(null);
     setSelectedBrandId(null);
+    setGenericName("");
+    setActiveIngredient("");
+    setStrength("");
+    setDosageForm("");
     setDescription("");
     setQuantity("");
     setPrice("");
@@ -141,6 +149,10 @@ export default function AddMedicineScreen() {
     setName(editingMedicine.name || "");
     setSelectedCategoryId(editingMedicine.category_id ?? null);
     setSelectedBrandId(editingMedicine.brand_id ?? null);
+    setGenericName(editingMedicine.generic_name || "");
+    setActiveIngredient(editingMedicine.active_ingredient || "");
+    setStrength(editingMedicine.strength || "");
+    setDosageForm(editingMedicine.dosage_form || "");
     setDescription(editingMedicine.description || "");
     setQuantity(
       editingMedicine.quantity === null || editingMedicine.quantity === undefined
@@ -332,7 +344,7 @@ export default function AddMedicineScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.85,
@@ -407,6 +419,10 @@ export default function AddMedicineScreen() {
         name: trimmedName,
         category_id: selectedCategoryId,
         brand_id: selectedBrandId,
+        generic_name: genericName.trim() || null,
+        active_ingredient: activeIngredient.trim() || null,
+        strength: strength.trim() || null,
+        dosage_form: dosageForm.trim() || null,
         description: description.trim(),
         image_url: image,
         quantity: parsedQuantity,
@@ -424,8 +440,6 @@ export default function AddMedicineScreen() {
       );
 
       const data = await response.json();
-      console.log(`${isEditMode ? "Update" : "Save"} medicine response:`, data);
-
       if (!response.ok) {
         throw new Error(data?.message || `Unable to ${isEditMode ? "update" : "save"} medicine.`);
       }
@@ -537,6 +551,12 @@ export default function AddMedicineScreen() {
               }}
               autoCapitalize="words"
             />
+            <View style={styles.helperPanel}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={THEME.primary} />
+              <Text style={styles.helperText}>
+                Add clinical metadata when available. It improves stock substitution suggestions during prescription dispensing.
+              </Text>
+            </View>
             <View style={styles.lookupRow}>
               <TouchableOpacity
                 style={styles.lookupField}
@@ -583,6 +603,52 @@ export default function AddMedicineScreen() {
                 <Ionicons name="add" size={16} color={THEME.primary} />
                 <Text style={styles.addLookupText}>Add</Text>
               </TouchableOpacity>
+            </View>
+            <Field
+              label="Generic Name"
+              placeholder="e.g. Paracetamol"
+              value={genericName}
+              onChangeText={(value) => {
+                setGenericName(value);
+                if (errorMessage || statusMessage) clearFeedback();
+              }}
+              autoCapitalize="words"
+            />
+            <Field
+              label="Active Ingredient"
+              placeholder="e.g. Acetaminophen"
+              value={activeIngredient}
+              onChangeText={(value) => {
+                setActiveIngredient(value);
+                if (errorMessage || statusMessage) clearFeedback();
+              }}
+              autoCapitalize="words"
+            />
+            <View style={styles.twoColumnRow}>
+              <View style={styles.twoColumnField}>
+                <Field
+                  label="Strength"
+                  placeholder="e.g. 500mg"
+                  value={strength}
+                  onChangeText={(value) => {
+                    setStrength(value);
+                    if (errorMessage || statusMessage) clearFeedback();
+                  }}
+                  autoCapitalize="none"
+                />
+              </View>
+              <View style={styles.twoColumnField}>
+                <Field
+                  label="Dosage Form"
+                  placeholder="e.g. Tablet"
+                  value={dosageForm}
+                  onChangeText={(value) => {
+                    setDosageForm(value);
+                    if (errorMessage || statusMessage) clearFeedback();
+                  }}
+                  autoCapitalize="words"
+                />
+              </View>
             </View>
             <Field
               label="Quantity *"
@@ -980,6 +1046,29 @@ const styles = StyleSheet.create({
   },
   fieldBlock: {
     marginBottom: 16,
+  },
+  helperPanel: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "#E8F8EF",
+    marginBottom: 16,
+  },
+  helperText: {
+    flex: 1,
+    color: THEME.primaryDark,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  twoColumnRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  twoColumnField: {
+    flex: 1,
   },
   lookupRow: {
     flexDirection: "row",

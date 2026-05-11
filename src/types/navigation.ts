@@ -1,16 +1,22 @@
 import type { NavigatorScreenParams } from "@react-navigation/native";
+import type { ReceptionSessionItem } from "../services/receptionistSessionService";
 
 export type AuthStackParamList = {
-  Login: undefined;
+  Login:
+    | {
+        initialEmail?: string;
+        flashMessage?: string;
+      }
+    | undefined;
   ForgotPassword: undefined;
   Register: undefined;
   RegisterPatient: undefined;
   RegisterDoctor: undefined;
   RegisterDoctorSuccess: {
     doctorId: number;
-    status: "pending";
+    verificationStatus: "pending" | "approved" | "rejected" | "suspended";
     email: string;
-    setupToken?: string;
+    canLogin: boolean;
   };
   RegisterPharmacist: undefined;
   RegisterMedicalCenter: undefined;
@@ -56,12 +62,72 @@ export type RootStackParamList = {
           | "MedicalCenterTabs";
       }
     | undefined;
+  DoctorPendingApproval:
+    | {
+        email?: string;
+        verificationStatus?: "pending" | "approved" | "rejected" | "suspended" | "verified";
+        verificationNotes?: string | null;
+        fromRegistration?: boolean;
+      }
+    | undefined;
+  ApprovalStatus:
+    | {
+        role?: "pharmacist" | "medical_center_admin";
+        verificationStatus?: "pending" | "approved" | "rejected" | "suspended";
+        verificationNotes?: string | null;
+        email?: string;
+        fromRegistration?: boolean;
+      }
+    | undefined;
   PatientStack: NavigatorScreenParams<PatientStackParamList> | undefined;
   Doctor: undefined;
   PharmacistStack: undefined;
   AdminTabs: undefined;
   ReceptionistTabs: undefined;
   MedicalCenterTabs: NavigatorScreenParams<MedicalCenterStackParamList> | undefined;
+};
+
+export type ReceptionistStackParamList = {
+  ReceptionistTabsRoot: undefined;
+  ReceptionistBookAppointment: undefined;
+  ReceptionistVisitDetails: {
+    visitId: number;
+  };
+  ReceptionistQueueDetails: {
+    queueId?: number;
+    sessionId?: number;
+    doctorName?: string;
+  };
+  ReceptionistDoctorAvailability: {
+    doctorId: number;
+    doctorUserId: number;
+    doctorName?: string;
+    specialization?: string | null;
+  };
+  ReceptionistDoctorSessionOverview: {
+    doctorId: number;
+    doctorUserId: number;
+    doctorName?: string;
+    specialization?: string | null;
+  };
+  ReceptionistDoctorSessionManagement: {
+    doctorId: number;
+    doctorUserId: number;
+    doctorName?: string;
+    specialization?: string | null;
+    editScheduleId?: number;
+    initialTab?: "routine" | "manual";
+    suggestedDate?: string;
+    suggestedStartTime?: string;
+    suggestedEndTime?: string;
+    suggestedSlotDuration?: number | null;
+    suggestedMaxPatients?: number | null;
+  };
+  ReceptionistDoctorSessionDetails: {
+    session: ReceptionSessionItem;
+    doctorName?: string;
+    specialization?: string | null;
+  };
 };
 
 export type MedicalCenterStackParamList = {
@@ -75,17 +141,6 @@ export type MedicalCenterStackParamList = {
     doctorId: number;
     doctorUserId: number;
     status: "ACTIVE" | "PENDING" | "INACTIVE";
-  };
-  MedicalCenterDoctorSchedule: {
-    doctorId: number;
-    doctorUserId: number;
-    doctorName?: string;
-    specialization?: string | null;
-    initialTab?: "routine" | "manual";
-    suggestedDate?: string;
-    suggestedStartTime?: string;
-    suggestedEndTime?: string;
-    suggestedMaxPatients?: number | null;
   };
   MedicalCenterDoctorAvailability: {
     doctorId: number;
@@ -128,6 +183,9 @@ export type PatientStackParamList = {
         doctorId?: number;
       }
     | undefined;
+  PatientDoctorDetails: {
+    doctorId: number;
+  };
   DoctorAvailabilityScreen: {
     doctorId: number;
     clinicId: string;
@@ -149,6 +207,7 @@ export type PatientStackParamList = {
   AppointmentSummaryScreen: {
     doctorName?: string;
     clinicName?: string;
+    clinicId?: string;
     specialty?: string;
     date?: string;
     clinicTime?: string;
@@ -157,15 +216,34 @@ export type PatientStackParamList = {
     estimatedWait?: string;
     queueOpensAt?: string;
     doctorId?: number;
+    sessionId?: number;
   };
   PrescriptionDetails: { id: string };
+  PrescriptionFulfillment: { prescriptionId: string; title?: string };
+  SubstitutionApproval: { orderId: number };
   PatientPrescriptions: undefined;
   MedicineTracker: undefined;
   UploadPrescription: undefined;
+  NotificationCenter:
+    | {
+        title?: string;
+        panel?: "patient" | "doctor" | "pharmacy" | "medical_center" | "receptionist";
+      }
+    | undefined;
+  ActivityFeed:
+    | {
+        title?: string;
+      }
+    | undefined;
   Favorites: undefined;
   SymptomChecker: undefined;
   MedicineSearch: undefined;
   PharmacyMarketplace: undefined;
   PharmacyStore: { pharmacyId: number };
+  PharmacyProductDetails: { productId: string; pharmacyId: number };
+  Cart: undefined;
+  Checkout: undefined;
+  Orders: undefined;
+  OrderDetails: { orderId: number };
   MyHealthDashboard: undefined;
 };

@@ -16,6 +16,7 @@ import {
   dispense,
   type PharmacyPrescription,
 } from "../../services/pharmacyApi";
+import PrescriptionMedicineCard from "../../components/pharmacist/PrescriptionMedicineCard";
 
 const THEME = {
   primary: "#2BB673",
@@ -35,22 +36,45 @@ type SelectedMedicine = {
   name: string;
   dosage: string;
   quantity: number;
+  requiredQuantity: number;
+  dispensedQuantity: number;
+  remainingQuantity: number;
   availableStock: number;
   selected: boolean;
   unitPrice: number;
+  demandCount?: number;
+  lowStockAlert?: boolean;
+  substitutions?: PharmacyPrescription["items"][number]["substitutions"];
 };
 
 const getInitialItems = (prescription: PharmacyPrescription | null): SelectedMedicine[] =>
-  (prescription?.items || []).map((item) => ({
-    id: Number(item.id),
-    medicineId: item.medicineId,
-    name: item.medicineName,
-    dosage: [item.dosage, item.frequency].filter(Boolean).join(" • ") || "Dose unavailable",
-    quantity: 1,
-    availableStock: Number(item.availableStock ?? 0),
-    selected: Number(item.availableStock ?? 0) > 0,
-    unitPrice: Number(item.unitPrice ?? 0),
-  }));
+  (prescription?.items || []).map((item) => {
+    const requiredQuantity = Number(item.requiredQuantity ?? item.remainingQuantity ?? 1);
+    const dispensedQuantity = Number(item.dispensedQuantity ?? 0);
+    const remainingQuantity = Math.max(
+      0,
+      Number(item.remainingQuantity ?? requiredQuantity - dispensedQuantity)
+    );
+    const availableStock = Number(item.availableStock ?? 0);
+    const quantity = Math.max(1, Math.min(remainingQuantity || 1, availableStock || 1));
+
+    return {
+      id: Number(item.id),
+      medicineId: item.medicineId,
+      name: item.medicineName,
+      dosage: [item.dosage, item.frequency].filter(Boolean).join(" • ") || "Dose unavailable",
+      quantity,
+      requiredQuantity,
+      dispensedQuantity,
+      remainingQuantity,
+      availableStock,
+      selected: availableStock > 0 && remainingQuantity > 0,
+      unitPrice: Number(item.unitPrice ?? 0),
+      demandCount: item.demandCount,
+      lowStockAlert: item.lowStockAlert,
+      substitutions: item.substitutions,
+    };
+  });
 
 export default function DispenseScreen() {
   const navigation = useNavigation<any>();
@@ -67,6 +91,20 @@ export default function DispenseScreen() {
     sale_id: number | string;
     total_amount: number;
   } | null>(null);
+  const [dispenseResult, setDispenseResult] = useState<{
+    isPartial?: boolean;
+    remainingItems?: Array<{
+      prescription_item_id: number;
+      medicine_name: string;
+      remaining_quantity: number;
+    }>;
+    dispensedItems?: Array<{
+      prescription_item_id: number;
+      medicine_name: string;
+      quantity: number;
+      remaining_quantity?: number;
+    }>;
+  } | null>(null);
   const [dispensed, setDispensed] = useState(false);
 
   const patientName =
@@ -77,6 +115,21 @@ export default function DispenseScreen() {
   const activeItems = useMemo(
     () => selectedItems.filter((item) => item.selected),
     [selectedItems]
+  );
+  const selectableItems = useMemo(
+    () => selectedItems.filter((item) => item.availableStock > 0),
+    [selectedItems]
+  );
+  const unavailableItemsCount = useMemo(
+    () => selectedItems.filter((item) => item.availableStock <= 0).length,
+    [selectedItems]
+  );
+  const hasPartialSelection = useMemo(
+    () =>
+      activeItems.length > 0 &&
+      (activeItems.length < selectableItems.length ||
+        activeItems.some((item) => item.quantity < item.remainingQuantity)),
+    [activeItems, selectableItems.length]
   );
   const total = useMemo(
     () => activeItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
@@ -98,7 +151,7 @@ export default function DispenseScreen() {
       prev.map((item) => {
         if (item.id !== id) return item;
         const nextQty = Math.max(1, item.quantity + delta);
-        if (nextQty > item.availableStock) return item;
+        if (nextQty > Math.min(item.availableStock, item.remainingQuantity)) return item;
         return { ...item, quantity: nextQty };
       })
     );
@@ -155,7 +208,7 @@ export default function DispenseScreen() {
       setDispenseLoading(true);
       setError(null);
 
-      await dispense({
+      const response = await dispense({
         prescriptionId: prescription!.prescription.id,
         selectedItems: activeItems.map((item) => ({
           prescription_item_id: item.id,
@@ -163,8 +216,18 @@ export default function DispenseScreen() {
         })),
       });
 
+      setDispenseResult({
+        isPartial: Boolean(response.is_partial),
+        remainingItems: response.remaining_items,
+        dispensedItems: response.dispensed_items,
+      });
       setDispensed(true);
-      Alert.alert("Dispensed", "Prescription marked as dispensed.");
+      Alert.alert(
+        response.is_partial ? "Partial Dispense Recorded" : "Dispensed",
+        response.is_partial
+          ? "The selected medicines were dispensed and the remaining items are still tracked."
+          : "Prescription marked as fully dispensed."
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to mark as dispensed";
       setError(message);
@@ -177,7 +240,12 @@ export default function DispenseScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="chevron-back" size={22} color={THEME.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>
@@ -187,11 +255,23 @@ export default function DispenseScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.flowCard}>
+          <View style={styles.flowPill}>
+            <Text style={styles.flowPillText}>Step 2 of 2</Text>
+          </View>
+          <Text style={styles.flowTitle}>Confirm dispense and billing</Text>
+          <Text style={styles.flowText}>
+            Finalize quantities, generate the sale if needed, and complete the dispense record.
+          </Text>
+        </View>
+
         <View style={styles.infoCard}>
           <View style={styles.infoHeaderRow}>
             <View>
               <Text style={styles.infoLabel}>Patient</Text>
-              <Text style={styles.infoValue}>{patientName}</Text>
+              <Text style={styles.infoValue} numberOfLines={2}>
+                {patientName}
+              </Text>
             </View>
             <View style={styles.infoPill}>
               <Text style={styles.infoPillText}>
@@ -199,8 +279,29 @@ export default function DispenseScreen() {
               </Text>
             </View>
           </View>
-          <Text style={styles.infoMeta}>Doctor: {doctorName}</Text>
+          <Text style={styles.infoMeta} numberOfLines={1}>
+            Doctor: {doctorName}
+          </Text>
           <Text style={styles.infoMeta}>Prescription ID: {prescription?.prescription?.id ?? "-"}</Text>
+        </View>
+
+        <View style={styles.helperCard}>
+          <Ionicons name="information-circle-outline" size={18} color={THEME.primary} />
+          <View style={styles.helperCopy}>
+            <Text style={styles.helperTitle}>
+              {hasPartialSelection ? "Partial dispense selected" : "Full dispense review"}
+            </Text>
+            <Text style={styles.helperText}>
+              {hasPartialSelection
+                ? "Only the medicines you keep selected will be included in this dispense record and sale."
+                : "All in-stock selected medicines will be included in this dispense record and sale."}
+            </Text>
+            {unavailableItemsCount > 0 ? (
+              <Text style={styles.helperSubtext}>
+                {unavailableItemsCount} medicine{unavailableItemsCount > 1 ? "s are" : " is"} currently out of stock and cannot be dispensed.
+              </Text>
+            ) : null}
+          </View>
         </View>
 
         {error && (
@@ -209,6 +310,14 @@ export default function DispenseScreen() {
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Selection</Text>
+            <Text style={styles.sectionTitle}>Medicines to Dispense</Text>
+          </View>
+          <Text style={styles.sectionCount}>{selectedItems.length} items</Text>
+        </View>
 
         {selectedItems.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -220,79 +329,61 @@ export default function DispenseScreen() {
           </View>
         ) : selectedItems.map((item) => {
           const outOfStock = item.availableStock <= 0;
-          const selectedTooHigh = item.quantity > item.availableStock && item.selected;
+          const warningMessage = outOfStock
+            ? null
+            : item.selected && item.availableStock <= 2
+              ? `Limited stock. Only ${item.availableStock} unit${item.availableStock > 1 ? "s are" : " is"} available.`
+              : item.selected && item.availableStock === item.quantity
+                ? "Using all remaining stock."
+                : null;
+          const footerPill = outOfStock
+            ? { label: "Out of stock", tone: "warning" as const }
+            : !item.selected
+              ? { label: "Excluded from this dispense", tone: "neutral" as const }
+              : null;
 
           return (
-            <View
+            <PrescriptionMedicineCard
               key={item.id}
-              style={[
-                styles.medicineCard,
-                (outOfStock || selectedTooHigh) && styles.medicineCardAlert,
-              ]}
-            >
-              <View style={styles.cardHeader}>
-                <TouchableOpacity
-                  style={styles.checkboxWrap}
-                  onPress={() => toggleSelection(item.id)}
-                  disabled={outOfStock}
-                >
-                  <Ionicons
-                    name={item.selected ? "checkbox" : "square-outline"}
-                    size={24}
-                    color={item.selected ? THEME.primary : THEME.textSecondary}
-                  />
-                </TouchableOpacity>
-                <View style={styles.medicineMain}>
-                  <Text style={styles.medicineName}>{item.name}</Text>
-                  <Text style={styles.medicineDose}>{item.dosage}</Text>
-                </View>
-                <Text style={styles.priceText}>LKR {item.unitPrice.toFixed(2)}</Text>
-              </View>
-
-              <View style={styles.cardFooter}>
-                <View style={styles.stockSection}>
-                  <Text style={styles.stockLabel}>Available Stock</Text>
-                  <Text style={[styles.stockValue, outOfStock && styles.stockValueDanger]}>
-                    {item.availableStock}
-                  </Text>
-                </View>
-
-                <View style={styles.qtyControl}>
-                  <TouchableOpacity
-                    style={[
-                      styles.qtyBtn,
-                      (!item.selected || item.quantity <= 1) && styles.qtyBtnDisabled,
-                    ]}
-                    onPress={() => adjustQuantity(item.id, -1)}
-                    disabled={!item.selected || item.quantity <= 1}
-                  >
-                    <Ionicons name="remove" size={16} color={THEME.textPrimary} />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyText}>{item.quantity}</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.qtyBtn,
-                      (!item.selected || item.quantity >= item.availableStock) &&
-                        styles.qtyBtnDisabled,
-                    ]}
-                    onPress={() => adjustQuantity(item.id, 1)}
-                    disabled={!item.selected || item.quantity >= item.availableStock}
-                  >
-                    <Ionicons name="add" size={16} color={THEME.textPrimary} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {outOfStock && (
-                <View style={styles.warningPill}>
-                  <Text style={styles.warningText}>Out of stock</Text>
-                </View>
-              )}
-            </View>
+              item={{
+                medicineName: item.name,
+                meta: item.dosage,
+                currentStock: item.availableStock,
+                requiredQuantity: item.requiredQuantity,
+                dispensedQuantity: item.dispensedQuantity,
+                remainingQuantity: item.remainingQuantity,
+                lowStockAlert: item.lowStockAlert,
+                demandCount: item.demandCount,
+                substitutions: item.substitutions,
+              }}
+              interactive={{
+                selected: item.selected,
+                disabled: outOfStock,
+                quantity: item.quantity,
+                maxQuantity: Math.min(item.availableStock, Math.max(1, item.remainingQuantity)),
+                unitPrice: item.unitPrice,
+                onToggle: () => toggleSelection(item.id),
+                onDecrease: () => adjustQuantity(item.id, -1),
+                onIncrease: () => adjustQuantity(item.id, 1),
+              }}
+              warningMessage={warningMessage}
+              footerPill={footerPill}
+            />
           );
         })}
 
         <View style={styles.summaryCard}>
+          <View style={styles.summaryHeader}>
+            <View>
+              <Text style={styles.sectionEyebrow}>Summary</Text>
+              <Text style={styles.summaryTitle}>Dispense Summary</Text>
+            </View>
+            {billResult ? (
+              <View style={styles.summaryPill}>
+                <Text style={styles.summaryPillText}>Bill ready</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Selected Items</Text>
             <Text style={styles.summaryValue}>{activeItems.length}</Text>
@@ -302,15 +393,38 @@ export default function DispenseScreen() {
             <Text style={styles.summaryValue}>LKR {total.toFixed(2)}</Text>
           </View>
           {billResult && (
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Sale ID</Text>
-              <Text style={styles.summaryValue}>#{billResult.sale_id}</Text>
+            <View style={styles.successPanel}>
+              <View style={styles.successPanelHeader}>
+                <Ionicons name="receipt-outline" size={18} color={THEME.primary} />
+                <Text style={styles.successPanelTitle}>Sale generated successfully</Text>
+              </View>
+              <Text style={styles.successPanelText}>
+                Sale #{billResult.sale_id} is ready with a total of LKR {billResult.total_amount.toFixed(2)}.
+              </Text>
             </View>
           )}
           {dispensed && (
-            <View style={styles.successBadge}>
-              <Ionicons name="checkmark-circle" size={18} color={THEME.primary} />
-              <Text style={styles.successText}>Prescription dispensed successfully</Text>
+            <View style={styles.successPanel}>
+              <View style={styles.successPanelHeader}>
+                <Ionicons name="checkmark-circle" size={18} color={THEME.primary} />
+                <Text style={styles.successPanelTitle}>
+                  {dispenseResult?.isPartial ? "Partial dispense recorded" : "Dispense completed"}
+                </Text>
+              </View>
+              <Text style={styles.successPanelText}>
+                {dispenseResult?.isPartial
+                  ? "The remaining medicines stay open for a later dispense."
+                  : `${activeItems.length} medicine${activeItems.length > 1 ? "s were" : " was"} marked as dispensed for this prescription.`}
+              </Text>
+              {dispenseResult?.remainingItems?.length ? (
+                <View style={styles.receiptRows}>
+                  {dispenseResult.remainingItems.map((item) => (
+                    <Text key={item.prescription_item_id} style={styles.receiptRowText} numberOfLines={1}>
+                      {item.medicine_name}: {item.remaining_quantity} remaining
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
             </View>
           )}
         </View>
@@ -321,6 +435,8 @@ export default function DispenseScreen() {
           style={[styles.secondaryAction, isBusy && styles.disabledAction]}
           onPress={handleGenerateBill}
           disabled={isBusy}
+          accessibilityRole="button"
+          accessibilityLabel="Generate sale bill"
         >
           {billingLoading ? (
             <ActivityIndicator size="small" color={THEME.primary} />
@@ -332,11 +448,15 @@ export default function DispenseScreen() {
           style={[styles.primaryAction, (isBusy || dispensed) && styles.disabledAction]}
           onPress={handleDispense}
           disabled={isBusy || dispensed}
+          accessibilityRole="button"
+          accessibilityLabel={dispensed ? "Prescription already dispensed" : "Complete dispensing"}
         >
           {dispenseLoading ? (
             <ActivityIndicator size="small" color={THEME.white} />
           ) : (
-            <Text style={styles.primaryActionText}>Mark as Dispensed</Text>
+            <Text style={styles.primaryActionText}>
+              {dispensed ? "Already Dispensed" : "Complete Dispense"}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
@@ -378,15 +498,50 @@ const styles = StyleSheet.create({
     paddingBottom: 140,
     gap: 14,
   },
+  flowCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
+  },
+  flowPill: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#E9F8F1",
+  },
+  flowPillText: {
+    color: THEME.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  flowTitle: {
+    marginTop: 12,
+    color: THEME.textPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  flowText: {
+    marginTop: 6,
+    color: THEME.textSecondary,
+    fontSize: 13,
+    lineHeight: 20,
+  },
   infoCard: {
     backgroundColor: THEME.white,
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
   },
   infoHeaderRow: {
     flexDirection: "row",
@@ -438,22 +593,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  medicineCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 16,
+  helperCard: {
+    backgroundColor: "#F1FBF8",
+    borderRadius: 18,
     padding: 16,
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#CDEFE3",
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  helperCopy: { flex: 1 },
+  helperTitle: {
+    color: THEME.textPrimary,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  helperText: {
+    color: THEME.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  helperSubtext: {
+    color: THEME.warningText,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  sectionEyebrow: {
+    color: THEME.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  sectionTitle: {
+    color: THEME.textPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  sectionCount: {
+    color: THEME.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
   },
   emptyCard: {
     backgroundColor: THEME.white,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 20,
     alignItems: "center",
     gap: 8,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
   },
   emptyTitle: {
     color: THEME.textPrimary,
@@ -466,104 +666,36 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 19,
   },
-  medicineCardAlert: {
-    borderWidth: 1,
-    borderColor: "#FED7AA",
-    backgroundColor: "#FFFDF8",
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  checkboxWrap: {
-    paddingTop: 2,
-  },
-  medicineMain: {
-    flex: 1,
-  },
-  medicineName: {
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  medicineDose: {
-    color: THEME.textSecondary,
-    fontSize: 13,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  priceText: {
-    color: THEME.primary,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  cardFooter: {
-    marginTop: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  stockSection: {
-    gap: 4,
-  },
-  stockLabel: {
-    color: THEME.textSecondary,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  stockValue: {
-    color: THEME.textPrimary,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  stockValueDanger: {
-    color: THEME.danger,
-  },
-  qtyControl: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#F8FAFC",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  qtyBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: THEME.white,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  qtyBtnDisabled: {
-    opacity: 0.45,
-  },
-  qtyText: {
-    minWidth: 18,
-    textAlign: "center",
-    color: THEME.textPrimary,
-    fontWeight: "700",
-  },
-  warningPill: {
-    alignSelf: "flex-start",
-    marginTop: 14,
-    backgroundColor: THEME.warningBg,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  warningText: {
-    color: THEME.warningText,
-    fontSize: 12,
-    fontWeight: "700",
-  },
   summaryCard: {
     backgroundColor: THEME.white,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 18,
+    padding: 18,
     marginTop: 4,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+  },
+  summaryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 6,
+  },
+  summaryTitle: {
+    color: THEME.textPrimary,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  summaryPill: {
+    backgroundColor: "#E9F8F1",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  summaryPillText: {
+    color: THEME.primary,
+    fontSize: 11,
+    fontWeight: "800",
   },
   summaryRow: {
     flexDirection: "row",
@@ -595,6 +727,40 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 12,
   },
+  successPanel: {
+    marginTop: 12,
+    backgroundColor: "#F1FBF8",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#CDEFE3",
+    gap: 6,
+  },
+  successPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  successPanelTitle: {
+    color: THEME.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  successPanelText: {
+    color: THEME.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  receiptRows: {
+    marginTop: 8,
+    gap: 4,
+  },
+  receiptRowText: {
+    color: THEME.warningText,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
   bottomActions: {
     position: "absolute",
     left: 20,
@@ -602,12 +768,19 @@ const styles = StyleSheet.create({
     bottom: 24,
     flexDirection: "row",
     gap: 12,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   secondaryAction: {
     flex: 1,
     height: 54,
     borderRadius: 16,
     backgroundColor: THEME.white,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
     alignItems: "center",
     justifyContent: "center",
   },

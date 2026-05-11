@@ -155,7 +155,9 @@ const useDoctorDetails = (
       try {
         const [profileResponse, schedulesResponse] = await Promise.all([
           apiFetch(`/api/doctors/${doctorId}`),
-          apiFetch("/api/center/schedules?active_only=true"),
+          apiFetch(
+            `/api/center/doctors/${encodeURIComponent(String(doctorUserId))}/schedules?active_only=true`
+          ),
         ]);
 
         if (!profileResponse.ok) {
@@ -174,11 +176,7 @@ const useDoctorDetails = (
         const schedulesPayload = (await schedulesResponse.json().catch(() => [])) as CenterSchedule[];
 
         setProfile(profilePayload);
-        setSchedules(
-          Array.isArray(schedulesPayload)
-            ? schedulesPayload.filter((item) => Number(item?.doctor_id) === doctorUserId)
-            : []
-        );
+        setSchedules(Array.isArray(schedulesPayload) ? schedulesPayload : []);
         setError(null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "Failed to load doctor details");
@@ -260,13 +258,15 @@ const ClinicAssignedCard = memo(function ClinicAssignedCard({
   name,
   type,
   imageUri,
-  onManageSchedule,
+  primaryActionLabel,
+  onPrimaryAction,
   onViewDetails,
 }: {
   name: string;
   type?: string | null;
   imageUri: string;
-  onManageSchedule: () => void;
+  primaryActionLabel: string;
+  onPrimaryAction: () => void;
   onViewDetails: () => void;
 }) {
   const initials = useMemo(
@@ -307,7 +307,7 @@ const ClinicAssignedCard = memo(function ClinicAssignedCard({
 
         <View style={styles.assignedClinicMetaRow}>
           <Ionicons name="calendar-outline" size={13} color={THEME.textSecondary} />
-          <Text style={styles.assignedClinicMetaText}>Available for schedule management</Text>
+          <Text style={styles.assignedClinicMetaText}>Clinic sessions follow reception workflow</Text>
         </View>
 
         <View style={styles.assignedClinicActions}>
@@ -322,9 +322,9 @@ const ClinicAssignedCard = memo(function ClinicAssignedCard({
           <TouchableOpacity
             style={styles.assignedClinicPrimaryButton}
             activeOpacity={0.88}
-            onPress={onManageSchedule}
+            onPress={onPrimaryAction}
           >
-            <Text style={styles.assignedClinicPrimaryButtonText}>Manage Schedule</Text>
+            <Text style={styles.assignedClinicPrimaryButtonText}>{primaryActionLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -525,21 +525,7 @@ export default function DoctorDetailsScreen({ navigation, route }: Props) {
 
             {activeTab === "schedule" ? (
               <>
-                <SectionHeader
-                  title="Schedule"
-                  actionLabel="Manage"
-                  onActionPress={
-                    canManageSchedule
-                      ? () =>
-                          navigation.navigate("MedicalCenterDoctorSchedule", {
-                            doctorId: profile.id,
-                            doctorUserId: route.params.doctorUserId,
-                            doctorName: profile.name,
-                            specialization: profile.specialization,
-                          })
-                      : undefined
-                  }
-                />
+                <SectionHeader title="Schedule" />
 
                 {!canManageSchedule ? (
                   <Text style={styles.helperText}>
@@ -580,17 +566,8 @@ export default function DoctorDetailsScreen({ navigation, route }: Props) {
                         name={clinic.name}
                         type={clinic.type}
                         imageUri={CLINIC_IMAGES[index % CLINIC_IMAGES.length]}
-                        onManageSchedule={
-                          canManageSchedule
-                            ? () =>
-                                navigation.navigate("MedicalCenterDoctorSchedule", {
-                                  doctorId: profile.id,
-                                  doctorUserId: route.params.doctorUserId,
-                                  doctorName: profile.name,
-                                  specialization: profile.specialization,
-                                })
-                            : () => setActiveTab("schedule")
-                        }
+                        primaryActionLabel="View Sessions"
+                        onPrimaryAction={() => setActiveTab("schedule")}
                         onViewDetails={() => setActiveTab("schedule")}
                       />
                     ))}

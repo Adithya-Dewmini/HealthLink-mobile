@@ -30,6 +30,8 @@ interface FormData {
   specialization: string;
   experience: string;
   workplace: string;
+  password: string;
+  confirmPassword: string;
 }
 
 interface Documents {
@@ -42,7 +44,7 @@ interface Errors {
   [key: string]: string;
 }
 
-const TOTAL_STEPS = 3;
+const TOTAL_STEPS = 4;
 const SRI_LANKA_NIC_REGEX = /^(?:\d{9}[VvXx]|\d{12})$/;
 
 type Props = NativeStackScreenProps<AuthStackParamList, "RegisterDoctor">;
@@ -59,6 +61,8 @@ export default function DoctorRegistration({ navigation }: Props) {
     specialization: "",
     experience: "",
     workplace: "",
+    password: "",
+    confirmPassword: "",
   });
   const [documents, setDocuments] = useState<Documents>({
     slmcCert: null,
@@ -72,11 +76,13 @@ export default function DoctorRegistration({ navigation }: Props) {
   const stepLabel = useMemo(() => {
     switch (step) {
       case 1:
-        return "Personal details";
+        return "Basic account details";
       case 2:
         return "Professional details";
-      default:
+      case 3:
         return "Verification documents";
+      default:
+        return "Create password";
     }
   }, [step]);
 
@@ -113,9 +119,7 @@ export default function DoctorRegistration({ navigation }: Props) {
 
     if (step === 1) {
       if (!formData.fullName) nextErrors.fullName = "Full name is required";
-      if (!formData.nic) {
-        nextErrors.nic = "NIC is required";
-      } else if (!SRI_LANKA_NIC_REGEX.test(normalizedNic)) {
+      if (formData.nic && !SRI_LANKA_NIC_REGEX.test(normalizedNic)) {
         nextErrors.nic = "Enter a valid Sri Lankan NIC";
       }
       if (!formData.contact) nextErrors.contact = "Contact number is required";
@@ -132,6 +136,26 @@ export default function DoctorRegistration({ navigation }: Props) {
       if (!formData.specialization) nextErrors.specialization = "Specialization is required";
       if (!formData.experience) nextErrors.experience = "Years of experience is required";
       if (!formData.workplace) nextErrors.workplace = "Current workplace is required";
+    }
+
+    if (step === 3) {
+      if (!documents.slmcCert || !documents.degreeCert || !documents.idProof) {
+        nextErrors.documents = "All required documents must be uploaded.";
+      }
+    }
+
+    if (step === 4) {
+      if (!formData.password) {
+        nextErrors.password = "Password is required";
+      } else if (formData.password.length < 6) {
+        nextErrors.password = "Password must be at least 6 characters";
+      }
+
+      if (!formData.confirmPassword) {
+        nextErrors.confirmPassword = "Please confirm your password";
+      } else if (formData.password !== formData.confirmPassword) {
+        nextErrors.confirmPassword = "Passwords do not match";
+      }
     }
 
     setErrors(nextErrors);
@@ -153,13 +177,6 @@ export default function DoctorRegistration({ navigation }: Props) {
       return;
     }
 
-    if (!documents.slmcCert || !documents.degreeCert || !documents.idProof) {
-      const message = "All required documents must be uploaded.";
-      setErrors((prev) => ({ ...prev, documents: message }));
-      setSubmitError(message);
-      return;
-    }
-
     const toUploadFile = (file: DocumentPicker.DocumentPickerAsset) => ({
       uri: file.uri,
       name: file.name || `upload-${Date.now()}`,
@@ -168,6 +185,16 @@ export default function DoctorRegistration({ navigation }: Props) {
 
     const normalizedNic = formData.nic.replace(/\s+/g, "").toUpperCase();
     const normalizedPhone = formData.contact.replace(/\s+/g, "").replace(/^\+94/, "0");
+    const slmcCert = documents.slmcCert;
+    const degreeCert = documents.degreeCert;
+    const idProof = documents.idProof;
+
+    if (!slmcCert || !degreeCert || !idProof) {
+      const message = "All required documents must be uploaded.";
+      setErrors((prev) => ({ ...prev, documents: message }));
+      setSubmitError(message);
+      return;
+    }
 
     setSubmitting(true);
     setSubmitError("");
@@ -182,11 +209,32 @@ export default function DoctorRegistration({ navigation }: Props) {
       specialization: formData.specialization.trim(),
       experience_years: Number(formData.experience || 0),
       workplace: formData.workplace.trim(),
-      slmc_certificate: toUploadFile(documents.slmcCert),
-      degree_certificate: toUploadFile(documents.degreeCert),
-      id_proof: toUploadFile(documents.idProof),
+      password: formData.password,
+      slmc_certificate: toUploadFile(slmcCert),
+      degree_certificate: toUploadFile(degreeCert),
+      id_proof: toUploadFile(idProof),
     })
       .then((result) => {
+        setFormData({
+          fullName: "",
+          nic: "",
+          contact: "",
+          email: "",
+          slmc: "",
+          qualification: "",
+          specialization: "",
+          experience: "",
+          workplace: "",
+          password: "",
+          confirmPassword: "",
+        });
+        setDocuments({
+          slmcCert: null,
+          degreeCert: null,
+          idProof: null,
+        });
+        setErrors({});
+        setSubmitError("");
         Toast.show({
           type: "success",
           text1: "Registration submitted",
@@ -194,9 +242,9 @@ export default function DoctorRegistration({ navigation }: Props) {
 
         navigation.replace("RegisterDoctorSuccess", {
           doctorId: result.doctorId,
-          status: result.status,
+          verificationStatus: result.verificationStatus,
           email: formData.email.trim().toLowerCase(),
-          setupToken: result.setupToken,
+          canLogin: result.canLogin,
         });
       })
       .catch((caughtError) => {
@@ -221,6 +269,13 @@ export default function DoctorRegistration({ navigation }: Props) {
     </Pressable>
   );
 
+  const isFinalStepSubmitDisabled =
+    submitting ||
+    !formData.password.trim() ||
+    !formData.confirmPassword.trim() ||
+    formData.password.length < 6 ||
+    formData.password !== formData.confirmPassword;
+
   return (
     <AuthLayout>
       <AuthHeader
@@ -233,7 +288,7 @@ export default function DoctorRegistration({ navigation }: Props) {
         {step === 1 ? (
           <>
             <AuthInput label="Full Name" value={formData.fullName} onChangeText={(value) => handleInputChange("fullName", value)} placeholder="Dr. John Doe" icon="person-outline" error={errors.fullName} />
-            <AuthInput label="NIC Number" value={formData.nic} onChangeText={(value) => handleInputChange("nic", value)} placeholder="199012345678 or 901234567V" icon="card-outline" error={errors.nic} />
+            <AuthInput label="NIC Number (Optional)" value={formData.nic} onChangeText={(value) => handleInputChange("nic", value)} placeholder="199012345678 or 901234567V" icon="card-outline" error={errors.nic} />
             <AuthInput label="Contact Number" value={formData.contact} onChangeText={(value) => handleInputChange("contact", value)} placeholder="+94 77 123 4567" keyboardType="phone-pad" icon="call-outline" error={errors.contact} />
             <AuthInput label="Email Address" value={formData.email} onChangeText={(value) => handleInputChange("email", value)} placeholder="doctor@example.com" keyboardType="email-address" icon="mail-outline" error={errors.email} />
           </>
@@ -258,6 +313,30 @@ export default function DoctorRegistration({ navigation }: Props) {
           </>
         ) : null}
 
+        {step === 4 ? (
+          <>
+            <AuthInput
+              label="Password"
+              value={formData.password}
+              onChangeText={(value) => handleInputChange("password", value)}
+              placeholder="Create a password"
+              secureTextEntry
+              icon="lock-closed-outline"
+              error={errors.password}
+            />
+            <AuthInput
+              label="Confirm Password"
+              value={formData.confirmPassword}
+              onChangeText={(value) => handleInputChange("confirmPassword", value)}
+              placeholder="Confirm your password"
+              secureTextEntry
+              icon="shield-checkmark-outline"
+              error={errors.confirmPassword}
+            />
+            <Text style={styles.helperText}>Use at least 6 characters.</Text>
+          </>
+        ) : null}
+
         {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
         <View style={styles.progressRow}>
@@ -269,16 +348,20 @@ export default function DoctorRegistration({ navigation }: Props) {
 
       <View style={styles.footerActions}>
         <TouchableOpacity
-          style={[styles.primaryButton, submitting && styles.primaryButtonDisabled]}
+          style={[
+            styles.primaryButton,
+            (step === TOTAL_STEPS ? isFinalStepSubmitDisabled : submitting) &&
+              styles.primaryButtonDisabled,
+          ]}
           activeOpacity={0.88}
           onPress={step === TOTAL_STEPS ? handleSubmit : handleNext}
-          disabled={submitting}
+          disabled={step === TOTAL_STEPS ? isFinalStepSubmitDisabled : submitting}
         >
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.primaryButtonText}>
-              {step === TOTAL_STEPS ? "Submit Registration" : "Next"}
+              {step === TOTAL_STEPS ? "Submit Registration" : "Continue"}
             </Text>
           )}
         </TouchableOpacity>
@@ -360,6 +443,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 14,
     textAlign: "center",
+  },
+  helperText: {
+    marginTop: -6,
+    marginBottom: 12,
+    color: AUTH_COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: "left",
   },
   footerLink: {
     marginTop: 18,

@@ -1,22 +1,23 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  SafeAreaView,
-  Switch,
-  Dimensions,
-  KeyboardAvoidingView,
-  Platform,
+  ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import PendingApprovalBanner from "./doctor/PendingApprovalBanner";
 import { getQueueDashboard } from "../services/doctorQueueService";
 import {
   completeConsultation,
@@ -24,25 +25,8 @@ import {
   updateConsultationDraft,
 } from "../services/consultationService";
 import { API_BASE_URL } from "../config/api";
-
-const { width } = Dimensions.get("window");
-
-const THEME = {
-  background: "#F8FAFC",
-  white: "#FFFFFF",
-  charcoal: "#0F172A",
-  accentBlue: "#3B82F6",
-  softBlue: "#EFF6FF",
-  textGray: "#64748B",
-  border: "#F1F5F9",
-  danger: "#EF4444",
-  softDanger: "#FEF2F2",
-  success: "#10B981",
-  softSuccess: "#ECFDF5",
-  warning: "#F59E0B",
-  accentGreen: "#4CAF50",
-  softGreen: "#E8F5E9",
-};
+import { doctorColors } from "../constants/doctorTheme";
+import { useAuth } from "../utils/AuthContext";
 
 type ConsultationScreenProps = {
   queueId?: string | number;
@@ -63,14 +47,103 @@ type MedicineItem = {
   notes: string;
 };
 
+type MedicineConflict = {
+  medicine: string;
+  with: string[];
+};
+
+type MedicineFieldErrors = Partial<Record<"name" | "type" | "strength" | "dosage" | "duration" | "timing", string>>;
+
+const THEME = {
+  background: doctorColors.background,
+  surface: doctorColors.surface,
+  card: doctorColors.card,
+  deep: doctorColors.deep,
+  primary: doctorColors.primary,
+  teal: doctorColors.teal,
+  aqua: doctorColors.aqua,
+  border: doctorColors.border,
+  textPrimary: doctorColors.textPrimary,
+  textSecondary: doctorColors.textSecondary,
+  textMuted: doctorColors.textMuted,
+  success: doctorColors.successText,
+  successBg: doctorColors.successBg,
+  warning: doctorColors.warningText,
+  warningBg: doctorColors.warningBg,
+  danger: doctorColors.dangerText,
+  dangerBg: doctorColors.dangerBg,
+};
+
+const INITIAL_MEDICINE_FORM = {
+  name: "",
+  type: "Tablet",
+  strength: "",
+  dosage: { morning: 1, afternoon: 0, night: 1 },
+  timing: "After Meal",
+  duration: "5",
+  notes: "",
+};
+
+const formatDateTime = (value?: string | number | Date | null) => {
+  if (!value) return "Not available";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Not available";
+  return parsed.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const getAutosavePresentation = (status: "idle" | "saving" | "saved" | "error") => {
+  switch (status) {
+    case "saving":
+      return { label: "Saving draft", icon: "sync-outline" as const, tone: THEME.warningBg, color: THEME.warning };
+    case "saved":
+      return { label: "Draft saved", icon: "checkmark-circle-outline" as const, tone: THEME.successBg, color: THEME.success };
+    case "error":
+      return { label: "Save failed", icon: "alert-circle-outline" as const, tone: THEME.dangerBg, color: THEME.danger };
+    case "idle":
+    default:
+      return { label: "Draft idle", icon: "time-outline" as const, tone: "#EDF7F7", color: THEME.textSecondary };
+  }
+};
+
+const validateMedicine = (medicine: Partial<MedicineItem>): MedicineFieldErrors => {
+  const errors: MedicineFieldErrors = {};
+  const name = String(medicine.name || "").trim();
+  const type = String(medicine.type || "").trim();
+  const strength = String(medicine.strength || "").trim();
+  const timing = String(medicine.timing || "").trim();
+  const duration = Number(medicine.duration || 0);
+  const dosage = medicine.dosage || { morning: 0, afternoon: 0, night: 0 };
+  const totalDosage = Number(dosage.morning || 0) + Number(dosage.afternoon || 0) + Number(dosage.night || 0);
+
+  if (!name) errors.name = "Medicine name is required.";
+  if (name && !type) errors.type = "Select the medicine type.";
+  if (name && !strength) errors.strength = "Add the medicine strength.";
+  if (name && totalDosage <= 0) errors.dosage = "Select at least one dose time.";
+  if (name && (!Number.isFinite(duration) || duration <= 0)) errors.duration = "Enter the number of days.";
+  if (name && !timing) errors.timing = "Choose when the medicine should be taken.";
+
+  return errors;
+};
+
+const formatConflictCopy = (conflicts: MedicineConflict[]) =>
+  conflicts
+    .map((conflict) => {
+      const withList = conflict.with.map((item) => item.trim()).filter(Boolean).join(", ");
+      return `${conflict.medicine} conflicts with ${withList}.`;
+    })
+    .join(" ");
+
 export default function ConsultationScreen({ queueId }: ConsultationScreenProps) {
   const navigation = useNavigation<any>();
-  const [activeTab, setActiveTab] = useState("Notes");
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<"History" | "Notes" | "Medicines">("Notes");
   const [isChronic, setIsChronic] = useState(false);
-  const [selectedInvestigations, setSelectedInvestigations] = useState<string[]>([
-    "Blood Count",
-  ]);
-  const [actionAdvice, setActionAdvice] = useState("");
+  const [selectedInvestigations] = useState<string[]>(["Blood Count"]);
   const [modalVisible, setModalVisible] = useState(false);
 
   const [symptoms, setSymptoms] = useState("");
@@ -85,9 +158,18 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
   const [patientToken, setPatientToken] = useState<string | number | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [medicines, setMedicines] = useState<MedicineItem[]>([]);
+  const [medicineErrors, setMedicineErrors] = useState<Record<number, MedicineFieldErrors>>({});
+  const [conflictWarnings, setConflictWarnings] = useState<MedicineConflict[]>([]);
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const lastSavedRef = useRef<string>("");
+  const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
+  const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
 
   useEffect(() => {
+    if (!isVerifiedDoctor) {
+      setLoading(false);
+      return;
+    }
     const fetchPatientData = async () => {
       if (!queueId) {
         setLoading(false);
@@ -101,18 +183,14 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         const contentType = res.headers.get("content-type") || "";
         const raw = await res.text();
         if (!res.ok) {
-          console.log("Patient fetch failed:", res.status, raw.slice(0, 200));
-          throw new Error("Patient fetch failed");
+          throw new Error("Could not load the consultation context.");
         }
         const data = contentType.includes("application/json") ? JSON.parse(raw) : null;
         if (!data) {
-          console.log("Unexpected response:", raw.slice(0, 200));
-          throw new Error("Invalid response");
+          throw new Error("Invalid consultation response.");
         }
         setPatientData(data);
-        if (data?.patient?.name) {
-          setPatientName(data.patient.name);
-        }
+        if (data?.patient?.name) setPatientName(data.patient.name);
         if (data?.patient?.age) {
           const gender = data?.patient?.gender
             ? String(data.patient.gender).charAt(0).toUpperCase()
@@ -126,9 +204,10 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       }
     };
     void fetchPatientData();
-  }, [queueId]);
+  }, [isVerifiedDoctor, queueId]);
 
   useEffect(() => {
+    if (!isVerifiedDoctor) return;
     const load = async () => {
       try {
         const token = await AsyncStorage.getItem("token");
@@ -142,18 +221,17 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
           const gender = current.gender ? String(current.gender).charAt(0).toUpperCase() : "";
           setPatientAge(gender ? `${age}${gender}` : age);
           setPatientToken(current.token_number ?? null);
-          if (current.consultation_id) {
-            setConsultationId(current.consultation_id);
-          }
+          if (current.consultation_id) setConsultationId(current.consultation_id);
         }
       } catch (error) {
         console.log("Consultation load error:", error);
       }
     };
     void load();
-  }, [queueId]);
+  }, [isVerifiedDoctor, queueId]);
 
   useEffect(() => {
+    if (!isVerifiedDoctor) return;
     const createDraft = async () => {
       if (!patientId || consultationId) return;
       try {
@@ -175,9 +253,10 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       }
     };
     void createDraft();
-  }, [patientId, queueId, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
+  }, [isVerifiedDoctor, patientId, queueId, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
 
   useEffect(() => {
+    if (!isVerifiedDoctor) return;
     if (!consultationId) return;
     const interval = setInterval(async () => {
       try {
@@ -204,73 +283,9 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [consultationId, symptoms, diagnosis, doctorNotes, medicines]);
+  }, [isVerifiedDoctor, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
 
-  const handleSaveDraft = () => {
-    Alert.alert(
-      "Save Draft",
-      "Save all current consultation data?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Save",
-          onPress: async () => {
-            try {
-              if (!consultationId) {
-                Alert.alert("Not ready", "Consultation draft not created yet.");
-                return;
-              }
-              const token = await AsyncStorage.getItem("token");
-              if (!token) return;
-              const payload = { symptoms, diagnosis, notes: doctorNotes, medicines };
-              await updateConsultationDraft(token, consultationId, payload);
-              lastSavedRef.current = JSON.stringify(payload);
-              setSaveStatus("saved");
-              Alert.alert("Saved", "Draft saved successfully.");
-            } catch (error) {
-              console.log("Save draft error:", error);
-              Alert.alert("Error", "Failed to save draft.");
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const handleComplete = async () => {
-    try {
-      if (!consultationId) return;
-      const token = await AsyncStorage.getItem("token");
-      if (!token) return;
-      const res = await completeConsultation(token, consultationId, medicines);
-      if (res?.success) {
-        Alert.alert("Success", "Prescription sent to patient");
-        navigation.replace("DoctorTabs", { screen: "DoctorQueueControl" });
-        return;
-      }
-      Alert.alert("Done", res?.message ?? "Consultation completed.");
-    } catch (error) {
-      console.log("Complete consultation error:", error);
-      Alert.alert("Error", "Unable to complete consultation");
-    }
-  };
-
-  const handleAddMedicine = () => {
-    setModalVisible(true);
-  };
-
-  const handleAddMedicineItem = (newMedicine: MedicineItem) => {
-    setMedicines((prev) => {
-      const exists = prev.find((m) => m.name === newMedicine.name);
-      if (exists) return prev;
-      return [...prev, newMedicine];
-    });
-    Alert.alert("Added", "Medicine added successfully.");
-  };
-
-  const handleRemoveMedicine = (id: number) => {
-    setMedicines((prev) => prev.filter((m) => m.id !== id));
-  };
+  const autosaveState = getAutosavePresentation(saveStatus);
 
   const patient = {
     name: patientName || "—",
@@ -278,11 +293,136 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
     token: patientToken ?? "—",
   };
 
+  const validatedMedicineErrors = useMemo(() => {
+    const next: Record<number, MedicineFieldErrors> = {};
+    medicines.forEach((medicine) => {
+      const errors = validateMedicine(medicine);
+      if (Object.keys(errors).length > 0) {
+        next[medicine.id] = errors;
+      }
+    });
+    return next;
+  }, [medicines]);
+
+  const handleSaveDraft = () => {
+    if (!isVerifiedDoctor) {
+      Alert.alert("Approval required", "Consultation drafts will be available after doctor approval.");
+      return;
+    }
+    Alert.alert("Save Draft", "Save all current consultation data?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Save",
+        onPress: async () => {
+          try {
+            if (!consultationId) {
+              Alert.alert("Not ready", "Consultation draft is not ready yet.");
+              return;
+            }
+            const token = await AsyncStorage.getItem("token");
+            if (!token) return;
+            const payload = { symptoms, diagnosis, notes: doctorNotes, medicines };
+            await updateConsultationDraft(token, consultationId, payload);
+            lastSavedRef.current = JSON.stringify(payload);
+            setSaveStatus("saved");
+            Alert.alert("Draft Saved", "Your consultation draft has been saved.");
+          } catch (error) {
+            console.log("Save draft error:", error);
+            Alert.alert("Save Failed", "Could not save the consultation draft.");
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleComplete = async () => {
+    if (!isVerifiedDoctor) {
+      Alert.alert("Approval required", "You can complete consultations after doctor approval.");
+      return;
+    }
+    setCompletionMessage(null);
+    setConflictWarnings([]);
+    setMedicineErrors(validatedMedicineErrors);
+
+    if (Object.keys(validatedMedicineErrors).length > 0) {
+      setActiveTab("Medicines");
+      setCompletionMessage("Please review the highlighted medicine entries before completing this consultation.");
+      return;
+    }
+
+    try {
+      if (!consultationId) {
+        Alert.alert("Not ready", "Consultation draft is not ready yet.");
+        return;
+      }
+      const token = await AsyncStorage.getItem("token");
+      if (!token) return;
+      const res = await completeConsultation(token, consultationId, medicines);
+      if (res?.success) {
+        Alert.alert("Prescription Issued", "The prescription was sent to the patient.");
+        navigation.replace("DoctorTabs", { screen: "DoctorQueueControl" });
+        return;
+      }
+      Alert.alert("Consultation Completed", res?.message ?? "Consultation completed.");
+    } catch (error: any) {
+      console.log("Complete consultation error:", error);
+      const conflicts = Array.isArray(error?.response?.data?.conflicts)
+        ? (error.response.data.conflicts as MedicineConflict[])
+        : [];
+      if (conflicts.length > 0) {
+        setConflictWarnings(conflicts);
+        setCompletionMessage(
+          "Medicine conflict found. Please review the highlighted medicines before completing this consultation."
+        );
+        setActiveTab("Medicines");
+        return;
+      }
+      const backendMessage = error?.response?.data?.message;
+      Alert.alert("Complete Consultation Failed", backendMessage || "Unable to complete this consultation.");
+    }
+  };
+
+  const handleAddMedicineItem = (newMedicine: MedicineItem) => {
+    setMedicines((prev) => {
+      const exists = prev.find((medicine) => medicine.name.trim().toLowerCase() === newMedicine.name.trim().toLowerCase());
+      if (exists) return prev;
+      return [...prev, newMedicine];
+    });
+    setMedicineErrors((prev) => ({ ...prev, [newMedicine.id]: {} }));
+  };
+
+  const handleRemoveMedicine = (id: number) => {
+    setMedicines((prev) => prev.filter((medicine) => medicine.id !== id));
+    setMedicineErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingWrap}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator size="large" color={THEME.primary} />
+          <Text style={styles.loadingText}>Loading consultation...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isVerifiedDoctor) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <PendingApprovalBanner />
+        <View style={styles.blockedScreen}>
+          <View style={styles.blockedCard}>
+            <Ionicons name="lock-closed-outline" size={28} color={THEME.warning} />
+            <Text style={styles.blockedTitle}>Consultation access is limited</Text>
+            <Text style={styles.blockedText}>
+              Consultations and prescription actions will be available once your doctor account is approved.
+            </Text>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -290,401 +430,414 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Header with Back Button + Patient Info */}
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.backBtn}
+          style={styles.headerIconButton}
           onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
-          <Ionicons name="chevron-back" size={22} color={THEME.charcoal} />
+          <Ionicons name="chevron-back" size={22} color={THEME.deep} />
         </TouchableOpacity>
-        <View style={styles.patientInfo}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={20} color={THEME.accentBlue} />
-          </View>
-          <View>
-            <Text style={styles.patientName}>
-              {patient.name} | {patient.age}
-            </Text>
-            <View style={styles.tokenBadge}>
-              <Text style={styles.tokenText}>Token #{patient.token}</Text>
+
+        <View style={styles.headerTitleBlock}>
+          <Text style={styles.headerEyebrow}>Doctor Consultation</Text>
+          <Text style={styles.headerTitle}>Clinical Review</Text>
+        </View>
+
+        <View style={[styles.autosaveChip, { backgroundColor: autosaveState.tone }]}>
+          <Ionicons name={autosaveState.icon} size={14} color={autosaveState.color} />
+          <Text style={[styles.autosaveText, { color: autosaveState.color }]}>{autosaveState.label}</Text>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.patientSummaryCard}>
+            <View style={styles.patientAvatar}>
+              <Ionicons name="person-outline" size={24} color={THEME.deep} />
+            </View>
+            <View style={styles.patientSummaryCopy}>
+              <Text style={styles.patientSummaryName} numberOfLines={1}>
+                {patient.name}
+              </Text>
+              <Text style={styles.patientSummaryMeta}>
+                {patient.age} • Token #{patient.token}
+              </Text>
             </View>
           </View>
-        </View>
-        <TouchableOpacity style={styles.iconBtn}>
-          <Ionicons name="notifications-outline" size={22} color={THEME.charcoal} />
-        </TouchableOpacity>
-      </View>
 
-      {/* Tab Switcher */}
-      <View style={styles.tabContainer}>
-        {["History", "Notes", "Action"].map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.activeTab]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text
-              style={[styles.tabText, activeTab === tab && styles.activeTabText]}
-            >
-              {tab}
+          <View style={styles.contextCard}>
+            <View style={styles.contextRow}>
+              <ContextPill icon="medical-outline" label={`Queue ${queueId ?? "—"}`} />
+              <ContextPill icon="document-text-outline" label={`Consultation ${consultationId ?? "Draft"}`} />
+            </View>
+            <Text style={styles.contextText}>
+              Complete this consultation to issue the prescription and move the next patient into the live queue.
             </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+          </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+          {completionMessage ? (
+            <View style={styles.warningBanner}>
+              <Ionicons name="warning-outline" size={18} color={THEME.warning} />
+              <Text style={styles.warningBannerText}>{completionMessage}</Text>
+            </View>
+          ) : null}
+
+          {conflictWarnings.length > 0 ? (
+            <View style={styles.conflictCard}>
+              <Text style={styles.conflictTitle}>Medicine conflict found</Text>
+              <Text style={styles.conflictText}>{formatConflictCopy(conflictWarnings)}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.tabBar}>
+            {(["History", "Notes", "Medicines"] as const).map((tab) => {
+              const active = activeTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.tabButton, active && styles.tabButtonActive]}
+                  onPress={() => setActiveTab(tab)}
+                >
+                  <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>{tab}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           {activeTab === "History" ? (
-            <View style={styles.historyContainer}>
+            <View style={styles.sectionStack}>
               {(patientData?.conditions?.length || patientData?.allergies?.length) ? (
-                <View style={styles.riskCard}>
-                  <View style={styles.riskHeader}>
-                    <Ionicons name="warning" size={20} color={THEME.danger} />
-                    <Text style={styles.riskTitle}>High Risk Alerts</Text>
-                  </View>
-                  <View style={styles.riskList}>
-                    {(patientData?.conditions || []).map((c: string, i: number) => (
-                      <Text key={`cond-${i}`} style={styles.riskItem}>
-                        • {c}
-                      </Text>
-                    ))}
-                    {(patientData?.allergies || []).map((a: string, i: number) => (
-                      <Text key={`allergy-${i}`} style={styles.riskItem}>
-                        • {a} Allergy
-                      </Text>
-                    ))}
-                  </View>
+                <View style={styles.alertCard}>
+                  <Text style={styles.alertTitle}>Clinical alerts</Text>
+                  {(patientData?.conditions || []).map((condition: string, index: number) => (
+                    <Text key={`condition-${index}`} style={styles.alertLine}>
+                      • {condition}
+                    </Text>
+                  ))}
+                  {(patientData?.allergies || []).map((allergy: string, index: number) => (
+                    <Text key={`allergy-${index}`} style={styles.alertLine}>
+                      • {allergy} allergy
+                    </Text>
+                  ))}
                 </View>
               ) : null}
 
-              <View style={styles.historySectionHeader}>
-                <Text style={styles.historySectionLabel}>Chronic Conditions</Text>
-              </View>
-              <View style={styles.chipContainer}>
-                {(patientData?.conditions || []).map((c: string, i: number) => (
-                  <View key={`cond-chip-${i}`} style={[styles.chipBase, { backgroundColor: THEME.softBlue }]}>
-                    <Text style={[styles.chipBaseText, { color: THEME.accentBlue }]}>{c}</Text>
-                  </View>
-                ))}
-              </View>
+              <InfoSection title="Chronic Conditions">
+                <View style={styles.chipWrap}>
+                  {(patientData?.conditions || []).length > 0 ? (
+                    (patientData.conditions || []).map((condition: string, index: number) => (
+                      <Tag key={`history-cond-${index}`} label={condition} tone="primary" />
+                    ))
+                  ) : (
+                    <Text style={styles.emptyInlineText}>No chronic conditions recorded.</Text>
+                  )}
+                </View>
+              </InfoSection>
 
-              <View style={styles.historySectionHeader}>
-                <Text style={styles.historySectionLabel}>Allergies</Text>
-              </View>
-              <View style={styles.chipContainer}>
-                {(patientData?.allergies || []).map((a: string, i: number) => (
-                  <View key={`allergy-chip-${i}`} style={[styles.chipBase, { backgroundColor: THEME.softDanger }]}>
-                    <Text style={[styles.chipBaseText, { color: THEME.danger }]}>{a}</Text>
-                  </View>
-                ))}
-              </View>
+              <InfoSection title="Allergies">
+                <View style={styles.chipWrap}>
+                  {(patientData?.allergies || []).length > 0 ? (
+                    (patientData.allergies || []).map((allergy: string, index: number) => (
+                      <Tag key={`history-allergy-${index}`} label={allergy} tone="danger" />
+                    ))
+                  ) : (
+                    <Text style={styles.emptyInlineText}>No allergy notes recorded.</Text>
+                  )}
+                </View>
+              </InfoSection>
 
-              <View style={styles.historySectionHeader}>
-                <Text style={styles.historySectionLabel}>Recent Visits</Text>
-                <TouchableOpacity>
-                  <Text style={styles.seeAllText}>View Full History</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.whiteCard}>
-                {(patientData?.visits || []).map((visit: any, i: number) => (
-                  <React.Fragment key={`visit-${i}`}>
-                    <HistoryTimelineItem
-                      date={visit.date}
-                      diagnosis={visit.diagnosis}
-                      treatment={visit.notes}
-                      isLast={i === (patientData?.visits?.length ?? 0) - 1}
-                    />
-                    {i < (patientData?.visits?.length ?? 0) - 1 ? (
-                      <View style={styles.timelineDivider} />
-                    ) : null}
-                  </React.Fragment>
-                ))}
-              </View>
-
-              <View style={styles.historySectionHeader}>
-                <Text style={styles.historySectionLabel}>Recent Medications</Text>
-              </View>
-              <View style={styles.whiteCard}>
-                {(patientData?.medications || []).map((med: string, i: number) => (
-                  <View key={`med-${i}`} style={styles.medRow}>
-                    <Ionicons name="medical" size={16} color={THEME.accentBlue} />
-                    <Text style={styles.medText}>{med}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.smartHighlight}>
-                <Ionicons name="bulb" size={18} color="#FBC02D" />
-                <Text style={styles.smartText}>
-                  Frequent visits detected (3 in last 30 days)
-                </Text>
-              </View>
+              <InfoSection title="Recent Visits">
+                <View style={styles.contentCard}>
+                  {(patientData?.visits || []).length > 0 ? (
+                    (patientData.visits || []).map((visit: any, index: number) => (
+                      <View key={`visit-${index}`} style={[styles.timelineItem, index > 0 && styles.timelineItemBorder]}>
+                        <Text style={styles.timelineDate}>{formatDateTime(visit.date)}</Text>
+                        <Text style={styles.timelineTitle}>{visit.diagnosis || "Visit recorded"}</Text>
+                        <Text style={styles.timelineBody}>{visit.notes || "No additional notes."}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.emptyInlineText}>No recent visits found.</Text>
+                  )}
+                </View>
+              </InfoSection>
             </View>
           ) : null}
 
           {activeTab === "Notes" ? (
-            <>
-              {/* Chief Complaint */}
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIcon}>
-                  <Ionicons name="medkit-outline" size={16} color={THEME.charcoal} />
-                </View>
-                <Text style={styles.sectionTitle}>Chief Complaint</Text>
-              </View>
-              <View style={styles.card}>
-                <TextInput
-                  placeholder="Fever, headache for 2 days..."
-                  style={styles.complaintInput}
-                  multiline
+            <View style={styles.sectionStack}>
+              <InfoSection title="Symptoms">
+                <LargeInput
                   value={symptoms}
                   onChangeText={setSymptoms}
+                  placeholder="Describe the patient's symptoms"
+                  minHeight={120}
                 />
-              </View>
+              </InfoSection>
 
-              {/* Diagnosis Section */}
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIcon}>
-                  <Ionicons name="bulb-outline" size={16} color={THEME.charcoal} />
-                </View>
-                <Text style={styles.sectionTitle}>Diagnosis</Text>
-              </View>
-              <View style={styles.card}>
-                <View style={styles.searchBar}>
-                  <Ionicons name="search" size={18} color={THEME.textGray} />
-                  <TextInput
-                    placeholder="Search disease or ICD code"
-                    style={styles.searchInput}
-                    value={diagnosis}
-                    onChangeText={setDiagnosis}
-                  />
-                </View>
-
-                <View style={styles.chipRow}>
-                  {["Viral Fever", "Migraine"].map((item) => (
-                    <View key={item} style={styles.chip}>
-                      <Text style={styles.chipText}>{item}</Text>
-                      <Ionicons name="close-circle" size={16} color={THEME.textGray} />
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.divider} />
-
-                <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>Mark as Chronic Condition</Text>
+              <InfoSection title="Diagnosis">
+                <LargeInput
+                  value={diagnosis}
+                  onChangeText={setDiagnosis}
+                  placeholder="Enter a diagnosis or working diagnosis"
+                  minHeight={96}
+                />
+                <View style={styles.switchRow}>
+                  <Text style={styles.switchLabel}>Mark as chronic condition</Text>
                   <Switch
                     value={isChronic}
                     onValueChange={setIsChronic}
-                    trackColor={{ false: "#D1D1D1", true: THEME.accentBlue }}
+                    trackColor={{ false: "#D4E7E7", true: THEME.teal }}
+                    thumbColor={isChronic ? THEME.surface : "#FFFFFF"}
                   />
                 </View>
-              </View>
+              </InfoSection>
 
-              {/* Clinical Notes */}
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIcon}>
-                  <Ionicons name="document-text-outline" size={16} color={THEME.charcoal} />
-                </View>
-                <Text style={styles.sectionTitle}>Clinical Notes (Optional)</Text>
-              </View>
-              <View style={[styles.card, { paddingVertical: 10 }]}>
-                <TextInput
-                  placeholder="Observations or remarks..."
-                  style={styles.notesInput}
-                  multiline
+              <InfoSection title="Clinical Notes">
+                <LargeInput
                   value={doctorNotes}
                   onChangeText={setDoctorNotes}
+                  placeholder="Add observations, examination findings, or treatment notes"
+                  minHeight={140}
                 />
-              </View>
+              </InfoSection>
 
-              {/* Investigations */}
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIcon}>
-                  <Ionicons name="flask-outline" size={16} color={THEME.charcoal} />
+              <InfoSection title="Investigations">
+                <View style={styles.chipWrap}>
+                  {selectedInvestigations.map((item) => (
+                    <Tag key={item} label={item} tone="neutral" />
+                  ))}
                 </View>
-                <Text style={styles.sectionTitle}>Investigations</Text>
-                <Text style={styles.seeAll}>See all</Text>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.investigationRow}
-              >
-                <TouchableOpacity style={styles.addBtn}>
-                  <Ionicons name="add" size={20} color={THEME.charcoal} />
-                </TouchableOpacity>
-                {selectedInvestigations.map((test) => (
-                  <TouchableOpacity key={test} style={styles.testChip}>
-                    <Text style={styles.testChipText}>{test}</Text>
-                  </TouchableOpacity>
-                ))}
-                {["Urine Test", "X-Ray Chest"].map((test) => (
-                  <TouchableOpacity key={test} style={styles.testChip}>
-                    <Text style={styles.testChipText}>{test}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              <Text style={styles.saveHint}>
-                {saveStatus === "saving"
-                  ? "Saving..."
-                  : saveStatus === "saved"
-                    ? "Saved just now"
-                    : saveStatus === "error"
-                      ? "Save failed"
-                      : ""}
-              </Text>
-            </>
+              </InfoSection>
+            </View>
           ) : null}
 
-          {activeTab === "Action" ? (
-            <>
-              <View style={styles.actionSectionHeader}>
-                <Text style={styles.actionSectionTitle}>Medicines</Text>
-                <TouchableOpacity style={styles.addMedicineBtn} onPress={handleAddMedicine}>
-                  <Ionicons name="add-circle" size={20} color={THEME.accentBlue} />
-                  <Text style={styles.addText}>Add Medicine</Text>
+          {activeTab === "Medicines" ? (
+            <View style={styles.sectionStack}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Medicine Builder</Text>
+                <TouchableOpacity
+                  style={styles.addMedicineButton}
+                  onPress={() => setModalVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add medicine"
+                >
+                  <Ionicons name="add" size={18} color={THEME.surface} />
+                  <Text style={styles.addMedicineButtonText}>Add Medicine</Text>
                 </TouchableOpacity>
               </View>
 
-              {medicines.map((item) => (
-                <View key={item.id} style={styles.medicineCard}>
-                  <View style={styles.medHeader}>
-                    <View>
-                      <Text style={styles.medName}>{item.name}</Text>
-                      <Text style={styles.medStrength}>
-                        {item.type} | {item.strength}
-                      </Text>
-                    </View>
-                    <TouchableOpacity onPress={() => handleRemoveMedicine(item.id)}>
-                      <Ionicons name="trash-outline" size={20} color={THEME.danger} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.actionDivider} />
-
-                  <View style={styles.dosageRow}>
-                    <View style={styles.dosageItem}>
-                      <Text style={styles.dosageLabel}>Dosage</Text>
-                      <View style={styles.dosageBadge}>
-                        <Text style={styles.dosageText}>
-                          {item.dosage.morning}-{item.dosage.afternoon}-{item.dosage.night}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.dosageItem}>
-                      <Text style={styles.dosageLabel}>Duration</Text>
-                      <Text style={styles.dosageValue}>{item.duration} days</Text>
-                    </View>
-                    <View style={styles.dosageItem}>
-                      <Text style={styles.dosageLabel}>Timing</Text>
-                      <Text style={styles.dosageValue}>{item.timing}</Text>
-                    </View>
-                  </View>
+              {medicines.length === 0 ? (
+                <View style={styles.emptyBuilderCard}>
+                  <Text style={styles.emptyBuilderTitle}>No medicines added yet</Text>
+                  <Text style={styles.emptyBuilderText}>
+                    Add medicines now if this consultation needs a prescription.
+                  </Text>
                 </View>
-              ))}
+              ) : (
+                medicines.map((medicine) => {
+                  const fieldErrors = medicineErrors[medicine.id] || validatedMedicineErrors[medicine.id] || {};
+                  return (
+                    <View key={medicine.id} style={styles.medicineCard}>
+                      <View style={styles.medicineCardHeader}>
+                        <View style={styles.medicineHeaderCopy}>
+                          <Text style={styles.medicineName} numberOfLines={1}>
+                            {medicine.name}
+                          </Text>
+                          <Text style={styles.medicineSubline} numberOfLines={1}>
+                            {medicine.type} • {medicine.strength}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.removeMedicineButton}
+                          onPress={() => handleRemoveMedicine(medicine.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${medicine.name}`}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={THEME.danger} />
+                        </TouchableOpacity>
+                      </View>
 
-              <View style={styles.actionSectionHeader}>
-                <Text style={styles.actionSectionTitle}>Additional Advice</Text>
-              </View>
-              <View style={styles.adviceCard}>
-                <TextInput
-                  placeholder="e.g. Drink plenty of water, Rest for 3 days..."
-                  placeholderTextColor={THEME.textGray}
-                  multiline
-                  style={styles.adviceInput}
-                  value={actionAdvice}
-                  onChangeText={setActionAdvice}
-                />
-              </View>
+                      <View style={styles.medicineMetaGrid}>
+                        <MetaTile label="Dosage" value={`${medicine.dosage.morning}-${medicine.dosage.afternoon}-${medicine.dosage.night}`} />
+                        <MetaTile label="Duration" value={`${medicine.duration} days`} />
+                        <MetaTile label="Timing" value={medicine.timing} />
+                      </View>
 
-              <View style={styles.qrStatusInfo}>
-                <Ionicons name="checkmark-circle" size={16} color={THEME.accentGreen} />
-                <Text style={styles.qrStatusText}>
-                  QR will be generated for the Patient App upon completion.
-                </Text>
-              </View>
-            </>
+                      {medicine.notes ? <Text style={styles.medicineNotes}>{medicine.notes}</Text> : null}
+
+                      {Object.values(fieldErrors).filter(Boolean).length > 0 ? (
+                        <View style={styles.inlineErrorBox}>
+                          {Object.values(fieldErrors).map((errorText) =>
+                            errorText ? (
+                              <Text key={errorText} style={styles.inlineErrorText}>
+                                • {errorText}
+                              </Text>
+                            ) : null
+                          )}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })
+              )}
+            </View>
           ) : null}
         </ScrollView>
+
+        <AddMedicineModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          onAdd={(medicine: MedicineItem) => {
+            handleAddMedicineItem(medicine);
+            setModalVisible(false);
+          }}
+        />
+
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={styles.draftButton}
+            onPress={handleSaveDraft}
+            accessibilityRole="button"
+            accessibilityLabel="Save consultation draft"
+          >
+            <Text style={styles.draftButtonText}>Save Draft</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.completeButton}
+            onPress={handleComplete}
+            accessibilityRole="button"
+            accessibilityLabel="Complete consultation"
+          >
+            <Text style={styles.completeButtonText}>Complete Consultation</Text>
+            <Ionicons name="arrow-forward" size={18} color={THEME.surface} />
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
-
-      <AddMedicineModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        onAdd={handleAddMedicineItem}
-      />
-
-      {/* Bottom Action Bar */}
-      <View style={styles.bottomActions}>
-        <TouchableOpacity style={styles.draftBtn} onPress={handleSaveDraft}>
-          <Text style={styles.draftBtnText}>Save Draft</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.completeBtn} onPress={handleComplete}>
-          <Text style={styles.completeBtnText}>Complete & Next Patient</Text>
-          <Ionicons name="arrow-forward" size={18} color={THEME.white} />
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
 
-const HistoryTimelineItem = ({ date, diagnosis, treatment, isLast }: any) => (
-  <View style={styles.timelineItem}>
-    <View style={styles.timelinePointContainer}>
-      <View style={[styles.timelineDot, isLast && styles.activeDot]} />
+function InfoSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
     </View>
-    <View style={styles.timelineContent}>
-      <Text style={styles.timelineDate}>{date}</Text>
-      <Text style={styles.timelineDiagnosis}>{diagnosis}</Text>
-      <Text style={styles.timelineTreatment}>{treatment}</Text>
+  );
+}
+
+function Tag({ label, tone }: { label: string; tone: "primary" | "danger" | "neutral" }) {
+  const palette =
+    tone === "danger"
+      ? { backgroundColor: THEME.dangerBg, color: THEME.danger }
+      : tone === "primary"
+        ? { backgroundColor: "#E7F6F5", color: THEME.primary }
+        : { backgroundColor: "#EEF7F7", color: THEME.textSecondary };
+  return (
+    <View style={[styles.tag, { backgroundColor: palette.backgroundColor }]}>
+      <Text style={[styles.tagText, { color: palette.color }]}>{label}</Text>
     </View>
-  </View>
-);
+  );
+}
 
-const AddMedicineModal = ({ visible, onClose, onAdd }: any) => {
-  const [selectedMedicine, setSelectedMedicine] = useState({
-    name: "Paracetamol",
-    type: "Tablet",
-    strength: "500mg",
-  });
-  const [dosage, setDosage] = useState({ morning: 1, afternoon: 0, night: 1 });
-  const [timing, setTiming] = useState("After Meal");
-  const [duration, setDuration] = useState("5 days");
-  const [notes, setNotes] = useState("");
+function ContextPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.contextPill}>
+      <Ionicons name={icon} size={14} color={THEME.primary} />
+      <Text style={styles.contextPillText}>{label}</Text>
+    </View>
+  );
+}
 
-  const cycleDosage = (key: keyof typeof dosage) => {
-    setDosage((prev) => ({
+function MetaTile({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metaTile}>
+      <Text style={styles.metaTileLabel}>{label}</Text>
+      <Text style={styles.metaTileValue} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function LargeInput({
+  value,
+  onChangeText,
+  placeholder,
+  minHeight,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  minHeight: number;
+}) {
+  return (
+    <View style={styles.contentCard}>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={THEME.textMuted}
+        multiline
+        style={[styles.largeInput, { minHeight }]}
+        textAlignVertical="top"
+      />
+    </View>
+  );
+}
+
+function AddMedicineModal({
+  visible,
+  onClose,
+  onAdd,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onAdd: (medicine: MedicineItem) => void;
+}) {
+  const [form, setForm] = useState(INITIAL_MEDICINE_FORM);
+  const [errors, setErrors] = useState<MedicineFieldErrors>({});
+
+  useEffect(() => {
+    if (!visible) {
+      setForm(INITIAL_MEDICINE_FORM);
+      setErrors({});
+    }
+  }, [visible]);
+
+  const cycleDosage = (key: keyof typeof form.dosage) => {
+    setForm((prev) => ({
       ...prev,
-      [key]: prev[key] >= 2 ? 0 : prev[key] + 1,
+      dosage: {
+        ...prev.dosage,
+        [key]: prev.dosage[key] >= 2 ? 0 : prev.dosage[key] + 1,
+      },
     }));
+    setErrors((prev) => ({ ...prev, dosage: undefined }));
   };
 
-  const handleSubmit = () => {
-    const parsedDuration = Number(duration.split(" ")[0]) || 0;
-    const medicineData = {
+  const submit = () => {
+    const parsedDuration = Number(form.duration);
+    const nextMedicine: MedicineItem = {
       id: Date.now(),
-      name: selectedMedicine.name.trim() || "Untitled",
-      type: selectedMedicine.type.trim() || "Tablet",
-      strength: selectedMedicine.strength.trim() || "—",
-      dosage: {
-        morning: dosage.morning,
-        afternoon: dosage.afternoon,
-        night: dosage.night,
-      },
-      duration: parsedDuration,
-      timing,
-      notes: notes.trim(),
+      name: form.name.trim(),
+      type: form.type.trim(),
+      strength: form.strength.trim(),
+      dosage: form.dosage,
+      duration: Number.isFinite(parsedDuration) ? parsedDuration : 0,
+      timing: form.timing.trim(),
+      notes: form.notes.trim(),
     };
-    onAdd?.(medicineData);
-    onClose();
+    const nextErrors = validateMedicine(nextMedicine);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+    onAdd(nextMedicine);
   };
 
   return (
@@ -693,628 +846,717 @@ const AddMedicineModal = ({ visible, onClose, onAdd }: any) => {
         <View style={styles.modalSheet}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Medicine</Text>
-            <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn}>
-              <Ionicons name="close" size={24} color={THEME.charcoal} />
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.modalCloseButton}
+              accessibilityRole="button"
+              accessibilityLabel="Close add medicine form"
+            >
+              <Ionicons name="close" size={22} color={THEME.textPrimary} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.modalScroll}
-          >
-            <View style={styles.modalSearch}>
-              <Ionicons name="search" size={20} color={THEME.textGray} style={styles.modalSearchIcon} />
-              <TextInput
-                placeholder="Search medicine (e.g. Paracetamol)"
-                style={styles.modalSearchInput}
-                placeholderTextColor={THEME.textGray}
-                value={selectedMedicine.name}
-                onChangeText={(text) =>
-                  setSelectedMedicine((prev) => ({ ...prev, name: text }))
-                }
-              />
-            </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
+            <TextInput
+              placeholder="Medicine name"
+              placeholderTextColor={THEME.textMuted}
+              style={styles.modalInput}
+              value={form.name}
+              onChangeText={(value) => {
+                setForm((prev) => ({ ...prev, name: value }));
+                setErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+            />
+            {errors.name ? <Text style={styles.fieldErrorText}>{errors.name}</Text> : null}
 
-            <View style={styles.modalSelectedCard}>
-              <View style={styles.modalMedIconBox}>
-                <Ionicons name="medical" size={20} color={THEME.accentBlue} />
-              </View>
-              <View>
-                <Text style={styles.modalSelectedName}>{selectedMedicine.name}</Text>
-                <Text style={styles.modalSelectedSub}>
-                  {selectedMedicine.type} | {selectedMedicine.strength}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.modalMetaRow}>
+            <View style={styles.modalRow}>
               <TextInput
-                placeholder="Type (e.g. Tablet)"
-                style={styles.modalMetaInput}
-                value={selectedMedicine.type}
-                onChangeText={(text) =>
-                  setSelectedMedicine((prev) => ({ ...prev, type: text }))
-                }
+                placeholder="Type"
+                placeholderTextColor={THEME.textMuted}
+                style={[styles.modalInput, styles.modalHalfInput]}
+                value={form.type}
+                onChangeText={(value) => {
+                  setForm((prev) => ({ ...prev, type: value }));
+                  setErrors((prev) => ({ ...prev, type: undefined }));
+                }}
               />
               <TextInput
-                placeholder="Strength (e.g. 500mg)"
-                style={styles.modalMetaInput}
-                value={selectedMedicine.strength}
-                onChangeText={(text) =>
-                  setSelectedMedicine((prev) => ({ ...prev, strength: text }))
-                }
+                placeholder="Strength"
+                placeholderTextColor={THEME.textMuted}
+                style={[styles.modalInput, styles.modalHalfInput]}
+                value={form.strength}
+                onChangeText={(value) => {
+                  setForm((prev) => ({ ...prev, strength: value }));
+                  setErrors((prev) => ({ ...prev, strength: undefined }));
+                }}
               />
             </View>
+            {errors.type || errors.strength ? (
+              <Text style={styles.fieldErrorText}>{errors.type || errors.strength}</Text>
+            ) : null}
 
-            <Text style={styles.modalSectionLabel}>Dosage (Tap to change)</Text>
-            <View style={styles.modalDosageRow}>
-              <DosagePill
-                label="Morning"
-                value={dosage.morning}
-                onPress={() => cycleDosage("morning")}
-              />
-              <DosagePill
-                label="Afternoon"
-                value={dosage.afternoon}
-                onPress={() => cycleDosage("afternoon")}
-              />
-              <DosagePill
-                label="Night"
-                value={dosage.night}
-                onPress={() => cycleDosage("night")}
-              />
-            </View>
-
-            <Text style={styles.modalSectionLabel}>Duration</Text>
-            <View style={styles.modalChipRow}>
-              {["3 days", "5 days", "7 days", "Custom"].map((d) => (
+            <Text style={styles.modalSectionTitle}>Dosage</Text>
+            <View style={styles.dosageRow}>
+              {(["morning", "afternoon", "night"] as const).map((slot) => (
                 <TouchableOpacity
-                  key={d}
-                  style={[styles.modalChip, duration === d && styles.modalChipActive]}
-                  onPress={() => setDuration(d)}
+                  key={slot}
+                  style={[styles.dosagePill, form.dosage[slot] > 0 && styles.dosagePillActive]}
+                  onPress={() => cycleDosage(slot)}
                 >
-                  <Text
-                    style={[styles.modalChipText, duration === d && styles.modalChipTextActive]}
-                  >
-                    {d}
+                  <Text style={[styles.dosagePillLabel, form.dosage[slot] > 0 && styles.dosagePillLabelActive]}>
+                    {slot.charAt(0).toUpperCase() + slot.slice(1)}
+                  </Text>
+                  <Text style={[styles.dosagePillValue, form.dosage[slot] > 0 && styles.dosagePillValueActive]}>
+                    {form.dosage[slot]}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {errors.dosage ? <Text style={styles.fieldErrorText}>{errors.dosage}</Text> : null}
 
-            <Text style={styles.modalSectionLabel}>Timing</Text>
-            <View style={styles.modalTimingBox}>
-              {["Before Meal", "After Meal", "With Food"].map((t) => (
-                <TouchableOpacity key={t} style={styles.modalRadioRow} onPress={() => setTiming(t)}>
-                  <Ionicons
-                    name={timing === t ? "radio-button-on" : "radio-button-off"}
-                    size={20}
-                    color={timing === t ? THEME.accentBlue : THEME.textGray}
-                  />
-                  <Text style={[styles.modalRadioLabel, timing === t && { color: THEME.charcoal }]}>
-                    {t}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.modalRow}>
+              <TextInput
+                placeholder="Duration in days"
+                placeholderTextColor={THEME.textMuted}
+                keyboardType="number-pad"
+                style={[styles.modalInput, styles.modalHalfInput]}
+                value={form.duration}
+                onChangeText={(value) => {
+                  setForm((prev) => ({ ...prev, duration: value.replace(/[^0-9]/g, "") }));
+                  setErrors((prev) => ({ ...prev, duration: undefined }));
+                }}
+              />
+              <TextInput
+                placeholder="Timing"
+                placeholderTextColor={THEME.textMuted}
+                style={[styles.modalInput, styles.modalHalfInput]}
+                value={form.timing}
+                onChangeText={(value) => {
+                  setForm((prev) => ({ ...prev, timing: value }));
+                  setErrors((prev) => ({ ...prev, timing: undefined }));
+                }}
+              />
             </View>
+            {errors.duration || errors.timing ? (
+              <Text style={styles.fieldErrorText}>{errors.duration || errors.timing}</Text>
+            ) : null}
 
             <TextInput
-              placeholder="Notes (optional): e.g. Take with warm water"
-              style={styles.modalNotesInput}
+              placeholder="Instructions or notes"
+              placeholderTextColor={THEME.textMuted}
+              style={[styles.modalInput, styles.modalNotesInput]}
               multiline
-              value={notes}
-              onChangeText={setNotes}
+              value={form.notes}
+              onChangeText={(value) => setForm((prev) => ({ ...prev, notes: value }))}
             />
           </ScrollView>
 
           <View style={styles.modalFooter}>
-            <TouchableOpacity style={styles.modalCancelBtn} onPress={onClose}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
+            <TouchableOpacity style={styles.modalSecondaryButton} onPress={onClose}>
+              <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.modalAddBtn} onPress={handleSubmit}>
-              <Text style={styles.modalAddText}>Add Medicine</Text>
+            <TouchableOpacity style={styles.modalPrimaryButton} onPress={submit}>
+              <Text style={styles.modalPrimaryButtonText}>Add Medicine</Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
     </Modal>
   );
-};
-
-const DosagePill = ({ label, value, onPress }: any) => (
-  <TouchableOpacity
-    style={[styles.modalDosagePill, value > 0 && styles.modalDosagePillActive]}
-    onPress={onPress}
-  >
-    <Text style={styles.modalDosageLabel}>{label}</Text>
-    <View style={[styles.modalDosageCircle, value > 0 && styles.modalDosageCircleActive]}>
-      <Text style={[styles.modalDosageValue, value > 0 && styles.modalDosageValueActive]}>
-        {value}
-      </Text>
-    </View>
-  </TouchableOpacity>
-);
+}
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   safe: { flex: 1, backgroundColor: THEME.background },
+  loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+  loadingText: { color: THEME.textSecondary, fontSize: 15 },
+  blockedScreen: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: "center",
+  },
+  blockedCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 24,
+    alignItems: "center",
+    gap: 10,
+  },
+  blockedTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+    textAlign: "center",
+  },
+  blockedText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: THEME.textSecondary,
+    textAlign: "center",
+  },
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 14,
+    backgroundColor: THEME.surface,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 10,
-  },
-  patientInfo: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: THEME.white,
+  headerIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "#EEF7F7",
     justifyContent: "center",
     alignItems: "center",
   },
-  patientName: { fontSize: 16, fontWeight: "700", color: THEME.charcoal },
-  tokenBadge: {
-    backgroundColor: "#E0E6ED",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
+  headerTitleBlock: { flex: 1, marginHorizontal: 14 },
+  headerEyebrow: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: THEME.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  headerTitle: {
     marginTop: 2,
-    alignSelf: "flex-start",
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "800",
+    color: THEME.deep,
   },
-  tokenText: { fontSize: 10, fontWeight: "800", color: THEME.textGray },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  tabContainer: {
+  autosaveChip: {
+    minHeight: 36,
+    borderRadius: 999,
     flexDirection: "row",
-    backgroundColor: "#E0E6ED",
-    marginHorizontal: 20,
-    borderRadius: 25,
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  autosaveText: { fontSize: 12, fontWeight: "700" },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 112,
+    gap: 16,
+  },
+  patientSummaryCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  patientAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "#EAF7F7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  patientSummaryCopy: { flex: 1 },
+  patientSummaryName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  patientSummaryMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    color: THEME.textSecondary,
+  },
+  contextCard: {
+    backgroundColor: "#ECF8F7",
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  contextRow: {
+    flexDirection: "row",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  contextPill: {
+    minHeight: 36,
+    borderRadius: 999,
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  contextPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: THEME.primary,
+  },
+  contextText: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textSecondary,
+  },
+  warningBanner: {
+    backgroundColor: THEME.warningBg,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  warningBannerText: {
+    flex: 1,
+    color: THEME.warning,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  conflictCard: {
+    backgroundColor: "#FFF7EC",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#F5D79C",
+  },
+  conflictTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.warning,
+  },
+  conflictText: {
+    marginTop: 6,
+    color: THEME.textPrimary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: "#DEECEC",
+    borderRadius: 22,
     padding: 5,
-    marginBottom: 20,
-  },
-  tab: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 20 },
-  activeTab: { backgroundColor: THEME.charcoal },
-  tabText: { fontSize: 14, fontWeight: "600", color: THEME.textGray },
-  activeTabText: { color: THEME.white },
-
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    marginTop: 15,
-  },
-  sectionIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 8,
-  },
-  sectionTitle: { fontSize: 15, fontWeight: "700", color: THEME.charcoal, flex: 1 },
-  seeAll: { fontSize: 13, color: THEME.accentBlue },
-
-  card: {
-    backgroundColor: THEME.white,
-    borderRadius: 28,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 15,
-    elevation: 2,
-  },
-  complaintInput: { fontSize: 18, fontWeight: "600", color: THEME.charcoal, minHeight: 40 },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F5F7F9",
-    borderRadius: 15,
-    paddingHorizontal: 12,
-    height: 45,
-  },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 14 },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 15 },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.softBlue,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
     gap: 6,
   },
-  chipText: { fontSize: 13, fontWeight: "600", color: THEME.accentBlue },
-  divider: { height: 1, backgroundColor: THEME.background, marginVertical: 15 },
-  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  toggleLabel: { fontSize: 14, color: THEME.textGray },
-
-  notesInput: { fontSize: 14, color: THEME.charcoal, minHeight: 60, textAlignVertical: "top" },
-
-  investigationRow: { flexDirection: "row", marginTop: 5 },
-  addBtn: {
-    width: 45,
-    height: 45,
-    borderRadius: 22,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
+  tabButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 18,
     alignItems: "center",
-    marginRight: 10,
-  },
-  testChip: {
-    backgroundColor: THEME.white,
-    paddingHorizontal: 20,
-    height: 45,
-    borderRadius: 22,
     justifyContent: "center",
-    marginRight: 10,
   },
-  testChipText: { fontWeight: "600", color: THEME.charcoal },
-  saveHint: { marginTop: 12, fontSize: 12, color: THEME.textGray, fontWeight: "600" },
-
-  placeholderText: { fontSize: 14, color: THEME.textGray },
-
-  historyContainer: { flex: 1 },
-  riskCard: {
-    backgroundColor: THEME.softDanger,
-    borderRadius: 24,
-    padding: 16,
-    borderLeftWidth: 5,
-    borderLeftColor: THEME.danger,
-    marginBottom: 20,
+  tabButtonActive: {
+    backgroundColor: THEME.deep,
   },
-  riskHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  riskTitle: { fontSize: 15, fontWeight: "800", color: THEME.danger },
-  riskList: { paddingLeft: 28 },
-  riskItem: { fontSize: 14, fontWeight: "600", color: THEME.danger, marginBottom: 2 },
-
-  historySectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 15,
+  tabButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.textSecondary,
+  },
+  tabButtonTextActive: {
+    color: THEME.surface,
+  },
+  sectionStack: { gap: 16 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: THEME.textPrimary,
     marginBottom: 10,
   },
-  historySectionLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: THEME.textGray,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+  contentCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 16,
   },
-  seeAllText: { fontSize: 12, fontWeight: "700", color: THEME.accentBlue },
-
-  chipContainer: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 5 },
-  chipBase: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
-  chipBaseText: { fontSize: 13, fontWeight: "700" },
-
-  whiteCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 28,
-    padding: 20,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
+  largeInput: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: THEME.textPrimary,
   },
-
-  timelineItem: { flexDirection: "row", gap: 12 },
-  timelinePointContainer: { alignItems: "center" },
-  timelineDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: THEME.border,
-    marginTop: 5,
-  },
-  activeDot: { backgroundColor: THEME.accentBlue, transform: [{ scale: 1.2 }] },
-  timelineContent: { flex: 1, paddingBottom: 5 },
-  timelineDate: { fontSize: 12, fontWeight: "700", color: THEME.textGray, marginBottom: 2 },
-  timelineDiagnosis: { fontSize: 15, fontWeight: "800", color: THEME.charcoal },
-  timelineTreatment: { fontSize: 13, color: THEME.textGray, marginTop: 2 },
-  timelineDivider: {
-    width: 1,
-    backgroundColor: THEME.border,
-    height: 20,
-    marginLeft: 4.5,
-    marginVertical: 2,
-  },
-
-  medRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
-  medText: { fontSize: 14, fontWeight: "600", color: THEME.charcoal },
-
-  smartHighlight: {
+  switchRow: {
+    marginTop: 14,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFF9C4",
-    padding: 12,
-    borderRadius: 16,
-    marginTop: 25,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: "#FBC02D",
+    justifyContent: "space-between",
+    gap: 12,
   },
-  smartText: { fontSize: 12, fontWeight: "700", color: "#827717", flex: 1 },
-
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  switchLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: THEME.textSecondary,
+    fontWeight: "600",
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  tag: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  tagText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  emptyInlineText: {
+    fontSize: 13,
+    color: THEME.textSecondary,
+  },
+  alertCard: {
+    backgroundColor: "#FFF4F2",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#F4D1CB",
+    padding: 16,
+  },
+  alertTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.danger,
+    marginBottom: 8,
+  },
+  alertLine: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textPrimary,
+  },
+  timelineItem: {
+    paddingVertical: 10,
+  },
+  timelineItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: THEME.border,
+  },
+  timelineDate: {
+    fontSize: 12,
+    color: THEME.textMuted,
+  },
+  timelineTitle: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: "700",
+    color: THEME.textPrimary,
+  },
+  timelineBody: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textSecondary,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  addMedicineButton: {
+    minHeight: 44,
+    borderRadius: 16,
+    backgroundColor: THEME.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  addMedicineButtonText: {
+    color: THEME.surface,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  emptyBuilderCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 18,
+  },
+  emptyBuilderTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  emptyBuilderText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: THEME.textSecondary,
+    lineHeight: 18,
+  },
+  medicineCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 16,
+  },
+  medicineCardHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  medicineHeaderCopy: { flex: 1 },
+  medicineName: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  medicineSubline: {
+    marginTop: 4,
+    fontSize: 13,
+    color: THEME.textSecondary,
+  },
+  removeMedicineButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "#FFF4F2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medicineMetaGrid: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  metaTile: {
+    flex: 1,
+    backgroundColor: "#F5FAFA",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  metaTileLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: THEME.textMuted,
+    textTransform: "uppercase",
+  },
+  metaTileValue: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textPrimary,
+    fontWeight: "700",
+  },
+  medicineNotes: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textSecondary,
+  },
+  inlineErrorBox: {
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: THEME.dangerBg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  inlineErrorText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: THEME.danger,
+    fontWeight: "700",
+  },
+  bottomBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: THEME.surface,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: THEME.border,
+    flexDirection: "row",
+    gap: 12,
+  },
+  draftButton: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.card,
+  },
+  draftButtonText: {
+    color: THEME.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  completeButton: {
+    flex: 1.6,
+    minHeight: 50,
+    borderRadius: 18,
+    backgroundColor: THEME.deep,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  completeButtonText: {
+    color: THEME.surface,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(8, 20, 24, 0.32)",
+    justifyContent: "flex-end",
+  },
   modalSheet: {
-    backgroundColor: THEME.background,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    height: width * 1.35,
-    paddingTop: 20,
+    backgroundColor: THEME.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 24,
+    maxHeight: "88%",
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 24,
-    marginBottom: 20,
-  },
-  modalTitle: { fontSize: 20, fontWeight: "800", color: THEME.charcoal },
-  modalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
     alignItems: "center",
+    marginBottom: 14,
   },
-  modalScroll: { paddingHorizontal: 24, paddingBottom: 120 },
-  modalSearch: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.white,
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  modalCloseButton: {
+    width: 44,
+    height: 44,
     borderRadius: 16,
-    paddingHorizontal: 15,
-    height: 54,
-    marginBottom: 15,
+    backgroundColor: "#EEF7F7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalContent: {
+    paddingBottom: 18,
+  },
+  modalInput: {
+    minHeight: 52,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: THEME.border,
-  },
-  modalSearchIcon: { marginRight: 10 },
-  modalSearchInput: { flex: 1, fontSize: 16, color: THEME.charcoal },
-  modalSelectedCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.softBlue,
-    padding: 15,
-    borderRadius: 20,
-    gap: 12,
-    marginBottom: 20,
-  },
-  modalMedIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: THEME.white,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalSelectedName: { fontSize: 16, fontWeight: "700", color: THEME.charcoal },
-  modalSelectedSub: { fontSize: 13, color: THEME.textGray },
-  modalMetaRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
-  modalMetaInput: {
-    flex: 1,
-    backgroundColor: THEME.white,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    backgroundColor: THEME.card,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    color: THEME.textPrimary,
     fontSize: 14,
-    color: THEME.charcoal,
-    borderWidth: 1,
-    borderColor: THEME.border,
   },
-  modalSectionLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: THEME.textGray,
-    marginBottom: 12,
-    marginTop: 10,
-    textTransform: "uppercase",
+  modalRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 12,
   },
-  modalDosageRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  modalDosagePill: {
+  modalHalfInput: {
     flex: 1,
-    backgroundColor: THEME.white,
-    borderRadius: 20,
-    padding: 12,
-    alignItems: "center",
+  },
+  modalSectionTitle: {
+    marginTop: 16,
+    marginBottom: 10,
+    fontSize: 14,
+    fontWeight: "700",
+    color: THEME.textPrimary,
+  },
+  dosageRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  dosagePill: {
+    flex: 1,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: THEME.border,
-  },
-  modalDosagePillActive: { borderColor: THEME.accentBlue, backgroundColor: "#EBF5FF" },
-  modalDosageLabel: { fontSize: 11, fontWeight: "700", color: THEME.textGray, marginBottom: 8 },
-  modalDosageCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: THEME.background,
-    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 12,
     alignItems: "center",
+    backgroundColor: THEME.card,
   },
-  modalDosageCircleActive: { backgroundColor: THEME.accentBlue },
-  modalDosageValue: { fontSize: 16, fontWeight: "800", color: THEME.charcoal },
-  modalDosageValueActive: { color: THEME.white },
-  modalChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
-  modalChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 15,
-    backgroundColor: THEME.white,
-    borderWidth: 1,
-    borderColor: THEME.border,
+  dosagePillActive: {
+    backgroundColor: "#E9F7F6",
+    borderColor: THEME.teal,
   },
-  modalChipActive: { backgroundColor: THEME.charcoal, borderColor: THEME.charcoal },
-  modalChipText: { fontSize: 14, fontWeight: "600", color: THEME.textGray },
-  modalChipTextActive: { color: THEME.white },
-  modalTimingBox: { backgroundColor: THEME.white, borderRadius: 20, padding: 15, marginBottom: 20 },
-  modalRadioRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
-  modalRadioLabel: { fontSize: 15, fontWeight: "600", color: THEME.textGray },
+  dosagePillLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: THEME.textSecondary,
+  },
+  dosagePillLabelActive: {
+    color: THEME.primary,
+  },
+  dosagePillValue: {
+    marginTop: 6,
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  dosagePillValueActive: {
+    color: THEME.deep,
+  },
   modalNotesInput: {
-    backgroundColor: THEME.white,
-    borderRadius: 20,
-    padding: 15,
-    minHeight: 80,
+    minHeight: 100,
+    marginTop: 12,
     textAlignVertical: "top",
-    color: THEME.charcoal,
   },
   modalFooter: {
-    position: "absolute",
-    bottom: 0,
-    width: width,
     flexDirection: "row",
-    padding: 24,
     gap: 12,
-    backgroundColor: THEME.white,
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
+    marginTop: 12,
   },
-  modalCancelBtn: {
+  modalSecondaryButton: {
     flex: 1,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: THEME.background,
-  },
-  modalCancelText: { fontWeight: "700", color: THEME.textGray },
-  modalAddBtn: {
-    flex: 2,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: THEME.accentBlue,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalAddText: { color: THEME.white, fontWeight: "700", fontSize: 16 },
-
-  actionSectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 15,
-    marginTop: 10,
-  },
-  actionSectionTitle: { fontSize: 16, fontWeight: "700", color: THEME.charcoal },
-  addMedicineBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.white,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 5,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-  },
-  addText: { color: THEME.accentBlue, fontWeight: "700", fontSize: 13 },
-
-  medicineCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 28,
-    padding: 20,
-    marginBottom: 15,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  medHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  medName: { fontSize: 17, fontWeight: "800", color: THEME.charcoal },
-  medStrength: { fontSize: 13, color: THEME.textGray, marginTop: 2 },
-
-  actionDivider: { height: 1, backgroundColor: "#F0F3F7", marginVertical: 15 },
-
-  dosageRow: { flexDirection: "row", justifyContent: "space-between" },
-  dosageItem: { flex: 1 },
-  dosageLabel: {
-    fontSize: 11,
-    color: THEME.textGray,
-    marginBottom: 5,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  dosageBadge: {
-    backgroundColor: THEME.softBlue,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-  },
-  dosageText: { color: THEME.accentBlue, fontWeight: "800", fontSize: 14 },
-  dosageValue: { fontSize: 14, fontWeight: "600", color: THEME.charcoal },
-
-  adviceCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 28,
-    padding: 20,
-    minHeight: 100,
-  },
-  adviceInput: { fontSize: 15, color: THEME.charcoal, textAlignVertical: "top" },
-
-  qrStatusInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 25,
-    backgroundColor: THEME.softGreen,
-    padding: 12,
-    borderRadius: 15,
-  },
-  qrStatusText: { fontSize: 12, color: THEME.textGray, flex: 1, fontWeight: "500" },
-
-  bottomActions: {
-    position: "absolute",
-    bottom: 0,
-    width: width,
-    flexDirection: "row",
-    padding: 20,
-    backgroundColor: "rgba(242, 245, 249, 0.9)",
-    gap: 12,
-  },
-  draftBtn: {
-    flex: 1,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: "center",
-    alignItems: "center",
+    minHeight: 48,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: THEME.border,
-  },
-  draftBtnText: { fontWeight: "700", color: THEME.textGray },
-  completeBtn: {
-    flex: 2,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: THEME.charcoal,
-    flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "center",
+    backgroundColor: THEME.card,
   },
-  completeBtnText: { color: THEME.white, fontWeight: "700", fontSize: 15 },
-
-  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  loadingText: { fontSize: 14, fontWeight: "600", color: THEME.textGray },
+  modalSecondaryButtonText: {
+    color: THEME.textPrimary,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  modalPrimaryButton: {
+    flex: 1.2,
+    minHeight: 48,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.primary,
+  },
+  modalPrimaryButtonText: {
+    color: THEME.surface,
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  fieldErrorText: {
+    marginTop: 8,
+    color: THEME.danger,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+  },
 });

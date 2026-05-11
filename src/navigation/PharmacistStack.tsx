@@ -1,7 +1,6 @@
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import PharmacistTabs from "./PharmacistTabs";
 import PrescriptionScreen from "../screens/patient/PrescriptionScreen";
-import PrescriptionModalScreen from "../screens/pharmacist/PrescriptionModalScreen";
 import DispenseScreen from "../screens/pharmacist/DispenseScreen";
 import PrescriptionDetailsScreen from "../screens/pharmacist/PrescriptionDetailsScreen";
 import AddMedicine from "../screens/pharmacist/AddMedicine";
@@ -10,6 +9,7 @@ import ExpiryTracker from "../screens/pharmacist/ExpiryTracker";
 import PrescriptionTrackingScreen from "../screens/pharmacist/PrescriptionTrackingScreen";
 import Suppliers from "../screens/pharmacist/Suppliers";
 import Settings from "../screens/pharmacist/Settings";
+import PharmacyOrderDetailsScreen from "../screens/pharmacist/PharmacyOrderDetailsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -24,11 +24,6 @@ export default function PharmacistStack() {
       <Stack.Screen
         name="PrescriptionScreen"
         component={PrescriptionScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PharmacyPrescriptionModal"
-        component={PrescriptionModalScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -69,6 +64,11 @@ export default function PharmacistStack() {
       <Stack.Screen
         name="PharmacySettings"
         component={Settings}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PharmacyOrderDetails"
+        component={PharmacyOrderDetailsScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

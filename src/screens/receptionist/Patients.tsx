@@ -15,6 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useReceptionActiveTask } from "../../hooks/useReceptionActiveTask";
 import { fetchReceptionPatients } from "../../services/receptionService";
+import { useAuth } from "../../utils/AuthContext";
+import ReceptionAccessNotAssigned from "../../components/ReceptionAccessNotAssigned";
 
 const THEME = {
   primary: "#2196F3",
@@ -36,6 +38,9 @@ type PatientItem = {
 export default function PatientsScreen() {
   useReceptionActiveTask("patients");
   const navigation = useNavigation<any>();
+  const { receptionistPermissions } = useAuth();
+  const canViewPatients =
+    receptionistPermissions.check_in || receptionistPermissions.appointments;
   const [patients, setPatients] = useState<PatientItem[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -67,6 +72,12 @@ export default function PatientsScreen() {
     }, [loadPatients])
   );
 
+  if (!canViewPatients) {
+    return (
+      <ReceptionAccessNotAssigned message="Patient records are available only for assigned appointments or check-in work." />
+    );
+  }
+
   const filteredPatients = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     if (!normalizedSearch) {
@@ -88,7 +99,11 @@ export default function PatientsScreen() {
           <Text style={styles.title}>Patients</Text>
           <Text style={styles.subtitle}>Search patients created through clinic visits</Text>
         </View>
-        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate("ReceptionistRegistration")}>
+        <TouchableOpacity
+          style={[styles.headerButton, !receptionistPermissions.check_in && { opacity: 0.45 }]}
+          onPress={() => navigation.navigate("ReceptionistRegistration")}
+          disabled={!receptionistPermissions.check_in}
+        >
           <Ionicons name="person-add-outline" size={22} color={THEME.primary} />
         </TouchableOpacity>
       </View>

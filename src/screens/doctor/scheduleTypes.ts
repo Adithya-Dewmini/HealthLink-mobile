@@ -15,7 +15,7 @@ export type TimeSlot = {
 
 export type AvailabilityMap = Record<DayKey, TimeSlot[]>;
 
-export type ScheduleSessionStatus = "Upcoming" | "Active" | "Completed" | "Missed";
+export type ScheduleSessionStatus = "Upcoming" | "Active" | "Completed" | "Missed" | "Cancelled";
 
 export type ScheduleSession = {
   id: string;
@@ -57,6 +57,7 @@ export type DoctorExternalSession = {
   note?: string | null;
   source: "external";
   hasConflict?: boolean;
+  conflictReason?: string | null;
 };
 
 export type DoctorRoutineDay = {

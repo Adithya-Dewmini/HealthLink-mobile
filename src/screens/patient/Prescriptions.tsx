@@ -5,28 +5,25 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { apiFetch } from "../../config/api";
+import { fetchPatientPrescriptions } from "../../services/patientPrescriptionService";
+import {
+  PatientEmptyState,
+  PatientErrorState,
+  PatientLoadingState,
+} from "../../components/patient/PatientFeedback";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
 
 const THEME = {
-  background: "#F2F5F9",
-  white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  softBlue: "#E1EEF9",
-  softGreen: "#E1F1E7",
-  softRed: "#FEE2E2",
-  softPurple: "#F3E5F5",
-  accentBlue: "#2196F3",
-  accentGreen: "#4CAF50",
-  accentRed: "#FF5252",
-  accentPurple: "#9C27B0",
+  ...patientTheme.colors,
+  softRed: patientTheme.colors.dangerSoft,
+  accentPurple: patientTheme.colors.navy,
 };
 
 const formatDosageSchedule = (frequency: any) => {
@@ -106,26 +103,23 @@ export default function Prescriptions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchPrescriptions = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await apiFetch("/api/patients/prescriptions");
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || "Failed to load prescriptions");
-        }
-        const data = await res.json();
-        setPrescriptions(Array.isArray(data) ? data : []);
-      } catch (err: any) {
-        setError(err?.message || "Failed to load prescriptions");
-      } finally {
-        setLoading(false);
-      }
-    };
-    void fetchPrescriptions();
+  const fetchPrescriptions = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setPrescriptions(await fetchPatientPrescriptions());
+    } catch (err: any) {
+      console.log("Load prescriptions error:", err);
+      setError(err?.message || "Failed to load prescriptions");
+      setPrescriptions([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void fetchPrescriptions();
+  }, [fetchPrescriptions]);
 
   const filtered = useMemo(() => {
     if (activeTab === "active") {
@@ -180,8 +174,20 @@ export default function Prescriptions() {
         showsVerticalScrollIndicator={false}
       >
         
+        {loading ? (
+          <PatientLoadingState label="Loading prescriptions" />
+        ) : error ? (
+          <PatientErrorState message={error} onRetry={() => void fetchPrescriptions()} />
+        ) : filtered.length === 0 ? (
+          <PatientEmptyState
+            icon="document-text-outline"
+            title={activeTab === "active" ? "No active prescriptions" : "No past prescriptions"}
+            message="Prescriptions from completed consultations will appear here."
+          />
+        ) : null}
+
         {/* Prescription Cards */}
-        {filtered.map((item) => (
+        {!loading && !error && filtered.map((item) => (
           <TouchableOpacity
             key={item.id}
             style={styles.card}
@@ -214,6 +220,7 @@ export default function Prescriptions() {
 
             <Text style={styles.dateLabel}>
               Prescribed on {item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : "Recently"}
+              {item.medical_center_name ? ` • ${item.medical_center_name}` : ""}
             </Text>
 
             <View style={styles.divider} />
@@ -263,26 +270,6 @@ export default function Prescriptions() {
             </View>
           </TouchableOpacity>
         ))}
-
-        {loading && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Loading</Text>
-            <Text style={styles.emptyText}>Fetching prescriptions...</Text>
-          </View>
-        )}
-        {!loading && error && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>Error</Text>
-            <Text style={styles.emptyText}>{error}</Text>
-          </View>
-        )}
-        {!loading && !error && filtered.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No prescriptions</Text>
-            <Text style={styles.emptyText}>There are no {activeTab} prescriptions yet.</Text>
-          </View>
-        )}
-
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>

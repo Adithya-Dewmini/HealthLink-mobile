@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import DayAvailabilityRow from "../../components/schedule/DayAvailabilityRow";
 import type { AvailabilityMap, DayKey, TimeSlot } from "./scheduleTypes";
+import { doctorColors } from "../../constants/doctorTheme";
 
 const DAY_ORDER: Array<{ key: DayKey; label: string }> = [
   { key: "monday", label: "Monday" },
@@ -136,7 +137,7 @@ export default function DoctorAvailabilityScreen({
     const normalizedEnd = editor.end.trim();
 
     if (!isValidTimeFormat(normalizedStart) || !isValidTimeFormat(normalizedEnd)) {
-      setValidationMessage("Use 24-hour time format like 09:00.");
+      setValidationMessage("Use a valid 24-hour time like 09:00.");
       return;
     }
 
@@ -156,7 +157,7 @@ export default function DoctorAvailabilityScreen({
     };
 
     if (hasOverlap(availability[editor.day], candidate, editor.slotId)) {
-      setValidationMessage("This time slot overlaps with another slot for the same day.");
+      setValidationMessage("This time range overlaps with another slot on the same day.");
       setDayErrors((current) => ({
         ...current,
         [editor.day]: "Time slots cannot overlap within the same day.",
@@ -310,7 +311,7 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: 20,
-    backgroundColor: "#2563EB",
+    backgroundColor: doctorColors.primary,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
@@ -321,7 +322,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 15,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: doctorColors.surface,
   },
   modalBackdrop: {
     flex: 1,
@@ -337,11 +338,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#0F172A",
+    color: doctorColors.textPrimary,
   },
   modalSubtitle: {
     fontSize: 13,
-    color: "#64748B",
+    color: doctorColors.textSecondary,
     marginTop: 6,
     lineHeight: 19,
   },
@@ -356,7 +357,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#334155",
+    color: doctorColors.textPrimary,
     marginBottom: 8,
   },
   input: {
@@ -367,12 +368,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontSize: 15,
-    color: "#0F172A",
+    color: doctorColors.textPrimary,
   },
   validationText: {
     marginTop: 12,
     fontSize: 13,
-    color: "#DC2626",
+    color: doctorColors.dangerText,
   },
   modalActions: {
     flexDirection: "row",
@@ -391,19 +392,19 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#475569",
+    color: doctorColors.textSecondary,
   },
   primaryButton: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 14,
-    backgroundColor: "#2563EB",
+    backgroundColor: doctorColors.primary,
     paddingVertical: 14,
   },
   primaryButtonText: {
     fontSize: 14,
     fontWeight: "800",
-    color: "#FFFFFF",
+    color: doctorColors.surface,
   },
 });

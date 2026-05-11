@@ -103,22 +103,22 @@ export const fetchDoctorSchedule = async (month: string) => {
 };
 
 type RangeSessionResponse = Array<{
-  id?: number | string;
+  scheduleId?: number | string;
   date?: string;
-  clinicId?: string;
+  type?: string;
   clinicName?: string;
-  startTime?: string;
-  endTime?: string;
+  start?: string;
+  end?: string;
   patientsCount?: number;
-  patientCount?: number;
   maxPatients?: number;
   slotDuration?: number;
   status?: string;
+  reason?: string | null;
 }>;
 
 export const fetchDoctorSessionsRange = async (start: string, end: string) => {
   const response = await apiFetch(
-    `/api/doctor/sessions?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    `/api/doctor/schedule-overview?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}`
   );
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
@@ -127,25 +127,33 @@ export const fetchDoctorSessionsRange = async (start: string, end: string) => {
 
   const data = (await response.json()) as RangeSessionResponse;
   return Array.isArray(data)
-    ? data.map<ScheduleSession>((session) => ({
-        id: String(session.id ?? `${session.date}-${session.startTime}-${session.endTime}`),
-        clinicId:
-          "clinicId" in session && session.clinicId != null ? String(session.clinicId) : undefined,
-        clinicName: String(session.clinicName || "Clinic"),
-        date: String(session.date || ""),
-        startTime: String(session.startTime || ""),
-        endTime: String(session.endTime || ""),
-        patientCount: Number(session.patientCount ?? session.patientsCount ?? 0),
-        maxPatients: typeof session.maxPatients === "number" ? session.maxPatients : undefined,
-        slotDuration: typeof session.slotDuration === "number" ? session.slotDuration : undefined,
-        status: normalizeSessionStatus(
-          String(session.date || ""),
-          session.startTime,
-          session.endTime,
-          session.status
-        ),
-        source: "internal",
-      }))
+    ? data.reduce<ScheduleSession[]>((sessions, item) => {
+        const type = String(item?.type || "").trim().toUpperCase();
+        if (type !== "CLINIC" && type !== "BLOCKED") {
+          return sessions;
+        }
+
+        sessions.push({
+          id: String(item.scheduleId ?? `${item.date}-${item.start}-${item.end}`),
+          clinicName: String(item.clinicName || "Clinic"),
+          date: String(item.date || ""),
+          startTime: String(item.start || ""),
+          endTime: String(item.end || ""),
+          patientCount: Number(item.patientsCount || 0),
+          maxPatients: typeof item.maxPatients === "number" ? item.maxPatients : undefined,
+          slotDuration: typeof item.slotDuration === "number" ? item.slotDuration : undefined,
+          status: normalizeSessionStatus(
+            String(item.date || ""),
+            item.start,
+            item.end,
+            item.status || (type === "BLOCKED" ? "COMPLETED" : "UPCOMING")
+          ),
+          source: "internal",
+          note: item.reason ?? null,
+        });
+
+        return sessions;
+      }, [])
     : [];
 };
 
@@ -159,6 +167,7 @@ type ExternalSessionResponse = Array<{
   note?: string | null;
   source?: "external";
   hasConflict?: boolean;
+  conflictReason?: string | null;
 }>;
 
 export const fetchDoctorExternalSessions = async () => {
@@ -180,6 +189,10 @@ export const fetchDoctorExternalSessions = async () => {
         note: session.note ?? null,
         source: "external",
         hasConflict: Boolean(session.hasConflict),
+        conflictReason:
+          typeof session.conflictReason === "string" && session.conflictReason.trim()
+            ? session.conflictReason.trim()
+            : null,
       }))
     : [];
 };
@@ -199,6 +212,7 @@ export const createDoctorExternalSession = async (payload: {
   const data = (await response.json().catch(() => ({}))) as {
     sessions?: ExternalSessionResponse;
     hasConflict?: boolean;
+    conflictReason?: string | null;
     message?: string;
   };
 
@@ -218,9 +232,17 @@ export const createDoctorExternalSession = async (payload: {
           note: session.note ?? null,
           source: "external",
           hasConflict: Boolean(session.hasConflict),
+          conflictReason:
+            typeof session.conflictReason === "string" && session.conflictReason.trim()
+              ? session.conflictReason.trim()
+              : null,
         }))
       : [],
     hasConflict: Boolean(data.hasConflict),
+    conflictReason:
+      typeof data.conflictReason === "string" && data.conflictReason.trim()
+        ? data.conflictReason.trim()
+        : null,
   };
 };
 
@@ -249,6 +271,10 @@ export const deleteDoctorExternalSession = async (externalSessionId: string) => 
         note: session.note ?? null,
         source: "external",
         hasConflict: Boolean(session.hasConflict),
+        conflictReason:
+          typeof session.conflictReason === "string" && session.conflictReason.trim()
+            ? session.conflictReason.trim()
+            : null,
       }))
     : [];
 };

@@ -15,24 +15,19 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { PatientStackParamList } from "../../types/navigation";
 import { apiFetch } from "../../config/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { jwtDecode } from "jwt-decode";
 import { useGlobalModal } from "../../context/GlobalModalContext";
 import { connectSocket, getSocket, joinSessionRoom, leaveSessionRoom } from "../../services/socket";
+import { patientTheme } from "../../constants/patientTheme";
 
 type DoctorStatus = "active" | "break" | "paused";
 
 const THEME = {
-  background: "#F2F5F9",
-  white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  mint: "#E1F1E7",
-  lavender: "#E9E7F7",
-  softBlue: "#E1EEF9",
-  accentGreen: "#4CAF50",
-  accentPurple: "#9C27B0",
-  accentBlue: "#2196F3",
-  accentRed: "#FF5252",
-  softRed: "#FEE2E2",
+  ...patientTheme.colors,
+  mint: patientTheme.colors.softGreen,
+  lavender: patientTheme.colors.highlight,
+  accentPurple: patientTheme.colors.navy,
+  softRed: patientTheme.colors.dangerSoft,
 };
 
 export default function LiveQueue() {
@@ -136,7 +131,22 @@ export default function LiveQueue() {
 
   const fetchLatestPrescription = async () => {
     try {
-      const stored = await AsyncStorage.getItem("lastSeenPrescriptionId");
+      const token = await AsyncStorage.getItem("token");
+      let seenKey = "lastSeenPrescriptionId";
+      if (token) {
+        try {
+          const decoded: any = jwtDecode(token);
+          if (decoded?.id) {
+            seenKey = `lastSeenPrescriptionId:${decoded.id}`;
+          }
+        } catch {
+          // Fall back to the legacy key if token parsing fails.
+        }
+      }
+
+      const stored =
+        (await AsyncStorage.getItem(seenKey)) ||
+        (await AsyncStorage.getItem("lastSeenPrescriptionId"));
       const storedId = stored ? Number(stored) : null;
 
       const res = await apiFetch("/api/patients/prescriptions?latest=true");

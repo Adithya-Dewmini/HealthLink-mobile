@@ -8,6 +8,7 @@ import QueueControl from "../screens/doctor/QueueControl";
 import ProfileScreen from "../screens/doctor/ProfileScreen";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthContext } from "../utils/AuthContext";
+import { doctorColors } from "../constants/doctorTheme";
 
 const Tab = createBottomTabNavigator();
 
@@ -20,8 +21,8 @@ export default function DoctorTabs() {
         headerShown: false,
         lazy: true,
         freezeOnBlur: true,
-        tabBarActiveTintColor: "#2BB673",
-        tabBarInactiveTintColor: "#9CA3AF",
+        tabBarActiveTintColor: doctorColors.primary,
+        tabBarInactiveTintColor: doctorColors.textMuted,
         tabBarLabelStyle: { fontSize: 11, marginBottom: 3 },
         tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
         tabBarStyle: {
@@ -30,11 +31,11 @@ export default function DoctorTabs() {
           left: 10,
           right: 10,
           height: 70,
-          backgroundColor: "#FFFFFF",
+          backgroundColor: doctorColors.surface,
           borderRadius: 25,
           elevation: 10,
-          shadowColor: "#000",
-          shadowOpacity: 0.1,
+          shadowColor: doctorColors.shadow,
+          shadowOpacity: 0.12,
           shadowRadius: 10,
           shadowOffset: { width: 0, height: 5 },
           borderTopWidth: 0,
@@ -43,7 +44,7 @@ export default function DoctorTabs() {
           <View
             style={{
               ...StyleSheet.absoluteFillObject,
-              backgroundColor: "#FFFFFF",
+              backgroundColor: doctorColors.surface,
               borderRadius: 25,
               bottom: -20,
             }}
@@ -82,7 +83,7 @@ export default function DoctorTabs() {
           tabBarIcon: ({ focused }) => (
             <View style={styles.centerTabWrap}>
               <View style={[styles.centerTabCircle, focused && styles.centerTabCircleActive]}>
-                <Ionicons name="calendar-outline" size={21} color="#2BB673" />
+                <Ionicons name="calendar-outline" size={21} color={doctorColors.primary} />
               </View>
             </View>
           ),
@@ -124,19 +125,19 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 31,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: doctorColors.surface,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
+    shadowColor: doctorColors.shadow,
     shadowOpacity: 0.12,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: doctorColors.border,
   },
   centerTabCircleActive: {
-    backgroundColor: "#E6F7EF",
-    borderColor: "#CDEFE0",
+    backgroundColor: doctorColors.badgeBg,
+    borderColor: doctorColors.aqua,
   },
 });

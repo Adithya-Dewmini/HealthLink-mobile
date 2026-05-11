@@ -10,6 +10,7 @@ import {
   ImageSourcePropType,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { patientTheme } from '../../constants/patientTheme';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.75;
@@ -24,19 +25,19 @@ const data: {
   {
     title: 'Consult Doctor',
     subtitle: 'Specialist care',
-    colors: ['#A7F3D0', '#6EE7B7'],
+    colors: [patientTheme.colors.softAqua, patientTheme.colors.aqua],
     image: undefined,
   },
   {
     title: 'My Prescriptions',
     subtitle: 'View & manage',
-    colors: ['#6366F1', '#8B5CF6'],
+    colors: [patientTheme.colors.lightAqua, patientTheme.colors.blue],
     image: undefined,
   },
   {
     title: 'Nearby Doctors & Pharmacies',
     subtitle: 'Search nearby',
-    colors: ['#34D399', '#10B981'],
+    colors: [patientTheme.colors.lightAqua, patientTheme.colors.navy],
     image: undefined,
   },
 ];
@@ -86,7 +87,7 @@ export default function HeroCards() {
             >
               <TouchableOpacity activeOpacity={0.9}>
                 <LinearGradient
-                  colors={["#FFFFFF", "#F8FAFC"]}
+                  colors={[patientTheme.colors.surface, patientTheme.colors.background]}
                   style={styles.cardContainer}
                 >
                   <View style={styles.cardHeaderRow}>
@@ -130,10 +131,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: patientTheme.typography.sectionTitle,
     fontWeight: '700',
     marginTop: 5,
     marginBottom: 15,
+    color: patientTheme.colors.textPrimary,
   },
   scrollContainer: {
     paddingHorizontal: 0,
@@ -150,8 +152,8 @@ const styles = StyleSheet.create({
     padding: 16,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
+    borderColor: patientTheme.colors.border,
+    shadowColor: patientTheme.colors.navy,
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
@@ -168,7 +170,7 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
     borderWidth: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: patientTheme.colors.background,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -191,13 +193,13 @@ const styles = StyleSheet.create({
     width: "70%",
   },
   cardTitle: {
-    color: "#1E293B",
+    color: patientTheme.colors.textPrimary,
     fontSize: 16,
     fontWeight: "700",
   },
   cardSubtitle: {
-    color: "#64748B",
-    fontSize: 12,
+    color: patientTheme.colors.textSecondary,
+    fontSize: 13,
     marginTop: 4,
   },
   imagePlaceholder: {

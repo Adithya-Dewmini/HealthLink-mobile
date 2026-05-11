@@ -6,12 +6,28 @@ export type PharmacyMedicineItem = {
   id: number;
   medicineId: number | null;
   medicineName: string;
+  requiredQuantity?: number | null;
+  dispensedQuantity?: number | null;
+  remainingQuantity?: number | null;
   dosage?: string | null;
   frequency?: string | null;
   duration?: string | null;
   instructions?: string | null;
   availableStock: number | null;
   unitPrice: number | null;
+  demandCount?: number;
+  lowStockAlert?: boolean;
+  substitutions?: PharmacySubstitutionOption[];
+};
+
+export type PharmacySubstitutionOption = {
+  medicineId: number;
+  medicineName: string;
+  availableStock: number;
+  unitPrice: number | null;
+  matchType?: "generic" | "ingredient" | "category" | string;
+  matchLabel?: string;
+  requiresPharmacistReview?: boolean;
 };
 
 export type PharmacyPrescriptionDetailItem = {
@@ -23,7 +39,12 @@ export type PharmacyPrescriptionDetailItem = {
   duration?: string | null;
   instructions?: string | null;
   requiredQuantity: number;
+  dispensedQuantity?: number;
+  remainingQuantity?: number;
   currentStock: number;
+  demandCount?: number;
+  lowStockAlert?: boolean;
+  substitutions?: PharmacySubstitutionOption[];
 };
 
 export type PharmacyPrescriptionDetails = {
@@ -198,12 +219,25 @@ export const dispense = async (payload: {
   return apiRequest<{
     message: string;
     prescription_id: number | string;
+    dispense_status?: "completed" | "partially_dispensed";
+    is_partial?: boolean;
     dispensed_items: Array<{
       prescription_item_id: number;
       medicine_id: number;
       medicine_name: string;
       quantity: number;
+      required_quantity?: number;
+      dispensed_quantity?: number;
+      remaining_quantity?: number;
       remaining_stock: number;
+    }>;
+    remaining_items?: Array<{
+      prescription_item_id: number;
+      medicine_id: number | null;
+      medicine_name: string;
+      required_quantity: number;
+      dispensed_quantity: number;
+      remaining_quantity: number;
     }>;
   }>(
     "/api/pharmacy/dispense",

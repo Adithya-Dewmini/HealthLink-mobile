@@ -10,6 +10,7 @@ export type DoctorRegistrationPayload = {
   specialization: string;
   experience_years: number;
   workplace: string;
+  password: string;
   slmc_certificate: {
     uri: string;
     name: string;
@@ -31,9 +32,11 @@ export type DoctorRegistrationResponse = {
   success: boolean;
   message: string;
   doctorId: number;
-  status: "pending";
-  setupToken?: string;
-  setupTokenExpiresAt?: string;
+  verificationStatus: "pending" | "approved" | "rejected" | "suspended";
+  requiresApproval: boolean;
+  requiresPasswordSetup: boolean;
+  canLogin: boolean;
+  email: string;
 };
 
 export const registerDoctor = async (
@@ -50,6 +53,7 @@ export const registerDoctor = async (
   formData.append("specialization", payload.specialization);
   formData.append("experience_years", String(payload.experience_years));
   formData.append("workplace", payload.workplace);
+  formData.append("password", payload.password);
   formData.append("slmc_certificate", payload.slmc_certificate as any);
   formData.append("degree_certificate", payload.degree_certificate as any);
   formData.append("id_proof", payload.id_proof as any);

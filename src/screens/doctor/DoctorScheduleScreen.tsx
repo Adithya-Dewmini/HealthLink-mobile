@@ -14,6 +14,7 @@ import {
   saveDoctorAvailability,
 } from "../../services/doctorScheduleService";
 import { getSocket } from "../../services/socket";
+import { doctorColors } from "../../constants/doctorTheme";
 
 type ScheduleTabKey = "availability" | "calendar" | "routine";
 
@@ -35,6 +36,8 @@ const INITIAL_AVAILABILITY: AvailabilityMap = {
 
 const AVAILABILITY_CACHE_KEY = "doctor_schedule_availability";
 const scheduleCacheKey = (month: string) => `doctor_schedule_month_${month}`;
+const getLocalMonthKey = (value: Date) =>
+  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
 
 export default function DoctorScheduleScreen() {
   const navigation = useNavigation<any>();
@@ -50,7 +53,7 @@ export default function DoctorScheduleScreen() {
     sunday: false,
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [currentMonth, setCurrentMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [currentMonth, setCurrentMonth] = useState(() => getLocalMonthKey(new Date()));
   const [schedule, setSchedule] = useState<ScheduleDayGroup[]>([]);
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
   const [syncBanner, setSyncBanner] = useState<string | null>(null);
@@ -90,11 +93,14 @@ export default function DoctorScheduleScreen() {
           saturday: Boolean(data.enabledDays?.includes("saturday")),
           sunday: Boolean(data.enabledDays?.includes("sunday")),
         });
-        setSyncBanner("Showing cached availability");
+        setSyncBanner("Showing your last saved availability.");
         return;
       }
 
-      Alert.alert("Availability Unavailable", error instanceof Error ? error.message : "Failed to load availability");
+      Alert.alert(
+        "Availability Unavailable",
+        error instanceof Error ? error.message : "Could not load your availability."
+      );
     }
   }, []);
 
@@ -110,10 +116,10 @@ export default function DoctorScheduleScreen() {
       const cached = await AsyncStorage.getItem(scheduleCacheKey(month));
       if (cached) {
         setSchedule(JSON.parse(cached) as ScheduleDayGroup[]);
-        setSyncBanner("Showing cached schedule");
-        setScheduleError(error instanceof Error ? error.message : "Failed to load schedule");
+        setSyncBanner("Showing your last synced calendar.");
+        setScheduleError(error instanceof Error ? error.message : "Could not load your schedule.");
       } else {
-        setScheduleError(error instanceof Error ? error.message : "Failed to load schedule");
+        setScheduleError(error instanceof Error ? error.message : "Could not load your schedule.");
       }
     } finally {
       setIsLoadingSchedule(false);
@@ -183,8 +189,8 @@ export default function DoctorScheduleScreen() {
       setSyncBanner(null);
       Alert.alert("Availability Saved", "Your weekly availability has been updated.");
     } catch (error) {
-      setSyncBanner("Changes saved locally. Sync failed.");
-      Alert.alert("Save Failed", error instanceof Error ? error.message : "Failed to save availability");
+      setSyncBanner("Changes are saved locally. We could not sync them yet.");
+      Alert.alert("Save Failed", error instanceof Error ? error.message : "Could not save availability.");
     } finally {
       setIsSaving(false);
     }
@@ -248,7 +254,7 @@ export default function DoctorScheduleScreen() {
           </View>
         ) : null}
         <TouchableOpacity style={styles.previewButton} activeOpacity={0.9} onPress={handleOpenPreview}>
-          <Ionicons name="eye-outline" size={18} color="#2563EB" />
+          <Ionicons name="eye-outline" size={18} color={doctorColors.primary} />
           <Text style={styles.previewButtonText}>Preview</Text>
         </TouchableOpacity>
       </View>
@@ -320,7 +326,7 @@ export default function DoctorScheduleScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: doctorColors.background,
   },
   screen: {
     flex: 1,
@@ -331,16 +337,18 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   availabilityHelperPill: {
-    backgroundColor: "#F8FAFC",
-    borderRadius: 14,
+    backgroundColor: "#EEF8F8",
+    borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
   },
   availabilityHelperText: {
     fontSize: 13,
     lineHeight: 19,
-    color: "#64748B",
+    color: doctorColors.textSecondary,
     paddingHorizontal: 2,
   },
   previewButton: {
@@ -348,25 +356,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     alignSelf: "flex-end",
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "#EAF6F5",
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: doctorColors.border,
   },
   previewButtonText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#2563EB",
+    color: doctorColors.primary,
   },
   segmentedControl: {
     flexDirection: "row",
     gap: 10,
     padding: 6,
-    backgroundColor: "#E2E8F0",
+    backgroundColor: "#E0F0EF",
     borderRadius: 18,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
   },
   segmentButton: {
     flex: 1,
@@ -376,8 +386,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   segmentButtonActive: {
-    backgroundColor: "#FFFFFF",
-    shadowColor: "#000",
+    backgroundColor: doctorColors.surface,
+    shadowColor: doctorColors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
@@ -386,22 +396,24 @@ const styles = StyleSheet.create({
   segmentLabel: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#64748B",
+    color: doctorColors.textSecondary,
   },
   segmentLabelActive: {
-    color: "#0F172A",
+    color: doctorColors.deep,
   },
   infoBanner: {
     marginBottom: 12,
-    backgroundColor: "#DBEAFE",
+    backgroundColor: "#E8F6F6",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
   },
   infoBannerText: {
     fontSize: 13,
     lineHeight: 19,
-    color: "#1D4ED8",
+    color: doctorColors.deep,
   },
   contentWrap: {
     flex: 1,

@@ -1,7 +1,15 @@
 import React from "react";
 import ConsultationScreen from "../../../components/ConsultationScreen";
 
-export default function ConsultationPage({ route }: any) {
+type ConsultationPageProps = {
+  route: {
+    params?: {
+      queueId?: string | number;
+    };
+  };
+};
+
+export default function ConsultationPage({ route }: ConsultationPageProps) {
   const { queueId } = route.params ?? {};
 
   return <ConsultationScreen queueId={queueId} />;

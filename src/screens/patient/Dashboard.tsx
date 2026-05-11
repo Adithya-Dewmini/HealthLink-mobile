@@ -1,54 +1,213 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
+  RefreshControl,
   ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  Dimensions,
   StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
 import { apiFetch } from "../../config/api";
-
-const { width } = Dimensions.get("window");
+import { patientTheme } from "../../constants/patientTheme";
+import ActiveQueueFloatingCard, {
+  type ActiveQueueState,
+  UpcomingAppointmentCard,
+} from "../../components/patient/ActiveQueueFloatingCard";
+import ActiveOrderSpotlight from "../../components/patient/ActiveOrderSpotlight";
+import DashboardBannerCarousel from "../../components/patient/DashboardBannerCarousel";
+import PremiumDashboardEntityCard from "../../components/patient/PremiumDashboardEntityCard";
+import {
+  getDashboardBanners,
+  type DashboardBanner,
+} from "../../services/dashboardBannerApi";
+import {
+  getDashboardMedicalCenters,
+  getDashboardPharmacies,
+  type DashboardMedicalCenter,
+  type DashboardPharmacy,
+} from "../../services/patientDashboardApi";
 
 const THEME = {
-  primaryBlue: "#2196F3",
-  lightBlueBg: "#E3F2FD",
-  background: "#F2F5F9",
-  accentBlue: "#2196F3",
+  ...patientTheme.colors,
+  primary: "#0F172A",
+  accent: "#38BDF8",
   white: "#FFFFFF",
-  textPrimary: "#1A1C1E",
-  textSecondary: "#6A6D7C",
-  border: "#E0E0E0",
-  cardRadius: 20,
+  bg: "#F8FAFC",
+  navy: "#03045E",
 };
 
-type QueueStatus = {
-  sessionId?: number | null;
-  status?: string;
-  queueStarted?: boolean;
-  currentToken?: number | null;
-  nowServing?: number | null;
-  patientToken?: number | null;
-  estimatedWaitMinutes?: number | null;
-  patientStatus?: string | null;
+const CONTENT_GUTTER = 24;
+
+const BANNER_TARGET_SCREEN_ALIASES: Record<string, keyof PatientStackParamList> = {
+  appointments: "Appointments",
+  bookappointmentscreen: "BookAppointmentScreen",
+  doctoravailabilityscreen: "DoctorAvailabilityScreen",
+  doctorsearchscreen: "DoctorSearchScreen",
+  favorites: "Favorites",
+  medicalhistoryscreen: "MedicalHistoryScreen",
+  medicinesearch: "MedicineSearch",
+  notificationcenter: "NotificationCenter",
+  patientclinicdetails: "PatientClinicDetails",
+  patientprescriptions: "PatientPrescriptions",
+  pharmacymarketplace: "PharmacyMarketplace",
+  pharmacystore: "PharmacyStore",
+  prescriptiondetails: "PrescriptionDetails",
+  symptomchecker: "SymptomChecker",
+  uploadprescription: "UploadPrescription",
 };
 
-export default function BluePatientDashboard() {
-  const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
-  const [profileName, setProfileName] = useState<string>("Patient");
-  const [latestPrescription, setLatestPrescription] = useState<any | null>(null);
-  const [nextBooking, setNextBooking] = useState<any | null>(null);
-  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+const EASY_ACTIONS = [
+  {
+    icon: "search" as const,
+    label: "Find Doctor",
+    accent: "#38BDF8",
+    gradient: ["#E0F2FE", "#F8FCFF"] as const,
+  },
+  {
+    icon: "document-text" as const,
+    label: "Records",
+    accent: "#8B5CF6",
+    gradient: ["#EDE9FE", "#FAF7FF"] as const,
+  },
+  {
+    icon: "medkit" as const,
+    label: "Prescriptions",
+    accent: "#10B981",
+    gradient: ["#DCFCE7", "#F4FFF9"] as const,
+  },
+  {
+    icon: "cloud-upload" as const,
+    label: "Upload Rx",
+    accent: "#F59E0B",
+    gradient: ["#FFF7ED", "#FFFDF7"] as const,
+  },
+  {
+    icon: "pulse" as const,
+    label: "Activity",
+    accent: "#EC4899",
+    gradient: ["#FCE7F3", "#FFF7FB"] as const,
+  },
+] as const;
+
+type PatientNavigation = NativeStackNavigationProp<PatientStackParamList>;
+
+type ActionTileProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  accent: string;
+  gradient: readonly [string, string];
+  onPress: () => void;
+};
+
+const normalizeActiveQueue = (payload: unknown): ActiveQueueState | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Record<string, unknown>;
+  const status = String(data.status ?? "none").toLowerCase();
+
+  return {
+    active: Boolean(data.active),
+    status:
+      status === "appointment_booked" ||
+      status === "queue_live" ||
+      status === "waiting" ||
+      status === "next" ||
+      status === "missed"
+        ? status
+        : "none",
+    appointmentId: data.appointmentId ? String(data.appointmentId) : undefined,
+    queueId: data.queueId ? String(data.queueId) : undefined,
+    doctorId: Number(data.doctorId ?? 0) || undefined,
+    clinicId: data.clinicId ? String(data.clinicId) : undefined,
+    sessionId: Number(data.sessionId ?? 0) || undefined,
+    doctorName: data.doctorName ? String(data.doctorName) : undefined,
+    medicalCenterName: data.medicalCenterName ? String(data.medicalCenterName) : undefined,
+    scheduledTime: data.scheduledTime ? String(data.scheduledTime) : undefined,
+    sessionTime: data.sessionTime ? String(data.sessionTime) : undefined,
+    queueStarted: typeof data.queueStarted === "boolean" ? data.queueStarted : undefined,
+    tokenNumber: Number(data.tokenNumber ?? 0) || undefined,
+    position: Number(data.position ?? 0) || undefined,
+    estimatedWaitMinutes: Number(data.estimatedWaitMinutes ?? 0) || undefined,
+  };
+};
+
+const normalizeBannerTargetScreen = (value: string | null | undefined): keyof PatientStackParamList | null => {
+  if (!value) return null;
+  const key = value.trim().toLowerCase();
+  return BANNER_TARGET_SCREEN_ALIASES[key] ?? null;
+};
+
+const ActionTile = ({ icon, label, accent, gradient, onPress }: ActionTileProps) => (
+  <TouchableOpacity style={styles.actionTileTouch} onPress={onPress} activeOpacity={0.9}>
+    <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.tile}>
+      <View style={[styles.tileGlow, { backgroundColor: `${accent}18` }]} />
+      <View style={styles.tileTopRow}>
+        <View style={[styles.tileIconCircle, { shadowColor: accent }]}>
+          <Ionicons name={icon} size={24} color={accent} />
+        </View>
+        <View style={[styles.tileAccentDot, { backgroundColor: accent }]} />
+      </View>
+      <Text style={styles.tileLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </LinearGradient>
+  </TouchableOpacity>
+);
+
+const LoadingCard = () => (
+  <View style={styles.loadingCardShell}>
+    <LinearGradient colors={["#E2E8F0", "#F8FAFC"]} style={styles.loadingCard}>
+      <View style={styles.loadingBadgeRow}>
+        <View style={styles.loadingEyebrow} />
+        <View style={styles.loadingBadge} />
+      </View>
+      <View style={styles.loadingVisual} />
+      <View style={styles.loadingLineLarge} />
+      <View style={styles.loadingLineSmall} />
+    </LinearGradient>
+  </View>
+);
+
+const InlineMessage = ({
+  message,
+  actionLabel,
+  onPress,
+}: {
+  message: string;
+  actionLabel?: string;
+  onPress?: () => void;
+}) => (
+  <View style={styles.inlineMessage}>
+    <Text style={styles.inlineMessageText}>{message}</Text>
+    {actionLabel && onPress ? (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.88}>
+        <Text style={styles.inlineMessageAction}>{actionLabel}</Text>
+      </TouchableOpacity>
+    ) : null}
+  </View>
+);
+
+export default function Dashboard() {
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<PatientNavigation>();
+  const [profileName, setProfileName] = useState("Patient");
+  const [activeQueue, setActiveQueue] = useState<ActiveQueueState | null>(null);
+  const [banners, setBanners] = useState<DashboardBanner[]>([]);
+  const [medicalCenters, setMedicalCenters] = useState<DashboardMedicalCenter[]>([]);
+  const [pharmacies, setPharmacies] = useState<DashboardPharmacy[]>([]);
+  const [loadingDashboardData, setLoadingDashboardData] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [bannersError, setBannersError] = useState<string | null>(null);
+  const [centersError, setCentersError] = useState<string | null>(null);
+  const [pharmaciesError, setPharmaciesError] = useState<string | null>(null);
+  const [fixedHeaderHeight, setFixedHeaderHeight] = useState(0);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -57,493 +216,739 @@ export default function BluePatientDashboard() {
     return "Good Evening";
   }, []);
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const [profileResult, bookingResult, prescriptionResult] = await Promise.allSettled([
-        apiFetch("/api/patients/me"),
-        apiFetch("/api/patients/bookings"),
-        apiFetch("/api/patients/prescriptions?latest=true"),
-      ]);
-
-      if (profileResult.status === "fulfilled" && profileResult.value.ok) {
-        const profile = await profileResult.value.json();
-        setProfileName(profile?.name ?? "Patient");
-      }
-
-      let selectedBooking: any | null = null;
-      if (bookingResult.status === "fulfilled" && bookingResult.value.ok) {
-        const bookingData = await bookingResult.value.json();
-        const upcoming = (Array.isArray(bookingData) ? bookingData : [])
-          .filter((item: any) => String(item?.status ?? "booked") !== "cancelled")
-          .map((item: any) => {
-            const date = String(item?.date ?? "");
-            const time = String(item?.time ?? "00:00");
-            const combined = new Date(`${date}T${time}`);
-            return { ...item, combined };
-          })
-          .filter((item: any) => !Number.isNaN(item.combined.getTime()))
-          .filter((item: any) => item.combined >= new Date())
-          .sort((a: any, b: any) => a.combined.getTime() - b.combined.getTime());
-        selectedBooking = upcoming[0] ?? null;
-        setNextBooking(selectedBooking);
-      } else {
-        setNextBooking(null);
-      }
-
-      if (prescriptionResult.status === "fulfilled" && prescriptionResult.value.ok) {
-        const data = await prescriptionResult.value.json();
-        setLatestPrescription(data ?? null);
-      } else {
-        setLatestPrescription(null);
-      }
-
-      if (selectedBooking?.doctor_id) {
-        const selectedClinicId =
-          selectedBooking?.medical_center_id ?? selectedBooking?.clinic_id ?? null;
-        const queueRes = await apiFetch(
-          `/api/patients/doctor/queue-status/${selectedBooking.doctor_id}${
-            selectedClinicId ? `?clinicId=${encodeURIComponent(selectedClinicId)}` : ""
-          }`
-        );
-        if (queueRes.ok) {
-          const queueData = await queueRes.json();
-          setQueueStatus(queueData ?? null);
-        } else {
-          setQueueStatus(null);
-        }
-      } else {
-        setQueueStatus(null);
-      }
-
-      const failedRequests = [profileResult, bookingResult, prescriptionResult].filter(
-        (result) => result.status === "rejected"
-      );
-
-      if (failedRequests.length > 0) {
-        const firstError = failedRequests[0] as PromiseRejectedResult;
-        const message =
-          firstError.reason instanceof Error
-            ? firstError.reason.message
-            : "Some dashboard data could not be loaded";
-        setLoadError(message);
-      }
-    } catch (err) {
-      console.error("Dashboard load error:", err);
-      setLoadError(err instanceof Error ? err.message : "Failed to load dashboard");
-    } finally {
-      setLoading(false);
+  const loadDashboard = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "initial") {
+      setLoadingDashboardData(true);
+    } else {
+      setRefreshing(true);
     }
+
+    const [profileResult, queueResult, bannersResult, medicalCentersResult, pharmaciesResult] = await Promise.allSettled([
+      apiFetch("/api/patients/me"),
+      apiFetch("/api/patient/queue/active"),
+      getDashboardBanners(),
+      getDashboardMedicalCenters(),
+      getDashboardPharmacies(),
+    ]);
+
+    if (profileResult.status === "fulfilled" && profileResult.value.ok) {
+      const profile = await profileResult.value.json().catch(() => ({}));
+      setProfileName(typeof profile?.name === "string" && profile.name.trim() ? profile.name : "Patient");
+    }
+
+    if (queueResult.status === "fulfilled" && queueResult.value.ok) {
+      const queuePayload = await queueResult.value.json().catch(() => ({}));
+      setActiveQueue(normalizeActiveQueue(queuePayload));
+    } else {
+      setActiveQueue(null);
+    }
+
+    if (bannersResult.status === "fulfilled") {
+      setBanners(bannersResult.value);
+      setBannersError(null);
+    } else {
+      setBanners([]);
+      setBannersError("Could not load latest banners.");
+    }
+
+    if (medicalCentersResult.status === "fulfilled") {
+      setMedicalCenters(medicalCentersResult.value);
+      setCentersError(null);
+    } else {
+      setMedicalCenters([]);
+      setCentersError("Could not load latest centers. Pull to refresh.");
+    }
+
+    if (pharmaciesResult.status === "fulfilled") {
+      setPharmacies(pharmaciesResult.value);
+      setPharmaciesError(null);
+    } else {
+      setPharmacies([]);
+      setPharmaciesError("Could not load latest pharmacies. Pull to refresh.");
+    }
+
+    const hasSectionError =
+      bannersResult.status === "rejected" ||
+      medicalCentersResult.status === "rejected" ||
+      pharmaciesResult.status === "rejected";
+    setDashboardError(hasSectionError ? "Some dashboard sections could not be refreshed." : null);
+    setLoadingDashboardData(false);
+    setRefreshing(false);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadDashboard();
+      void loadDashboard("initial");
+      return undefined;
     }, [loadDashboard])
   );
 
-  const currentStatus = useMemo(() => {
-    if (queueStatus?.patientToken && ["WAITING", "WITH_DOCTOR"].includes(String(queueStatus?.patientStatus))) {
-      return "queue";
+  const showFloatingQueue = Boolean(
+    activeQueue?.active && activeQueue.status !== "appointment_booked" && activeQueue.status !== "none"
+  );
+
+  const handleUpcomingPress = useCallback(() => {
+    navigation.navigate("Appointments");
+  }, [navigation]);
+
+  const handleQueuePress = useCallback(() => {
+    if (activeQueue?.doctorId) {
+      navigation.navigate("PatientQueue", {
+        doctorId: activeQueue.doctorId,
+        clinicId: activeQueue.clinicId,
+        sessionId: activeQueue.sessionId,
+      });
+      return;
     }
-    if (nextBooking) return "appointment";
-    return "empty";
-  }, [queueStatus, nextBooking]);
 
-  const nowServing = Number(queueStatus?.currentToken ?? queueStatus?.nowServing ?? 0);
-  const yourNumber = Number(queueStatus?.patientToken ?? 0);
-  const progressPct = useMemo(() => {
-    if (!yourNumber) return 0;
-    return Math.min((nowServing / Math.max(yourNumber, 1)) * 100, 100);
-  }, [nowServing, yourNumber]);
+    navigation.navigate("Appointments");
+  }, [activeQueue, navigation]);
 
-  const reminderMedicine = useMemo(() => {
-    const meds = Array.isArray(latestPrescription?.medicines)
-      ? latestPrescription.medicines
-      : [];
-    return meds[0] ?? null;
-  }, [latestPrescription]);
+  const handleBannerPress = useCallback((banner: DashboardBanner) => {
+    const targetType = String(banner.targetType || "none").toLowerCase();
+    const targetId = banner.targetId?.trim();
+    const targetScreen = normalizeBannerTargetScreen(banner.targetScreen);
 
-  const recentDoctor =
-    latestPrescription?.doctor?.name ??
-    latestPrescription?.doctor_name ??
-    latestPrescription?.doctorName ??
-    "Doctor";
+    if (targetScreen === "PatientClinicDetails" && targetId) {
+      navigation.navigate("PatientClinicDetails", {
+        clinicId: targetId,
+        clinicName: banner.title?.trim() || "Medical Center",
+        location: "Location not provided",
+        status: "OPEN",
+        image: banner.imageUrl,
+        rating: 0,
+        waitTime: "Queue details unavailable",
+        nextAvailable: "Unavailable",
+        specialty: "Medical Center",
+      });
+      return;
+    }
 
-  const recentDate = latestPrescription?.issuedAt
-    ? new Date(latestPrescription.issuedAt).toLocaleDateString()
-    : latestPrescription?.createdAt
-      ? new Date(latestPrescription.createdAt).toLocaleDateString()
-      : "—";
+    if (targetScreen === "PharmacyStore") {
+      const pharmacyId = Number(targetId);
+      if (Number.isInteger(pharmacyId)) {
+        navigation.navigate("PharmacyStore", { pharmacyId });
+        return;
+      }
+    }
+
+    if (targetScreen === "DoctorSearchScreen") {
+      const doctorId = Number(targetId);
+      navigation.navigate("DoctorSearchScreen", {
+        doctorId: Number.isFinite(doctorId) ? doctorId : undefined,
+      });
+      return;
+    }
+
+    if (targetScreen === "BookAppointmentScreen") {
+      const doctorId = Number(targetId);
+      navigation.navigate("BookAppointmentScreen", {
+        doctorId: Number.isFinite(doctorId) ? doctorId : undefined,
+      });
+      return;
+    }
+
+    if (targetScreen === "UploadPrescription") {
+      navigation.navigate("UploadPrescription");
+      return;
+    }
+
+    if (targetScreen === "Appointments") {
+      navigation.navigate("Appointments");
+      return;
+    }
+
+    if (targetScreen === "PharmacyMarketplace") {
+      navigation.navigate("PharmacyMarketplace");
+      return;
+    }
+
+    if (targetScreen === "PatientPrescriptions") {
+      navigation.navigate("PatientPrescriptions");
+      return;
+    }
+
+    if (targetScreen === "MedicalHistoryScreen") {
+      navigation.navigate("MedicalHistoryScreen");
+      return;
+    }
+
+    if (targetScreen === "MedicineSearch") {
+      navigation.navigate("MedicineSearch");
+      return;
+    }
+
+    if (targetScreen === "Favorites") {
+      navigation.navigate("Favorites");
+      return;
+    }
+
+    if (targetScreen === "SymptomChecker") {
+      navigation.navigate("SymptomChecker");
+      return;
+    }
+
+    if (targetScreen === "NotificationCenter") {
+      navigation.navigate("NotificationCenter");
+      return;
+    }
+
+    if (targetType === "medical_center" && targetId) {
+      navigation.navigate("PatientClinicDetails", {
+        clinicId: targetId,
+        clinicName: banner.title?.trim() || "Medical Center",
+        location: "Location not provided",
+        status: "OPEN",
+        image: banner.imageUrl,
+        rating: 0,
+        waitTime: "Queue details unavailable",
+        nextAvailable: "Unavailable",
+        specialty: "Medical Center",
+      });
+      return;
+    }
+
+    if (targetType === "pharmacy" && targetId) {
+      const pharmacyId = Number(targetId);
+      if (Number.isInteger(pharmacyId)) {
+        navigation.navigate("PharmacyStore", { pharmacyId });
+        return;
+      }
+      navigation.navigate("PharmacyMarketplace");
+      return;
+    }
+
+    if (targetType === "doctor" && targetId) {
+      const doctorId = Number(targetId);
+      navigation.navigate("DoctorSearchScreen", {
+        doctorId: Number.isFinite(doctorId) ? doctorId : undefined,
+      });
+      return;
+    }
+
+    if (targetType === "prescription_upload") {
+      navigation.navigate("UploadPrescription");
+      return;
+    }
+
+    if (targetType === "appointments") {
+      navigation.navigate("Appointments");
+    }
+  }, [navigation]);
+
+  const getCenterStatus = useCallback((center: DashboardMedicalCenter) => {
+    if (center.activeQueueCount && center.activeQueueCount > 0) return "Queue Live" as const;
+    if (center.isOpen === true) return "Open" as const;
+    if (center.isOpen === false) return "Closed" as const;
+    return null;
+  }, []);
+
+  const getPharmacyStatus = useCallback((pharmacy: DashboardPharmacy) => {
+    if (pharmacy.isOpen === true) return "Open" as const;
+    if (pharmacy.isOpen === false) return "Closed" as const;
+    return null;
+  }, []);
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" />
-      
-      {/* 1. Header Section */}
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.greetingText}>{greeting}</Text>
-          <Text style={styles.userName}>{profileName}</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconCircle}>
-            <Ionicons name="notifications-outline" size={24} color={THEME.primaryBlue} />
-            <View style={styles.notifDot} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {loadError ? (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
-            <Text style={styles.errorBannerText}>{loadError}</Text>
-          </View>
-        ) : null}
-        
-        {/* 2. Dynamic Main Card (Blue Gradient) */}
-        {currentStatus === "queue" && (
-          <LinearGradient 
-            colors={[THEME.lightBlueBg, "#DBEAFE"]} 
-            start={{ x: 0, y: 0 }} 
-            end={{ x: 1, y: 1 }} 
-            style={styles.mainCard}
-          >
-            <View style={styles.mainCardHeader}>
-              <Text style={styles.mainCardLabel}>Live Queue</Text>
-              <View style={styles.liveBadge}><Text style={styles.liveText}>LIVE</Text></View>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.safe} edges={[]}>
+        <View
+          style={[styles.fixedHeader, { paddingTop: insets.top + 18 }]}
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+            setFixedHeaderHeight((current) => (current !== nextHeight ? nextHeight : current));
+          }}
+        >
+          <View style={styles.headerNav}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.greetingText}>{greeting}</Text>
+              <Text style={styles.userNameText}>{profileName}</Text>
             </View>
-            <View style={styles.queueContent}>
-              <View>
-                <Text style={styles.queueNumber}>{yourNumber || "—"}</Text>
-                <Text style={styles.queueSub}>Your Number</Text>
-              </View>
-              <View style={styles.queueDivider} />
-              <View>
-                <Text style={styles.queueNumberSmall}>{nowServing || "—"}</Text>
-                <Text style={styles.queueSub}>Now Serving</Text>
-              </View>
-            </View>
-            <View style={styles.progressBarBg}>
-               <View style={[styles.progressBarFill, { width: `${progressPct}%` }]} />
-            </View>
-            <Text style={styles.waitText}>
-              Estimated wait:{" "}
-              <Text style={{ fontWeight: "800" }}>
-                {queueStatus?.estimatedWaitMinutes ?? 0} mins
-              </Text>
-            </Text>
             <TouchableOpacity
-              style={styles.mainCardBtn}
-              onPress={() =>
-                navigation.navigate("PatientQueue", {
-                  doctorId: nextBooking?.doctor_id,
-                  clinicId: nextBooking?.medical_center_id ?? nextBooking?.clinic_id,
-                  sessionId: queueStatus?.sessionId ? Number(queueStatus.sessionId) : undefined,
-                })
-              }
+              style={styles.notifBtn}
+              onPress={() => navigation.navigate("NotificationCenter", { title: "Notifications", panel: "patient" })}
+              activeOpacity={0.88}
             >
-              <Text style={styles.mainCardBtnText}>Check Details</Text>
+              <Ionicons name="notifications-outline" size={22} color="white" />
+              <View style={styles.notifBadge} />
             </TouchableOpacity>
-          </LinearGradient>
-        )}
-        {currentStatus === "appointment" && (
-          <View style={styles.appointmentCard}>
-            <View style={styles.appointmentRow}>
-              <View>
-                <Text style={styles.mainCardLabelDark}>Upcoming Appointment</Text>
-                <Text style={styles.appointmentDoctor}>
-                  {nextBooking?.doctor_name ?? "Doctor"}
-                </Text>
-                <Text style={styles.appointmentMeta}>
-                  {nextBooking?.date ?? "—"} • {formatBookingTime(nextBooking?.time)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.appointmentBtn}
-                onPress={() =>
-                  navigation.navigate("PatientTabs", { screen: "PatientAppointments" })
-                }
-              >
-                <Text style={styles.appointmentBtnText}>View</Text>
-              </TouchableOpacity>
-            </View>
           </View>
-        )}
-        {currentStatus === "empty" && (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyRow}>
-              <Ionicons name="calendar-outline" size={24} color={THEME.primaryBlue} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.emptyTitle}>No upcoming appointments</Text>
-                <Text style={styles.emptySub}>Book a doctor to get started.</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.appointmentBtn}
+        </View>
+
+        <ScrollView
+          style={styles.scroll}
+          bounces={false}
+          alwaysBounceVertical={false}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: fixedHeaderHeight },
+            showFloatingQueue ? styles.scrollContentWithTracker : null,
+          ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                void loadDashboard("refresh");
+              }}
+              tintColor={THEME.white}
+            />
+          }
+        >
+          <View style={styles.scrollHeroSection}>
+            <LinearGradient
+              colors={[THEME.primary, "#1E293B"]}
+              style={styles.scrollHeroBackdrop}
+            />
+            {bannersError && banners.length === 0 ? null : (
+              <DashboardBannerCarousel banners={banners} onPressBanner={handleBannerPress} />
+            )}
+          </View>
+
+          <View style={styles.bodySection}>
+            <ActiveOrderSpotlight />
+
+            {activeQueue?.status === "appointment_booked" ? (
+              <UpcomingAppointmentCard appointment={activeQueue} onPress={handleUpcomingPress} />
+            ) : null}
+
+            {dashboardError ? <InlineMessage message={dashboardError} /> : null}
+            <Text style={styles.sectionLabel}>Easy Action</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.easyActionScroll}
+              contentContainerStyle={styles.easyActionRail}
+            >
+              <ActionTile
+                icon={EASY_ACTIONS[0].icon}
+                label={EASY_ACTIONS[0].label}
+                accent={EASY_ACTIONS[0].accent}
+                gradient={EASY_ACTIONS[0].gradient}
                 onPress={() => navigation.navigate("DoctorSearchScreen")}
-              >
-                <Text style={styles.appointmentBtnText}>Book</Text>
+              />
+              <ActionTile
+                icon={EASY_ACTIONS[1].icon}
+                label={EASY_ACTIONS[1].label}
+                accent={EASY_ACTIONS[1].accent}
+                gradient={EASY_ACTIONS[1].gradient}
+                onPress={() => navigation.navigate("MedicalHistoryScreen")}
+              />
+              <ActionTile
+                icon={EASY_ACTIONS[2].icon}
+                label={EASY_ACTIONS[2].label}
+                accent={EASY_ACTIONS[2].accent}
+                gradient={EASY_ACTIONS[2].gradient}
+                onPress={() => navigation.navigate("PatientPrescriptions")}
+              />
+              <ActionTile
+                icon={EASY_ACTIONS[3].icon}
+                label={EASY_ACTIONS[3].label}
+                accent={EASY_ACTIONS[3].accent}
+                gradient={EASY_ACTIONS[3].gradient}
+                onPress={() => navigation.navigate("UploadPrescription")}
+              />
+              <ActionTile
+                icon={EASY_ACTIONS[4].icon}
+                label={EASY_ACTIONS[4].label}
+                accent={EASY_ACTIONS[4].accent}
+                gradient={EASY_ACTIONS[4].gradient}
+                onPress={() => navigation.navigate("ActivityFeed", { title: "Activity Feed" })}
+              />
+            </ScrollView>
+
+            <View style={styles.featuredHeader}>
+              <Text style={styles.sectionLabel}>Healthcare Centers</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("PatientTabs", { screen: "PatientAppointments" })}>
+                <Text style={styles.seeAllText}>See All</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        )}
 
-        {/* 3. Quick Actions Grid */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.grid}>
-          <ActionTile
-            icon="calendar-outline"
-            label="Book Appt"
-            onPress={() => navigation.navigate("DoctorSearchScreen")}
-          />
-          <ActionTile
-            icon="document-text-outline"
-            label="Lab Reports"
-            onPress={() => navigation.navigate("MedicalHistoryScreen")}
-          />
-          <ActionTile
-            icon="medkit-outline"
-            label="Pharmacy"
-            onPress={() =>
-              navigation.navigate("PatientPrescriptions")
-            }
-          />
-          <ActionTile
-            icon="search-outline"
-            label="Find Doctor"
-            onPress={() => navigation.navigate("DoctorSearchScreen")}
-          />
-        </View>
+            {centersError ? (
+              <InlineMessage message={centersError} actionLabel="Retry" onPress={() => void loadDashboard("refresh")} />
+            ) : null}
 
-        {/* 4. Reminder Section */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Reminders</Text>
-          <TouchableOpacity><Text style={styles.seeAll}>See All</Text></TouchableOpacity>
-        </View>
-        {reminderMedicine ? (
-          <View style={styles.reminderCard}>
-            <View style={styles.reminderIconBox}>
-              <MaterialCommunityIcons name="pill" size={26} color={THEME.primaryBlue} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.reminderName}>
-                {reminderMedicine.name ?? reminderMedicine.medicine_name ?? "Medicine"}
-              </Text>
-              <Text style={styles.reminderTime}>
-                {reminderMedicine.instructions ??
-                  reminderMedicine.frequency ??
-                  "Follow prescription instructions"}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.takeNowBtn}
-              onPress={() => navigation.navigate("MedicineTracker")}
-            >
-              <Text style={styles.takeNowText}>Track</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.emptyReminder}>
-            <Text style={styles.emptyReminderText}>
-              {loading ? "Loading reminders..." : "No reminders yet."}
-            </Text>
-          </View>
-        )}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+              {loadingDashboardData ? (
+                <>
+                  <LoadingCard />
+                  <LoadingCard />
+                </>
+              ) : medicalCenters.length > 0 ? (
+                medicalCenters.map((center) => (
+                  <PremiumDashboardEntityCard
+                    key={center.id}
+                    title={center.name}
+                    subtitle={center.city || center.address || "Address not provided"}
+                    imageUrl={center.imageUrl || center.logoUrl}
+                    status={getCenterStatus(center)}
+                    metadata={
+                      center.activeQueueCount && center.activeQueueCount > 0
+                        ? `${center.activeQueueCount} in queue`
+                        : null
+                    }
+                    icon="business-outline"
+                    onPress={() =>
+                      navigation.navigate("PatientClinicDetails", {
+                        clinicId: center.id,
+                        clinicName: center.name,
+                        location: center.address || center.city || "Location not provided",
+                        status:
+                          center.activeQueueCount && center.activeQueueCount > 0
+                            ? "QUEUE LIVE"
+                            : center.isOpen
+                              ? "OPEN"
+                              : "CLOSED",
+                        image: center.imageUrl || center.logoUrl || "",
+                        rating: 0,
+                        waitTime:
+                          center.activeQueueCount && center.activeQueueCount > 0
+                            ? `${center.activeQueueCount} in queue`
+                            : "Queue details unavailable",
+                        nextAvailable: center.isOpen ? "Open now" : "Unavailable",
+                        specialty: "Medical Center",
+                      })
+                    }
+                  />
+                ))
+              ) : (
+                <View style={styles.emptySectionCard}>
+                  <View style={styles.emptySectionIconWrap}>
+                    <Ionicons name="business-outline" size={24} color="#475569" />
+                  </View>
+                  <Text style={styles.emptySectionTitle}>No healthcare centers available yet</Text>
+                  <Text style={styles.emptySectionText}>Approved centers will appear here when available.</Text>
+                </View>
+              )}
+            </ScrollView>
 
-        {/* 5. Recent Activity Section */}
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
-        {latestPrescription ? (
-          <View style={styles.activityItem}>
-            <View style={styles.activityIcon}>
-              <Ionicons name="medical-outline" size={22} color={THEME.primaryBlue} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.activityTitle}>Consultation Completed</Text>
-              <Text style={styles.activitySub}>
-                {recentDoctor} • {recentDate}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={THEME.textSecondary} />
-          </View>
-        ) : (
-          <View style={styles.emptyReminder}>
-            <Text style={styles.emptyReminderText}>
-              {loading ? "Loading activity..." : "No recent activity yet."}
-            </Text>
-          </View>
-        )}
+            <View style={styles.featuredSection}>
+              <View style={styles.featuredHeader}>
+                <Text style={styles.sectionLabel}>Pharmacies</Text>
+                <TouchableOpacity onPress={() => navigation.navigate("PharmacyMarketplace")}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </SafeAreaView>
+              {pharmaciesError ? (
+                <InlineMessage
+                  message={pharmaciesError}
+                  actionLabel="Retry"
+                  onPress={() => {
+                    void loadDashboard("refresh");
+                  }}
+                />
+              ) : null}
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                {loadingDashboardData ? (
+                  <>
+                    <LoadingCard />
+                    <LoadingCard />
+                  </>
+                ) : pharmacies.length > 0 ? (
+                  pharmacies.map((pharmacy) => (
+                    <PremiumDashboardEntityCard
+                      key={pharmacy.id}
+                      title={pharmacy.name}
+                      subtitle={pharmacy.city || pharmacy.address || "Address not provided"}
+                      imageUrl={pharmacy.imageUrl || pharmacy.logoUrl}
+                      status={getPharmacyStatus(pharmacy)}
+                      metadata={
+                        pharmacy.medicineCount && pharmacy.medicineCount > 0
+                          ? `${pharmacy.medicineCount} medicines`
+                          : null
+                      }
+                      icon="medical-outline"
+                      onPress={() => navigation.navigate("PharmacyMarketplace")}
+                    />
+                  ))
+                ) : (
+                  <View style={styles.emptySectionCard}>
+                    <View style={styles.emptySectionIconWrap}>
+                      <Ionicons name="medical-outline" size={24} color="#475569" />
+                    </View>
+                    <Text style={styles.emptySectionTitle}>No pharmacies available yet</Text>
+                    <Text style={styles.emptySectionText}>Approved pharmacies will appear here when available.</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </ScrollView>
+
+        {showFloatingQueue && activeQueue ? <ActiveQueueFloatingCard queue={activeQueue} onPress={handleQueuePress} /> : null}
+      </SafeAreaView>
+    </View>
   );
 }
 
-// Helper Components
-const ActionTile = ({ icon, label, onPress }: any) => (
-  <TouchableOpacity style={styles.tile} onPress={onPress}>
-    <View style={styles.tileIconBox}>
-      <Ionicons name={icon} size={28} color={THEME.primaryBlue} />
-    </View>
-    <Text style={styles.tileLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
-  scroll: { backgroundColor: THEME.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: THEME.white,
-    gap: 12,
+  container: { flex: 1, backgroundColor: THEME.bg },
+  safe: { flex: 1 },
+  fixedHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    backgroundColor: THEME.primary,
+    paddingHorizontal: CONTENT_GUTTER,
+    paddingBottom: 0,
   },
-  headerText: { flex: 1, alignItems: "flex-start" },
-  greetingText: { fontSize: 14, color: THEME.textSecondary, fontWeight: '500' },
-  userName: { fontSize: 26, fontWeight: '800', color: THEME.textPrimary },
-  headerActions: { flexDirection: 'row', gap: 12, alignItems: "center" },
-  iconCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
-  notifDot: { position: 'absolute', top: 14, right: 15, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 2, borderColor: THEME.white },
-
-  scrollContent: { paddingHorizontal: 20, paddingTop: 12 },
-  errorBanner: {
+  headerNav: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 14,
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  greetingText: { color: "rgba(255,255,255,0.72)", fontSize: 14, fontWeight: "600", marginBottom: 2 },
+  userNameText: { color: "white", fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.4 },
+  notifBtn: {
+    width: 45,
+    height: 45,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifBadge: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#EF4444",
+    borderWidth: 1.5,
+    borderColor: "#1E293B",
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: THEME.bg,
+  },
+  scrollContent: {
+    paddingBottom: 120,
+  },
+  scrollContentWithTracker: {
+    paddingBottom: 240,
+  },
+  scrollHeroSection: {
+    position: "relative",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    zIndex: 2,
+  },
+  scrollHeroBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 72,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  bodySection: {
+    marginTop: -10,
+    paddingTop: 10,
+    paddingHorizontal: CONTENT_GUTTER,
+    backgroundColor: THEME.bg,
+    zIndex: 1,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#94A3B8",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 1.4,
+  },
+  easyActionRail: {
+    paddingLeft: CONTENT_GUTTER,
+    paddingRight: CONTENT_GUTTER,
+    gap: 12,
+    marginBottom: 16,
+  },
+  easyActionScroll: {
+    marginHorizontal: -CONTENT_GUTTER,
+  },
+  actionTileTouch: {
+    width: 118,
+  },
+  tile: {
+    minHeight: 118,
+    padding: 14,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tileGlow: {
+    position: "absolute",
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    top: -14,
+    right: -10,
+  },
+  tileTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+  tileIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  tileAccentDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 3,
+  },
+  tileLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: THEME.primary,
+    lineHeight: 17,
+    marginTop: 10,
+    textAlign: "center",
+    width: "100%",
+  },
+  featuredHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    marginBottom: 0,
+  },
+  featuredSection: { marginTop: 14 },
+  seeAllText: { color: THEME.accent, fontWeight: "800", fontSize: 15 },
+  horizontalScroll: { marginHorizontal: -CONTENT_GUTTER, paddingLeft: CONTENT_GUTTER, marginTop: 4 },
+  inlineMessage: {
+    marginBottom: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    marginBottom: 14,
+    backgroundColor: "#E0F2FE",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
   },
-  errorBannerText: {
+  inlineMessageText: {
     flex: 1,
+    color: "#0F172A",
     fontSize: 13,
     fontWeight: "600",
-    color: "#991B1B",
   },
-  
-  // Main Status Card
-  mainCard: {
-    padding: 20,
-    borderRadius: THEME.cardRadius,
-    marginTop: 12,
-    marginBottom: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+  inlineMessageAction: {
+    color: "#0284C7",
+    fontSize: 13,
+    fontWeight: "800",
   },
-  mainCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  mainCardLabel: { color: THEME.textSecondary, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, fontSize: 12 },
-  liveBadge: { backgroundColor: THEME.white, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  liveText: { color: THEME.primaryBlue, fontSize: 10, fontWeight: '900' },
-  queueContent: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, gap: 24 },
-  queueNumber: { fontSize: 52, fontWeight: '900', color: THEME.textPrimary },
-  queueNumberSmall: { fontSize: 34, fontWeight: '800', color: THEME.textSecondary },
-  queueSub: { color: THEME.textSecondary, fontSize: 13, fontWeight: '600' },
-  queueDivider: { width: 1, height: 45, backgroundColor: THEME.border },
-  progressBarBg: { height: 8, backgroundColor: THEME.white, borderRadius: 4, marginBottom: 12 },
-  progressBarFill: { height: '100%', backgroundColor: THEME.primaryBlue, borderRadius: 4 },
-  waitText: { color: THEME.textSecondary, fontSize: 14 },
-  mainCardBtn: { backgroundColor: THEME.lightBlueBg, paddingVertical: 12, borderRadius: 999, marginTop: 18, alignItems: 'center' },
-  mainCardBtnText: { color: THEME.primaryBlue, fontWeight: '800', fontSize: 14 },
-  appointmentCard: {
-    backgroundColor: THEME.white,
-    borderRadius: THEME.cardRadius,
-    padding: 20,
-    marginTop: 12,
-    marginBottom: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+  loadingCardShell: {
+    width: 298,
+    height: 186,
+    marginRight: 16,
+    borderRadius: 26,
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+    ...patientTheme.shadows.card,
   },
-  appointmentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
-  appointmentDoctor: { fontSize: 18, fontWeight: "800", color: THEME.textPrimary, marginTop: 6 },
-  appointmentMeta: { fontSize: 13, color: THEME.textSecondary, marginTop: 6 },
-  appointmentBtn: {
-    backgroundColor: THEME.lightBlueBg,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  appointmentBtnText: { color: THEME.primaryBlue, fontWeight: "800", fontSize: 12 },
-  mainCardLabelDark: {
-    color: THEME.textSecondary,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    fontSize: 12,
-  },
-  emptyCard: {
-    backgroundColor: THEME.white,
-    borderRadius: THEME.cardRadius,
-    padding: 20,
-    marginTop: 12,
-    marginBottom: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  emptyRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  emptyTitle: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
-  emptySub: { fontSize: 13, color: THEME.textSecondary, marginTop: 4 },
-
-  sectionTitle: { fontSize: 20, fontWeight: '800', color: THEME.textPrimary, marginBottom: 14, marginTop: 6 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  seeAll: { color: THEME.primaryBlue, fontWeight: '700', fontSize: 14 },
-
-  // Quick Actions Grid
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 15, marginBottom: 24 },
-  tile: { width: (width - 55) / 2, backgroundColor: THEME.white, padding: 18, borderRadius: 18, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
-  tileIconBox: { width: 54, height: 54, borderRadius: 16, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  tileLabel: { fontSize: 16, fontWeight: '700', color: THEME.textPrimary },
-
-  // Reminders
-  reminderCard: { backgroundColor: THEME.white, padding: 18, borderRadius: THEME.cardRadius, flexDirection: 'row', alignItems: 'center', gap: 15, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
-  reminderIconBox: { width: 52, height: 52, borderRadius: 16, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
-  reminderName: { fontSize: 17, fontWeight: '700', color: THEME.textPrimary },
-  reminderTime: { fontSize: 14, color: THEME.textSecondary, marginTop: 2 },
-  takeNowBtn: { backgroundColor: THEME.lightBlueBg, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
-  takeNowText: { color: THEME.primaryBlue, fontWeight: '800', fontSize: 12 },
-
-  // Activity
-  activityItem: { flexDirection: 'row', alignItems: 'center', gap: 15, backgroundColor: THEME.white, padding: 18, borderRadius: THEME.cardRadius, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
-  activityIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: THEME.lightBlueBg, justifyContent: 'center', alignItems: 'center' },
-  activityTitle: { fontSize: 16, fontWeight: '700', color: THEME.textPrimary },
-  activitySub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  emptyReminder: {
-    backgroundColor: THEME.white,
+  loadingCard: {
+    flex: 1,
     padding: 18,
-    borderRadius: THEME.cardRadius,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
-    alignItems: "center",
+    justifyContent: "space-between",
   },
-  emptyReminderText: { fontSize: 13, color: THEME.textSecondary, fontWeight: "600" },
+  loadingBadgeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  loadingBadge: {
+    width: 78,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: "rgba(148,163,184,0.28)",
+  },
+  loadingEyebrow: {
+    width: 108,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: "rgba(148,163,184,0.24)",
+  },
+  loadingVisual: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "rgba(148,163,184,0.22)",
+  },
+  loadingLineLarge: {
+    width: "76%",
+    height: 24,
+    borderRadius: 10,
+    backgroundColor: "rgba(148,163,184,0.34)",
+  },
+  loadingLineSmall: {
+    width: "58%",
+    height: 14,
+    borderRadius: 8,
+    backgroundColor: "rgba(148,163,184,0.26)",
+  },
+  emptySectionCard: {
+    width: 298,
+    minHeight: 186,
+    marginRight: 16,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 26,
+    paddingVertical: 24,
+    ...patientTheme.shadows.soft,
+  },
+  emptySectionIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  emptySectionTitle: {
+    color: "#0F172A",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  emptySectionText: {
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "600",
+    textAlign: "center",
+  },
 });
-  const formatBookingTime = (value?: string) => {
-    if (!value) return "—";
-    const parts = value.split(":");
-    if (parts.length < 2) return value;
-    const h = Number(parts[0]);
-    const m = Number(parts[1]);
-    if (Number.isNaN(h) || Number.isNaN(m)) return value;
-    const hour12 = h % 12 || 12;
-    const period = h >= 12 ? "PM" : "AM";
-    return `${hour12.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")} ${period}`;
-  };

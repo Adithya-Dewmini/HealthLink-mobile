@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import CalendarDayItem from "../../components/schedule/CalendarDayItem";
 import ScheduleSessionCard from "../../components/schedule/ScheduleSessionCard";
 import type { ScheduleDayGroup, ScheduleSession } from "./scheduleTypes";
+import { doctorColors } from "../../constants/doctorTheme";
 
 type CalendarCell = {
   key: string;
@@ -32,6 +33,13 @@ type DoctorCalendarScreenProps = {
 
 const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+const toLocalDateKey = (value: Date) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 export default function DoctorCalendarScreen({
   schedule,
   isLoading = false,
@@ -45,7 +53,7 @@ export default function DoctorCalendarScreen({
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey(new Date()));
 
   const normalizedSchedule = useMemo(
     () =>
@@ -127,7 +135,7 @@ export default function DoctorCalendarScreen({
         dayNumber={item.dayNumber}
         isCurrentMonth={item.isCurrentMonth}
         isSelected={item.isoDate === selectedDate}
-        isToday={item.isoDate === new Date().toISOString().slice(0, 10)}
+        isToday={item.isoDate === toLocalDateKey(new Date())}
         hasSessions={item.isoDate ? Boolean(sessionsByDate[item.isoDate]?.length) : false}
         dotColor={item.isoDate ? markedDates[item.isoDate]?.dotColor : undefined}
         onPress={item.isoDate ? () => setSelectedDate(item.isoDate!) : undefined}
@@ -148,13 +156,13 @@ export default function DoctorCalendarScreen({
           activeOpacity={0.85}
           onPress={() => handleChangeMonth(-1)}
         >
-          <Ionicons name="chevron-back" size={18} color="#0F172A" />
+          <Ionicons name="chevron-back" size={18} color={doctorColors.deep} />
         </TouchableOpacity>
 
         <Text style={styles.monthLabel}>{monthLabel}</Text>
 
         <TouchableOpacity style={styles.monthNavButton} activeOpacity={0.85} onPress={() => handleChangeMonth(1)}>
-          <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+          <Ionicons name="chevron-forward" size={18} color={doctorColors.deep} />
         </TouchableOpacity>
       </View>
 
@@ -185,9 +193,9 @@ export default function DoctorCalendarScreen({
         <View style={styles.emptyState}>
           <Ionicons name="time-outline" size={18} color="#94A3B8" />
           <View style={styles.emptyCopy}>
-            <Text style={styles.emptyStateTitle}>No availability set</Text>
+            <Text style={styles.emptyStateTitle}>No clinic sessions assigned for this day.</Text>
             <Text style={styles.emptyStateText}>
-              Set your weekly availability before clinic sessions can be mapped cleanly.
+              Your medical centers will appear here once they assign your schedule.
             </Text>
           </View>
           {onGoToAvailability ? (
@@ -201,7 +209,7 @@ export default function DoctorCalendarScreen({
       {errorMessage && !isLoading ? (
         <View style={styles.errorState}>
           <View style={styles.errorCopy}>
-            <Text style={styles.errorTitle}>Schedule sync failed</Text>
+            <Text style={styles.errorTitle}>Could not load your calendar</Text>
             <Text style={styles.errorText}>{errorMessage}</Text>
           </View>
           {onRetry ? (
@@ -214,7 +222,7 @@ export default function DoctorCalendarScreen({
 
       {isLoading ? (
         <View style={styles.loadingState}>
-          <ActivityIndicator size="small" color="#2563EB" />
+          <ActivityIndicator size="small" color={doctorColors.primary} />
           <Text style={styles.loadingStateText}>Loading sessions</Text>
         </View>
       ) : null}
@@ -231,7 +239,7 @@ export default function DoctorCalendarScreen({
           isLoading || errorMessage ? null : (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconWrap}>
-                <Ionicons name="calendar" size={34} color="#10B981" />
+                <Ionicons name="calendar" size={34} color={doctorColors.teal} />
               </View>
               <View style={styles.emptyCopy}>
                 <Text style={styles.emptyStateTitle}>No sessions scheduled</Text>
@@ -283,7 +291,7 @@ function buildCalendarCells(currentMonth: Date): CalendarCell[] {
   }
 
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const isoDate = new Date(year, month, day).toISOString().slice(0, 10);
+    const isoDate = toLocalDateKey(new Date(year, month, day));
     cells.push({
       key: isoDate,
       dayNumber: day,

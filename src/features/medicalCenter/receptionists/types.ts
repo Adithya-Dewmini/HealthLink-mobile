@@ -1,10 +1,7 @@
-export type ReceptionistStatus = "PENDING" | "ACTIVE" | "DISABLED";
+import type { ReceptionistPermissions } from "../../../utils/receptionistPermissions";
+export type { ReceptionistPermissions } from "../../../utils/receptionistPermissions";
 
-export type ReceptionistPermissions = {
-  can_manage_queue: boolean;
-  can_manage_appointments: boolean;
-  can_check_in: boolean;
-};
+export type ReceptionistStatus = "PENDING" | "ACTIVE" | "DISABLED";
 
 export type Receptionist = {
   id: string;

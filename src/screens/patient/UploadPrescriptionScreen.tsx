@@ -5,24 +5,17 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Alert,
   Image,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { API_BASE_URL } from "../../config/api";
+import { patientTheme } from "../../constants/patientTheme";
 
-const THEME = {
-  primary: "#2563EB",
-  background: "#F9FAFB",
-  white: "#FFFFFF",
-  textPrimary: "#111827",
-  textSecondary: "#6B7280",
-  border: "#E5E7EB",
-  softBlue: "#EFF6FF",
-};
+const THEME = patientTheme.colors;
 
 type Step = "upload" | "extract" | "results";
 
@@ -258,6 +251,16 @@ export default function UploadPrescriptionScreen() {
                 </View>
               )}
             </View>
+
+            <View style={styles.nextStepCard}>
+              <Ionicons name="information-circle-outline" size={22} color={THEME.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.nextStepTitle}>Availability checking is being connected</Text>
+                <Text style={styles.nextStepText}>
+                  Use this extracted list for testing. Real pharmacy matching and cost estimates will appear here once the pharmacy inventory API is connected.
+                </Text>
+              </View>
+            </View>
           </View>
         )}
 
@@ -432,6 +435,26 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     marginTop: 4,
+  },
+  nextStepCard: {
+    flexDirection: "row",
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: THEME.softBlue,
+    borderWidth: 1,
+    borderColor: "#D7E8FF",
+  },
+  nextStepTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  nextStepText: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    color: THEME.textSecondary,
   },
   medicineCard: {
     backgroundColor: "#F8FAFC",

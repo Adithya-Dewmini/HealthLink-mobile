@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
 import { AuthContext } from "../../utils/AuthContext";
 import { apiFetch } from "../../config/api";
 
@@ -54,15 +55,15 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
+      <LinearGradient colors={["#0F172A", "#1E293B"]} style={styles.headerBackground} />
       
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="chevron-back" size={22} color={THEME.textDark} />
+          <Ionicons name="chevron-back" size={22} color={THEME.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
         <View style={styles.headerSpacer} />
@@ -180,22 +181,29 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scroll: { backgroundColor: THEME.background },
   scrollContent: { paddingBottom: 40 },
+  headerBackground: {
+    position: "absolute",
+    top: 0,
+    width: "100%",
+    height: 160,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+  },
   header: {
     paddingHorizontal: 20,
     paddingVertical: 15,
-    backgroundColor: THEME.white,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: THEME.textDark },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: THEME.white },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: THEME.background,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   headerSpacer: { width: 40, height: 40 },
   

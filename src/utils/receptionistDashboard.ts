@@ -44,33 +44,28 @@ const normalizeAction = (action: DashboardAction, index: number): DashboardActio
 };
 
 export const DEFAULT_RECEPTION_DASHBOARD: ReceptionDashboardData = {
-  greeting: "Good Morning",
+  greeting: "Reception",
   title: "Reception Dashboard",
-  doctorName: "Dr. Silva",
-  queueStatus: "LIVE",
-  startedAtLabel: "Started 8:00 AM",
-  totalPatientsLabel: "42 Patients",
+  doctorName: "No active session",
+  queueStatus: "NOT_STARTED",
+  startedAtLabel: "Live dashboard data unavailable",
+  totalPatientsLabel: "No patient data loaded",
   heroIcon: "stethoscope",
   stats: [
-    { id: "in-queue", icon: "users", label: "In Queue", value: "12", iconColor: "#2196F3" },
-    { id: "today", icon: "calendar", label: "Today", value: "48", iconColor: "#2BB673" },
-    { id: "missed", icon: "slash", label: "Missed", value: "03", iconColor: "#EF4444" },
-    { id: "avg-wait", icon: "clock", label: "Avg Wait", value: "14m", iconColor: "#F59E0B" },
+    { id: "in-queue", icon: "users", label: "In Queue", value: "0", iconColor: "#2196F3" },
   ],
   nextPatient: {
-    queueNumber: "#12",
-    name: "Amara Jayawardena",
-    etaLabel: "Est. wait: 5 mins",
-    callToAction: "Call Next",
+    queueNumber: "No queue",
+    name: "No patient waiting",
+    etaLabel: "Live estimates unavailable",
+    callToAction: "Refresh",
   },
   alert: {
-    title: "2 patients are late for check-in",
-    subtitle: "3 missed appointments in the last hour",
+    title: "Live dashboard data is not loaded",
+    subtitle: "Refresh the receptionist panel to fetch real backend data.",
   },
   actions: [
-    { id: "start-queue", title: "Start Queue", isPrimary: true, icon: "play" },
-    { id: "add-walk-in", title: "Add Walk-in" },
-    { id: "view-appointments", title: "View Appointments" },
+    { id: "refresh-dashboard", title: "Refresh", isPrimary: true, icon: "rotate-cw" },
   ],
 };
 

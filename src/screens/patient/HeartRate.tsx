@@ -12,19 +12,22 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LineChart } from "react-native-chart-kit";
 import { useNavigation } from "@react-navigation/native";
+import { patientTheme } from "../../constants/patientTheme";
 
 const screenWidth = Dimensions.get("window").width;
 
 const THEME = {
-  background: "#F2F5F9",
-  white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  softBlue: "#E3F0F9",
-  softGreen: "#E8F5E9",
-  accentBlue: "#2196F3",
-  accentRed: "#FF5252",
-  accentGreen: "#4CAF50",
+  background: patientTheme.colors.modernBackground,
+  white: patientTheme.colors.modernSurface,
+  textDark: patientTheme.colors.modernText,
+  textGray: patientTheme.colors.modernMuted,
+  softBlue: "#F0F9FF",
+  softGreen: patientTheme.colors.softGreen,
+  accentBlue: patientTheme.colors.modernAccent,
+  accentRed: patientTheme.colors.accentRed,
+  accentGreen: patientTheme.colors.accentGreen,
+  border: patientTheme.colors.modernBorder,
+  primary: patientTheme.colors.modernPrimary,
 };
 
 export default function HeartRateScreen() {
@@ -42,11 +45,11 @@ export default function HeartRateScreen() {
       {/* 1. Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color={THEME.textDark} />
+          <Ionicons name="chevron-back" size={22} color={THEME.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Heart Rate</Text>
         <TouchableOpacity style={styles.refreshBtn}>
-          <Ionicons name="refresh" size={22} color={THEME.accentBlue} />
+          <Ionicons name="refresh" size={22} color={THEME.white} />
         </TouchableOpacity>
       </View>
 
@@ -142,7 +145,7 @@ const HistoryItem = ({ time, value, date }: any) => (
 );
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
+  safe: { flex: 1, backgroundColor: THEME.primary },
   scroll: { backgroundColor: THEME.background },
   scrollContent: { paddingBottom: 20 },
   header: {
@@ -151,26 +154,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: THEME.white,
+    backgroundColor: THEME.primary,
   },
-  headerTitle: { fontSize: 20, fontWeight: "600", color: THEME.textDark },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: THEME.white },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: THEME.background,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
   },
   refreshBtn: { padding: 4 },
 
   mainCard: {
-    backgroundColor: THEME.softBlue,
-    borderRadius: 28,
+    backgroundColor: THEME.white,
+    borderRadius: 24,
     padding: 24,
     marginHorizontal: 20,
     marginTop: 20,
     alignItems: "flex-start",
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   iconCircle: {
     width: 50,
@@ -187,10 +194,12 @@ const styles = StyleSheet.create({
 
   statusCard: {
     backgroundColor: THEME.white,
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 20,
     marginHorizontal: 20,
     marginTop: 16,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   statusTitle: { fontSize: 14, fontWeight: "bold", color: THEME.textGray, textTransform: "uppercase" },
@@ -203,7 +212,7 @@ const styles = StyleSheet.create({
 
   chartContainer: {
     backgroundColor: THEME.white,
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 16,
     marginHorizontal: 20,
     alignItems: "center",
@@ -216,7 +225,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     backgroundColor: THEME.white,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     marginBottom: 8,
   },
@@ -227,7 +236,7 @@ const styles = StyleSheet.create({
 
   tipsCard: {
     backgroundColor: THEME.softGreen,
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 20,
     marginHorizontal: 20,
     marginTop: 20,

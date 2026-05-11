@@ -1,12 +1,8 @@
 import React, { memo } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { patientTheme } from "../../../constants/patientTheme";
 
-const THEME = {
-  primary: "#2563EB",
-  textPrimary: "#0F172A",
-  textSecondary: "#64748B",
-  softBlue: "#EFF6FF",
-};
+const THEME = patientTheme.colors;
 
 export type PrescriptionMedicine = {
   name: string;
@@ -56,10 +52,12 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   chip: {
-    backgroundColor: THEME.softBlue,
+    backgroundColor: THEME.highlight,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   chipText: { fontSize: 11, fontWeight: "700", color: THEME.primary },
 });

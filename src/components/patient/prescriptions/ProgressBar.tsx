@@ -1,9 +1,8 @@
 import React, { memo } from "react";
 import { StyleSheet, View } from "react-native";
+import { patientTheme } from "../../../constants/patientTheme";
 
-const THEME = {
-  primary: "#2563EB",
-};
+const THEME = patientTheme.colors;
 
 function ProgressBarComponent({ progress }: { progress: number }) {
   const normalized = Math.max(0, Math.min(progress, 1));
@@ -20,7 +19,7 @@ export default memo(ProgressBarComponent);
 const styles = StyleSheet.create({
   progressBarBg: {
     height: 6,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: THEME.border,
     borderRadius: 3,
     marginBottom: 20,
   },

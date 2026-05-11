@@ -18,13 +18,26 @@ import type { MedicalCenterStackParamList } from "../../types/navigation";
 type Props = NativeStackScreenProps<MedicalCenterStackParamList, "MedicalCenterDoctorAvailability">;
 
 type AvailabilityItem = {
-  id: number;
+  id: number | string;
   day?: string | null;
   day_of_week?: number | null;
   start_time: string;
   end_time: string;
   max_patients?: number | null;
   is_active?: boolean;
+};
+
+type AvailabilityStateKey =
+  | "sunday"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday";
+
+type AvailabilityStateResponse = {
+  availability?: Partial<Record<AvailabilityStateKey, Array<{ id: string; start: string; end: string }>>>;
 };
 
 type DayGroup = {
@@ -54,6 +67,16 @@ const DAY_ORDER: Array<{ key: number; name: string }> = [
   { key: 6, name: "Saturday" },
   { key: 0, name: "Sunday" },
 ];
+
+const DAY_KEY_BY_AVAILABILITY_KEY: Record<AvailabilityStateKey, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
 
 const getResponseErrorMessage = async (response: Response, fallback: string) => {
   const raw = await response.text().catch(() => "");
@@ -119,17 +142,28 @@ export default function MedicalCenterDoctorAvailabilityScreen({ navigation, rout
 
       try {
         const response = await apiFetch(
-          `/api/doctors/${encodeURIComponent(String(route.params.doctorId))}/availability`
+          `/api/center/doctors/${encodeURIComponent(String(route.params.doctorUserId))}/availability-state`
         );
         if (!response.ok) {
           throw new Error(await getResponseErrorMessage(response, "Failed to load availability"));
         }
 
-        const payload = (await response.json().catch(() => [])) as AvailabilityItem[];
+        const payload = (await response.json().catch(() => ({}))) as AvailabilityStateResponse;
+        const normalizedItems = Object.entries(payload.availability || {}).flatMap(
+          ([dayKeyName, slots]) => {
+            const dayKey = DAY_KEY_BY_AVAILABILITY_KEY[dayKeyName as AvailabilityStateKey];
+            return (Array.isArray(slots) ? slots : []).map((slot) => ({
+              id: Number(slot.id) || slot.id,
+              day: DAY_ORDER.find((item) => item.key === dayKey)?.name ?? null,
+              day_of_week: dayKey,
+              start_time: slot.start,
+              end_time: slot.end,
+              is_active: true,
+            }));
+          }
+        );
         setItems(
-          Array.isArray(payload)
-            ? payload.filter((item) => item && item.is_active !== false)
-            : []
+          normalizedItems.filter((item) => item && item.is_active !== false)
         );
         setError(null);
       } catch (loadError) {
@@ -201,34 +235,6 @@ export default function MedicalCenterDoctorAvailabilityScreen({ navigation, rout
     [route.params.doctorName]
   );
 
-  const handleCreateSession = useCallback(() => {
-    if (!firstAvailableSlot) {
-      return;
-    }
-
-    navigation.navigate("MedicalCenterDoctorSchedule", {
-      doctorId: route.params.doctorId,
-      doctorUserId: route.params.doctorUserId,
-      doctorName: route.params.doctorName,
-      specialization: route.params.specialization,
-      initialTab: "manual",
-      suggestedDate: nextDateForDay(firstAvailableSlot.day.key),
-      suggestedStartTime: formatTime(firstAvailableSlot.slot.start_time),
-      suggestedEndTime: formatTime(firstAvailableSlot.slot.end_time),
-      suggestedMaxPatients:
-        typeof firstAvailableSlot.slot.max_patients === "number"
-          ? firstAvailableSlot.slot.max_patients
-          : null,
-    });
-  }, [
-    firstAvailableSlot,
-    navigation,
-    route.params.doctorId,
-    route.params.doctorName,
-    route.params.doctorUserId,
-    route.params.specialization,
-  ]);
-
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
@@ -292,10 +298,12 @@ export default function MedicalCenterDoctorAvailabilityScreen({ navigation, rout
               </View>
             ))}
 
-            <TouchableOpacity style={styles.ctaButton} onPress={handleCreateSession}>
-              <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.ctaText}>Create Session</Text>
-            </TouchableOpacity>
+            <View style={styles.stateCard}>
+              <Text style={styles.stateTitle}>Session management is handled in reception</Text>
+              <Text style={styles.stateText}>
+                Review availability here, then let the receptionist team assign clinic sessions.
+              </Text>
+            </View>
           </>
         )}
       </ScrollView>

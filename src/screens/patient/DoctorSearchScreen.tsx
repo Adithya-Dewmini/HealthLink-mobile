@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
@@ -12,32 +12,23 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { LinearGradient } from "expo-linear-gradient";
 import FilterBottomSheet from "../../components/FilterBottomSheet";
 import { apiFetch } from "../../config/api";
-import { addFavorite, getFavorites, removeFavorite } from "../../services/favoritesApi";
+import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../services/favoritesApi";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
+import { resolveImageUrl } from "../../utils/imageUrl";
 
-const THEME = {
-  background: "#F5F7FC",
-  white: "#FFFFFF",
-  textDark: "#162033",
-  textGray: "#6D7890",
-  textMuted: "#98A2B3",
-  border: "#DFE6F0",
-  accentBlue: "#2F6FED",
-  accentBlueSoft: "#EAF1FF",
-  accentGreen: "#18B67A",
-  accentGreenSoft: "#E6FAF3",
-  accentAmber: "#F59E0B",
-  accentAmberSoft: "#FEF3C7",
-  accentRed: "#EF4444",
-  heroStart: "#DCEBFF",
-  heroEnd: "#F9FBFF",
+const THEME = patientTheme.colors;
+const MODERN_THEME = {
+  primary: patientTheme.colors.modernPrimary,
+  primaryAlt: patientTheme.colors.modernPrimaryAlt,
+  white: patientTheme.colors.modernSurface,
 };
 
 const CATEGORIES = [
@@ -55,22 +46,33 @@ type DoctorCard = {
   id: number;
   name: string;
   specialty: string;
-  city: string;
+  city?: string | null;
   clinicId?: string | null;
   clinicName?: string | null;
   rating?: number | null;
   reviews?: number | null;
-  experience: string;
-  queueLength: number;
-  isAvailableToday: boolean;
-  available: boolean;
+  experience?: string | null;
+  queueLength?: number | null;
+  isAvailableToday?: boolean | null;
+  assignedMedicalCentersCount?: number | null;
+  nextAvailableSession?: {
+    date: string;
+    startTime: string;
+    medicalCenterName?: string | null;
+  } | null;
   profileImage?: string | null;
+};
+
+type DoctorSection = {
+  title: string;
+  items: DoctorCard[];
 };
 
 export default function DoctorSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const route = useRoute<any>();
-  const tabBarHeight = useBottomTabBarHeight();
+  const insets = useSafeAreaInsets();
+  const bottomSpacing = Math.max(insets.bottom, 16);
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({
@@ -83,7 +85,9 @@ export default function DoctorSearchScreen() {
   const [doctors, setDoctors] = useState<DoctorCard[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [favoriteDoctorIds, setFavoriteDoctorIds] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [favoriteDoctorIds, setFavoriteDoctorIds] = useState<string[]>([]);
+  const [favoriteBusyIds, setFavoriteBusyIds] = useState<string[]>([]);
 
   const locations = useMemo(
     () => [
@@ -137,6 +141,7 @@ export default function DoctorSearchScreen() {
     const loadDoctors = async () => {
       try {
         setLoading(true);
+        setError(null);
         const res = await apiFetch("/api/patients/doctors");
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -147,21 +152,44 @@ export default function DoctorSearchScreen() {
           id: Number(doc.doctor_id),
           name: doc.name ?? "Doctor",
           specialty: doc.specialization ?? "General Physician",
-          city: doc.city ?? "Colombo",
+          city: typeof doc.city === "string" && doc.city.trim() ? doc.city.trim() : null,
           clinicId: doc.clinic_id ?? null,
           clinicName: doc.clinic_name ?? null,
           rating: doc.rating ?? null,
           reviews: doc.review_count ?? null,
-          experience: doc.experience_years ? `${doc.experience_years} years` : "N/A",
-          queueLength: Number(doc.queue_length ?? 0),
-          isAvailableToday: Boolean(doc.is_available_today),
-          available: Boolean(doc.is_available_today),
-          profileImage: doc.profile_image ?? null,
+          experience:
+            doc.experience_years != null && !Number.isNaN(Number(doc.experience_years))
+              ? `${Number(doc.experience_years)} years`
+              : null,
+          queueLength:
+            doc.queue_length == null || Number.isNaN(Number(doc.queue_length))
+              ? null
+              : Number(doc.queue_length),
+          isAvailableToday:
+            typeof doc.is_available_today === "boolean" ? doc.is_available_today : null,
+          assignedMedicalCentersCount:
+            doc.assigned_medical_centers_count == null ||
+            Number.isNaN(Number(doc.assigned_medical_centers_count))
+              ? null
+              : Number(doc.assigned_medical_centers_count),
+          nextAvailableSession:
+            typeof doc.next_session_date === "string" && typeof doc.next_session_start_time === "string"
+              ? {
+                  date: doc.next_session_date,
+                  startTime: String(doc.next_session_start_time).slice(0, 5),
+                  medicalCenterName:
+                    typeof doc.next_session_clinic_name === "string"
+                      ? doc.next_session_clinic_name
+                      : null,
+                }
+              : null,
+          profileImage: resolveImageUrl(doc.profile_image ?? null),
         }));
         setDoctors(mapped);
       } catch (err) {
         console.error("Load doctors error:", err);
         setDoctors([]);
+        setError(err instanceof Error ? err.message : "Could not load doctors");
       } finally {
         setLoading(false);
       }
@@ -170,25 +198,28 @@ export default function DoctorSearchScreen() {
     loadDoctors();
   }, []);
 
-  useEffect(() => {
-    const loadFavorites = async () => {
-      try {
-        const data = await getFavorites();
-        setFavoriteDoctorIds(data.doctors.map((doc) => Number(doc.id)));
-      } catch (err) {
-        console.error("Load favorite doctors error:", err);
-      }
-    };
+  useFocusEffect(
+    useCallback(() => {
+      const loadFavorites = async () => {
+        try {
+          const data = await getFavorites();
+          setFavoriteDoctorIds(data.doctors.map((doc) => String(doc.entityId)));
+        } catch (err) {
+          console.error("Load favorite doctors error:", err);
+        }
+      };
 
-    loadFavorites();
-  }, []);
+      void loadFavorites();
+      return undefined;
+    }, [])
+  );
 
   const filteredDoctors = useMemo(() => {
     let nextDoctors = [...doctors];
 
     if (filters.location) {
       const target = normalizeValue(filters.location);
-      nextDoctors = nextDoctors.filter((doctor) => normalizeValue(doctor.city) === target);
+      nextDoctors = nextDoctors.filter((doctor) => normalizeValue(doctor.city || "") === target);
     }
 
     if (filters.specialty) {
@@ -202,12 +233,22 @@ export default function DoctorSearchScreen() {
 
     if (filters.queue) {
       nextDoctors = nextDoctors.filter(
-        (doctor) => doctor.queueLength < (filters.queue || Number.POSITIVE_INFINITY)
+        (doctor) =>
+          doctor.queueLength != null &&
+          doctor.queueLength < (filters.queue || Number.POSITIVE_INFINITY)
       );
     }
 
     if (filters.availableToday) {
-      nextDoctors = nextDoctors.filter((doctor) => doctor.isAvailableToday);
+      nextDoctors = nextDoctors.filter((doctor) => {
+        if (doctor.isAvailableToday === true) {
+          return true;
+        }
+        if (!doctor.nextAvailableSession?.date) {
+          return false;
+        }
+        return doctor.nextAvailableSession.date === new Date().toISOString().slice(0, 10);
+      });
     }
 
     if (search.trim()) {
@@ -216,7 +257,7 @@ export default function DoctorSearchScreen() {
         (doctor) =>
           normalizeValue(doctor.name).includes(searchTerm) ||
           normalizeValue(doctor.specialty).includes(searchTerm) ||
-          normalizeValue(doctor.city).includes(searchTerm)
+          normalizeValue(doctor.city || "").includes(searchTerm)
       );
     }
 
@@ -225,37 +266,74 @@ export default function DoctorSearchScreen() {
         return true;
       }
 
-      return normalizeValue(doctor.specialty) === normalizeValue(activeTab);
+      return normalizeValue(doctor.specialty || "") === normalizeValue(activeTab);
     });
   }, [activeTab, doctors, filters, search]);
 
-  const counts = useMemo(() => {
-    const availableToday = doctors.filter((doctor) => doctor.isAvailableToday).length;
-    const lowQueue = doctors.filter((doctor) => doctor.queueLength <= 5).length;
-    return {
-      total: doctors.length,
-      availableToday,
-      lowQueue,
-    };
-  }, [doctors]);
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(
+        search.trim() ||
+          filters.location ||
+          filters.specialty ||
+          filters.rating ||
+          filters.queue ||
+          filters.availableToday ||
+          activeTab !== "All"
+      ),
+    [activeTab, filters, search]
+  );
+
+  const doctorSections = useMemo<DoctorSection[]>(() => {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const availableToday = filteredDoctors
+      .filter(
+        (doctor) =>
+          doctor.isAvailableToday === true || doctor.nextAvailableSession?.date === todayKey
+      )
+      .slice(0, 8);
+    const topRated = [...filteredDoctors]
+      .filter((doctor) => doctor.rating != null && !Number.isNaN(Number(doctor.rating)))
+      .sort((left, right) => Number(right.rating ?? 0) - Number(left.rating ?? 0))
+      .slice(0, 8);
+    const lowQueue = [...filteredDoctors]
+      .filter((doctor) => doctor.queueLength != null)
+      .sort((left, right) => (left.queueLength ?? 0) - (right.queueLength ?? 0))
+      .slice(0, 8);
+
+    return [
+      { title: "Available today", items: availableToday },
+      { title: "Top rated", items: topRated },
+      ...(lowQueue.length > 0 ? [{ title: "Low queue", items: lowQueue }] : []),
+    ].filter((section) => section.items.length > 0);
+  }, [filteredDoctors]);
+
+  const openDoctorDetails = useCallback(
+    (doctorId: number) => {
+      navigation.navigate("PatientDoctorDetails", { doctorId });
+    },
+    [navigation]
+  );
 
   const toggleFavorite = async (doctorId: number) => {
-    const isFavorite = favoriteDoctorIds.includes(doctorId);
+    const favoriteKey = String(doctorId);
+    if (favoriteBusyIds.includes(favoriteKey)) return;
+
+    const isFavorite = favoriteDoctorIds.includes(favoriteKey);
+    setFavoriteBusyIds((current) => [...current, favoriteKey]);
     setFavoriteDoctorIds((current) =>
-      isFavorite ? current.filter((id) => id !== doctorId) : [...current, doctorId]
+      isFavorite ? current.filter((id) => id !== favoriteKey) : [...current, favoriteKey]
     );
 
     try {
-      if (isFavorite) {
-        await removeFavorite(doctorId, "doctor");
-      } else {
-        await addFavorite(doctorId, "doctor");
-      }
+      await toggleFavoriteRequest("doctor", favoriteKey, isFavorite);
     } catch (err) {
       setFavoriteDoctorIds((current) =>
-        isFavorite ? [...current, doctorId] : current.filter((id) => id !== doctorId)
+        isFavorite ? [...current, favoriteKey] : current.filter((id) => id !== favoriteKey)
       );
       console.error("Toggle doctor favorite error:", err);
+    } finally {
+      setFavoriteBusyIds((current) => current.filter((id) => id !== favoriteKey));
     }
   };
 
@@ -271,466 +349,435 @@ export default function DoctorSearchScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.safe}>
-        <StatusBar barStyle="dark-content" backgroundColor={THEME.white} />
+      <View style={styles.screen}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient
+          colors={[MODERN_THEME.primary, MODERN_THEME.primaryAlt]}
+          style={styles.headerBackground}
+        />
 
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          <View style={styles.hero}>
-            <View style={styles.topRow}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                <Ionicons name="arrow-back" size={22} color={THEME.textDark} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.filterBtn}
-                onPress={() => setIsFilterOpen(true)}
-              >
-                <Ionicons name="options-outline" size={22} color={THEME.accentBlue} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.headerTitle}>Find Doctors</Text>
-            <Text style={styles.headerSub}>
-              Search specialists, compare availability, and book the right visit faster.
-            </Text>
-
-            <View style={styles.searchShell}>
-              <View style={styles.searchContainer}>
-                <Ionicons name="search-outline" size={20} color={THEME.accentBlue} />
-                <TextInput
-                  placeholder="Search doctor, specialty, or city"
-                  value={search}
-                  onChangeText={setSearch}
-                  style={styles.searchInput}
-                  placeholderTextColor={THEME.textMuted}
-                />
+        <SafeAreaView style={styles.safe} edges={["top"]}>
+          <View style={styles.frozenTop}>
+            <View style={styles.storefrontHeader}>
+              <View style={styles.storefrontTopRow}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.storefrontIconBtn}>
+                  <Ionicons name="arrow-back" size={20} color={THEME.white} />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Find Doctor</Text>
+                <TouchableOpacity
+                  style={styles.storefrontIconBtn}
+                  onPress={() => setIsFilterOpen(true)}
+                >
+                  <Ionicons name="options-outline" size={20} color={THEME.white} />
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                style={styles.quickFilterButton}
-                onPress={() => setIsFilterOpen(true)}
-              >
-                <Ionicons name="funnel-outline" size={18} color={THEME.textDark} />
-                <Text style={styles.quickFilterText}>Filters</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.statsRow}>
-              <StatsPill
-                label="Doctors"
-                value={String(counts.total)}
-                tint={THEME.accentBlueSoft}
-                color={THEME.accentBlue}
-                icon="people-outline"
-              />
-              <StatsPill
-                label="Today"
-                value={String(counts.availableToday)}
-                tint={THEME.accentGreenSoft}
-                color={THEME.accentGreen}
-                icon="checkmark-circle-outline"
-              />
-              <StatsPill
-                label="Low Queue"
-                value={String(counts.lowQueue)}
-                tint={THEME.accentAmberSoft}
-                color={THEME.accentAmber}
-                icon="flash-outline"
-              />
+              <View style={styles.storefrontSearchRow}>
+                <View style={styles.storefrontSearchBar}>
+                  <Ionicons name="search-outline" size={22} color={THEME.textGray} />
+                  <TextInput
+                    placeholder="Search doctor, specialty, or city"
+                    value={search}
+                    onChangeText={setSearch}
+                    style={styles.storefrontSearchInput}
+                    placeholderTextColor={THEME.textGray}
+                  />
+                </View>
+              </View>
             </View>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoryScroll}
-          >
-            {CATEGORIES.map((category) => {
-              const active = activeTab === category;
-              return (
-                <TouchableOpacity
-                  key={category}
-                  onPress={() => setActiveTab(category)}
-                  style={[styles.categoryPill, active && styles.activeCategoryPill]}
-                >
-                  <Text style={[styles.categoryText, active && styles.activeCategoryText]}>
-                    {category}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.content}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Recommended For You</Text>
-                <Text style={styles.sectionSub}>
-                  {loading
-                    ? "Loading doctor directory..."
-                    : `${filteredDoctors.length} matching doctors`}
-                </Text>
-              </View>
-            </View>
-
-            {loading ? (
-              <View style={styles.loadingState}>
-                <ActivityIndicator size="large" color={THEME.accentBlue} />
-                <Text style={styles.loadingText}>Preparing the doctor directory</Text>
-              </View>
-            ) : filteredDoctors.length === 0 ? (
-              <View style={styles.emptyState}>
-                <View style={styles.emptyIconWrap}>
-                  <Ionicons name="medkit-outline" size={30} color={THEME.textGray} />
-                </View>
-                <Text style={styles.emptyTitle}>No doctors found</Text>
-                <Text style={styles.emptyText}>
-                  Try another specialty, city, or search keyword.
-                </Text>
-              </View>
-            ) : (
-              filteredDoctors.map((doctor) => {
-                const isFavorite = favoriteDoctorIds.includes(doctor.id);
+          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.pharmacyCategoryTabs}
+            >
+              {CATEGORIES.map((category) => {
+                const active = activeTab === category;
                 return (
-                  <View key={doctor.id} style={styles.doctorCard}>
-                    <View style={styles.docMainInfo}>
-                      {doctor.profileImage ? (
-                        <Image source={{ uri: doctor.profileImage }} style={styles.avatarImage} />
-                      ) : (
-                        <View style={styles.avatarPlaceholder}>
-                          <Text style={styles.avatarInitials}>
-                            {doctor.name
-                              .split(" ")
-                              .filter(Boolean)
-                              .slice(0, 2)
-                              .map((part) => part.charAt(0).toUpperCase())
-                              .join("") || "DR"}
-                          </Text>
-                        </View>
-                      )}
+                  <TouchableOpacity
+                    key={category}
+                    onPress={() => setActiveTab(category)}
+                    style={styles.pharmacyCategoryTab}
+                  >
+                    <Text style={[styles.pharmacyCategoryText, active && styles.pharmacyCategoryTextActive]}>
+                      {category}
+                    </Text>
+                    <View
+                      style={[
+                        styles.pharmacyCategoryUnderline,
+                        active && styles.pharmacyCategoryUnderlineActive,
+                      ]}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                      <View style={styles.detailsContainer}>
-                        <View style={styles.nameRow}>
-                          <Text style={styles.docName}>{doctor.name}</Text>
-                          <View
-                            style={[
-                              styles.statusBadge,
-                              doctor.available ? styles.statusAvailable : styles.statusLimited,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.statusBadgeText,
-                                { color: doctor.available ? THEME.accentGreen : THEME.accentAmber },
-                              ]}
-                            >
-                              {doctor.available ? "Available Today" : "Limited Today"}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <Text style={styles.docSpec}>{doctor.specialty}</Text>
-                        <Text style={styles.docMeta}>{doctor.city}</Text>
-
-                        <View style={styles.metricsRow}>
-                          <MetricChip
-                            icon="star"
-                            value={
-                              doctor.rating != null ? Number(doctor.rating).toFixed(1) : "New"
-                            }
-                            tone="amber"
-                          />
-                          <MetricChip
-                            icon="briefcase-outline"
-                            value={doctor.experience}
-                            tone="blue"
-                          />
-                          <MetricChip
-                            icon="git-network-outline"
-                            value={`Queue ${doctor.queueLength}`}
-                            tone="green"
-                          />
-                        </View>
+            <View style={styles.content}>
+              {loading ? (
+                <View style={styles.loadingState}>
+                  <ActivityIndicator size="large" color={THEME.accentBlue} />
+                  <Text style={styles.loadingText}>Loading doctors</Text>
+                </View>
+              ) : error ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="cloud-offline-outline" size={30} color={THEME.textGray} />
+                  </View>
+                  <Text style={styles.emptyTitle}>Could not load doctors</Text>
+                  <Text style={styles.emptyText}>{error}</Text>
+                </View>
+              ) : filteredDoctors.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="medkit-outline" size={30} color={THEME.textGray} />
+                  </View>
+                  <Text style={styles.emptyTitle}>No doctors found</Text>
+                  <Text style={styles.emptyText}>
+                    Try another specialty, city, or search keyword.
+                  </Text>
+                </View>
+              ) : !hasActiveFilters ? (
+                doctorSections.map((section) => (
+                  <View key={section.title} style={styles.pharmacySectionBlock}>
+                    <View style={styles.pharmacySectionHeader}>
+                      <Text style={styles.pharmacySectionTitle}>{section.title}</Text>
+                      <View style={styles.pharmacySectionArrow}>
+                        <Ionicons name="arrow-forward" size={20} color={THEME.textDark} />
                       </View>
-
-                      <TouchableOpacity
-                        style={styles.favoriteBtn}
-                        onPress={() => toggleFavorite(doctor.id)}
-                      >
-                        <Ionicons
-                          name={isFavorite ? "heart" : "heart-outline"}
-                          size={22}
-                          color={isFavorite ? THEME.accentRed : THEME.textGray}
-                        />
-                      </TouchableOpacity>
                     </View>
 
-                    <View style={styles.cardFooter}>
-                      <TouchableOpacity
-                        style={styles.secondaryAction}
-                        onPress={() => {
-                          if (!doctor.clinicId) {
-                            Alert.alert("Clinic Required", "This doctor does not have an active clinic schedule right now.");
-                            return;
-                          }
-                          navigation.navigate("DoctorAvailabilityScreen", {
-                            doctorId: doctor.id,
-                            clinicId: doctor.clinicId,
-                            clinicName: doctor.clinicName ?? undefined,
-                            doctorName: doctor.name,
-                            specialty: doctor.specialty,
-                          });
-                        }}
-                      >
-                        <Ionicons
-                          name="calendar-outline"
-                          size={16}
-                          color={THEME.textDark}
-                        />
-                        <Text style={styles.secondaryActionText}>Availability</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.primaryAction}
-                        onPress={() => {
-                          if (!doctor.clinicId) {
-                            Alert.alert("Clinic Required", "This doctor does not have an active clinic schedule right now.");
-                            return;
-                          }
-                          navigation.navigate("BookAppointmentScreen", {
-                            doctorId: doctor.id,
-                            clinicId: doctor.clinicId,
-                            clinicName: doctor.clinicName ?? undefined,
-                            doctorName: doctor.name,
-                            specialty: doctor.specialty,
-                            experienceYears: Number.isNaN(Number.parseInt(doctor.experience, 10))
-                              ? undefined
-                              : Number.parseInt(doctor.experience, 10),
-                            rating:
-                              doctor.rating == null || Number.isNaN(Number(doctor.rating))
-                                ? undefined
-                                : Number(doctor.rating),
-                            reviewCount:
-                              doctor.reviews == null || Number.isNaN(Number(doctor.reviews))
-                                ? undefined
-                                : Number(doctor.reviews),
-                          });
-                        }}
-                      >
-                        <Text style={styles.primaryActionText}>Book Appointment</Text>
-                        <Ionicons name="arrow-forward" size={16} color={THEME.white} />
-                      </TouchableOpacity>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.pharmacySectionRail}
+                    >
+                      {section.items.map((doctor) => {
+                        const favoriteKey = String(doctor.id);
+                        const isFavorite = favoriteDoctorIds.includes(favoriteKey);
+                        const favoriteBusy = favoriteBusyIds.includes(favoriteKey);
+                        return (
+                          <DoctorListingCard
+                            key={`${section.title}-${doctor.id}`}
+                            doctor={doctor}
+                            compact
+                            isFavorite={isFavorite}
+                            favoriteBusy={favoriteBusy}
+                            onToggleFavorite={() => toggleFavorite(doctor.id)}
+                            onOpenDetails={() => openDoctorDetails(doctor.id)}
+                          />
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                ))
+              ) : (
+                <>
+                  <View style={styles.sectionHeader}>
+                    <View>
+                      <Text style={styles.sectionTitle}>
+                        {search.trim() ? "Search results" : activeTab}
+                      </Text>
+                      <Text style={styles.sectionSub}>{`${filteredDoctors.length} matching doctors`}</Text>
                     </View>
                   </View>
-                );
-              })
-            )}
-          </View>
 
-          <View style={{ height: tabBarHeight + 40 }} />
-        </ScrollView>
+                  <View style={styles.doctorGrid}>
+                    {filteredDoctors.map((doctor) => {
+                      const favoriteKey = String(doctor.id);
+                      const isFavorite = favoriteDoctorIds.includes(favoriteKey);
+                      const favoriteBusy = favoriteBusyIds.includes(favoriteKey);
+                      return (
+                        <DoctorListingCard
+                          key={doctor.id}
+                          doctor={doctor}
+                          isFavorite={isFavorite}
+                          favoriteBusy={favoriteBusy}
+                          onToggleFavorite={() => toggleFavorite(doctor.id)}
+                          onOpenDetails={() => openDoctorDetails(doctor.id)}
+                        />
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+            </View>
 
-        <TouchableOpacity
-          style={[styles.floatingFab, { bottom: tabBarHeight + 28 }]}
-          onPress={() => navigation.navigate("SymptomChecker")}
-          activeOpacity={0.9}
-        >
-          <Ionicons name="sparkles" size={22} color={THEME.white} />
-        </TouchableOpacity>
+            <View style={{ height: bottomSpacing + 56 }} />
+          </ScrollView>
 
-        <FilterBottomSheet
-          visible={isFilterOpen}
-          onClose={() => setIsFilterOpen(false)}
-          filters={filters}
-          setFilters={setFilters}
-          onApply={applyFilters}
-          locations={locations}
-          specialties={specialties}
-        />
-      </SafeAreaView>
+          <FilterBottomSheet
+            visible={isFilterOpen}
+            onClose={() => setIsFilterOpen(false)}
+            filters={filters}
+            setFilters={setFilters}
+            onApply={applyFilters}
+            locations={locations}
+            specialties={specialties}
+          />
+
+          <TouchableOpacity
+            style={[styles.floatingFab, { bottom: bottomSpacing + 12 }]}
+            onPress={() => navigation.navigate("SymptomChecker")}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="sparkles-outline" size={24} color={THEME.white} />
+          </TouchableOpacity>
+        </SafeAreaView>
+      </View>
     </GestureHandlerRootView>
   );
 }
 
-function StatsPill({
-  label,
-  value,
-  tint,
-  color,
-  icon,
+function DoctorListingCard({
+  doctor,
+  compact = false,
+  isFavorite,
+  favoriteBusy,
+  onToggleFavorite,
+  onOpenDetails,
 }: {
-  label: string;
-  value: string;
-  tint: string;
-  color: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  doctor: DoctorCard;
+  compact?: boolean;
+  isFavorite: boolean;
+  favoriteBusy: boolean;
+  onToggleFavorite: () => void;
+  onOpenDetails: () => void;
 }) {
+  const hasImage = typeof doctor.profileImage === "string" && doctor.profileImage.trim().length > 0;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const isAvailableToday =
+    doctor.isAvailableToday === true || doctor.nextAvailableSession?.date === todayKey;
+  const hasNextSession = Boolean(doctor.nextAvailableSession?.date && doctor.nextAvailableSession?.startTime);
+  const availabilityLabel = isAvailableToday
+    ? "Available today"
+    : hasNextSession
+      ? "Next available"
+      : null;
+  const centerCountLabel =
+    typeof doctor.assignedMedicalCentersCount === "number" && doctor.assignedMedicalCentersCount > 0
+      ? `Available at ${doctor.assignedMedicalCentersCount} medical center${
+          doctor.assignedMedicalCentersCount === 1 ? "" : "s"
+        }`
+      : null;
+  const nextSessionLabel =
+    hasNextSession && doctor.nextAvailableSession
+      ? `Next: ${
+          doctor.nextAvailableSession.date === todayKey ? "Today" : doctor.nextAvailableSession.date
+        } ${doctor.nextAvailableSession.startTime}${
+          doctor.nextAvailableSession.medicalCenterName
+            ? ` · ${doctor.nextAvailableSession.medicalCenterName}`
+            : ""
+        }`
+      : null;
+  const locationLabel =
+    doctor.clinicName && doctor.city
+      ? `${doctor.clinicName} • ${doctor.city}`
+      : doctor.clinicName || doctor.city || null;
+
   return (
-    <View style={styles.statsPill}>
-      <View style={[styles.statsIcon, { backgroundColor: tint }]}>
-        <Ionicons name={icon} size={15} color={color} />
+    <TouchableOpacity
+      activeOpacity={0.92}
+      onPress={onOpenDetails}
+      style={[styles.doctorListingCard, compact ? styles.doctorListingCompact : styles.doctorListingGrid]}
+    >
+      <View style={styles.doctorImageShell}>
+        {hasImage ? (
+          <Image source={{ uri: doctor.profileImage! }} style={styles.doctorListingImage} />
+        ) : (
+          <View style={styles.doctorListingFallback}>
+            <View style={styles.doctorListingFallbackAvatar}>
+              <View style={styles.doctorListingFallbackAura} />
+              <View style={styles.doctorListingFallbackHair} />
+              <View style={styles.doctorListingFallbackHead} />
+              <View style={styles.doctorListingFallbackNeck} />
+              <View style={styles.doctorListingFallbackCoat} />
+              <View style={styles.doctorListingFallbackShirt} />
+              <View style={styles.doctorListingFallbackTie} />
+              <View style={styles.doctorListingFallbackStethoscopeLeft} />
+              <View style={styles.doctorListingFallbackStethoscopeRight} />
+              <View style={styles.doctorListingFallbackStethoscopeChest} />
+              <View style={styles.doctorListingFallbackStethoscopeBell} />
+            </View>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[styles.doctorFavoriteBtn, favoriteBusy ? styles.favoriteBtnDisabled : null]}
+          onPress={onToggleFavorite}
+          disabled={favoriteBusy}
+        >
+          <Ionicons
+            name={isFavorite ? "heart" : "heart-outline"}
+            size={18}
+            color={isFavorite ? THEME.accentRed : THEME.textGray}
+          />
+        </TouchableOpacity>
+
+        {availabilityLabel ? (
+          <View
+            style={[
+              styles.doctorAvailabilityBadge,
+              isAvailableToday ? styles.statusAvailable : styles.statusLimited,
+            ]}
+          >
+            <Text
+              style={[
+                styles.doctorAvailabilityText,
+                { color: isAvailableToday ? THEME.accentGreen : THEME.accentAmber },
+              ]}
+            >
+              {availabilityLabel}
+            </Text>
+          </View>
+        ) : null}
+
+        <TouchableOpacity
+          style={styles.doctorActionOrb}
+          onPress={onOpenDetails}
+          accessibilityRole="button"
+          accessibilityLabel="View availability"
+        >
+          <Ionicons name="arrow-forward" size={22} color="#111111" />
+        </TouchableOpacity>
       </View>
-      <View>
-        <Text style={[styles.statsValue, { color }]}>{value}</Text>
-        <Text style={styles.statsLabel}>{label}</Text>
+
+      <View style={styles.doctorListingInfo}>
+        <Text style={styles.doctorListingName} numberOfLines={1}>
+          {doctor.name}
+        </Text>
+        <Text style={styles.doctorListingSpecialty} numberOfLines={1}>
+          {doctor.specialty}
+        </Text>
+        {centerCountLabel ? (
+          <Text style={styles.doctorListingMeta} numberOfLines={1}>
+            {centerCountLabel}
+          </Text>
+        ) : locationLabel ? (
+          <Text style={styles.doctorListingMeta} numberOfLines={1}>
+            {locationLabel}
+          </Text>
+        ) : null}
+        {nextSessionLabel ? (
+          <Text style={styles.doctorListingMetaSecondary} numberOfLines={2}>
+            {nextSessionLabel}
+          </Text>
+        ) : null}
       </View>
-    </View>
-  );
-}
-
-function MetricChip({
-  icon,
-  value,
-  tone,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  value: string;
-  tone: "amber" | "blue" | "green";
-}) {
-  const toneMap = {
-    amber: { bg: "#FFF6D8", color: "#D97706" },
-    blue: { bg: "#E8F1FF", color: "#2F6FED" },
-    green: { bg: "#E6FAF3", color: "#18B67A" },
-  } as const;
-
-  const palette = toneMap[tone];
-
-  return (
-    <View style={[styles.metricChip, { backgroundColor: palette.bg }]}>
-      <Ionicons name={icon} size={13} color={palette.color} />
-      <Text style={[styles.metricChipText, { color: palette.color }]}>{value}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
-  scroll: { flex: 1, backgroundColor: THEME.background },
-  hero: {
-    backgroundColor: THEME.white,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
+  screen: { flex: 1, backgroundColor: THEME.background },
+  headerBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 176,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
   },
-  topRow: {
+  safe: { flex: 1, backgroundColor: "transparent" },
+  frozenTop: {
+    zIndex: 2,
+  },
+  scroll: { flex: 1, backgroundColor: THEME.background },
+  storefrontHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+    backgroundColor: "transparent",
+  },
+  storefrontTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: THEME.background,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  filterBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: THEME.accentBlueSoft,
+    marginBottom: 14,
   },
   headerTitle: {
-    marginTop: 20,
-    fontSize: 31,
-    lineHeight: 36,
-    fontWeight: "900",
-    color: THEME.textDark,
-  },
-  headerSub: {
-    marginTop: 8,
-    fontSize: 15,
-    lineHeight: 22,
-    color: THEME.textGray,
-    maxWidth: "92%",
-  },
-  searchShell: {
-    marginTop: 22,
-    padding: 14,
-    borderRadius: 24,
-    backgroundColor: "#F7FAFF",
-    borderWidth: 1,
-    borderColor: "#E7EEF8",
-  },
-  searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.white,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    height: 54,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: 15,
-    color: THEME.textDark,
-  },
-  quickFilterButton: {
-    marginTop: 12,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: THEME.white,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  quickFilterText: {
-    fontSize: 13,
+    fontSize: 18,
     fontWeight: "700",
-    color: THEME.textDark,
+    color: THEME.white,
   },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 18,
-    gap: 10,
-  },
-  statsPill: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.white,
-    borderRadius: 18,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  statsIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
+  storefrontIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 10,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    shadowColor: "#03045E",
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
-  statsValue: {
+  storefrontSearchRow: {
+    paddingBottom: 4,
+  },
+  storefrontSearchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: THEME.white,
+    borderRadius: 30,
+    paddingHorizontal: 18,
+    height: 64,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    shadowColor: "#03045E",
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  storefrontSearchInput: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: "900",
-  },
-  statsLabel: {
-    fontSize: 11,
-    color: THEME.textMuted,
-    marginTop: 2,
-    fontWeight: "700",
+    color: THEME.textDark,
+    marginLeft: 12,
+    fontWeight: "400",
   },
   categoryScroll: {
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 12,
     gap: 10,
+  },
+  pharmacyCategoryTabs: {
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 12,
+  },
+  pharmacyCategoryTab: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    alignItems: "center",
+    marginHorizontal: 6,
+  },
+  pharmacyCategoryText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: THEME.textGray,
+  },
+  pharmacyCategoryTextActive: {
+    fontWeight: "700",
+    color: THEME.accentBlue,
+  },
+  pharmacyCategoryUnderline: {
+    height: 3,
+    width: 62,
+    borderRadius: 999,
+    backgroundColor: "transparent",
+    marginTop: 10,
+  },
+  pharmacyCategoryUnderlineActive: {
+    backgroundColor: THEME.accentBlue,
   },
   categoryPill: {
     paddingHorizontal: 18,
@@ -754,18 +801,47 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  pharmacySectionBlock: {
+    marginBottom: 28,
+  },
+  pharmacySectionHeader: {
+    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  pharmacySectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: THEME.textDark,
+    letterSpacing: -0.2,
+  },
+  pharmacySectionArrow: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: THEME.highlight,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pharmacySectionRail: {
+    paddingRight: 20,
   },
   sectionHeader: {
     marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: "900",
+    fontSize: 18,
+    fontWeight: "700",
     color: THEME.textDark,
   },
   sectionSub: {
     marginTop: 4,
-    fontSize: 13,
+    fontSize: 12,
     color: THEME.textGray,
   },
   loadingState: {
@@ -783,12 +859,14 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
     paddingHorizontal: 24,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   emptyIconWrap: {
     width: 62,
     height: 62,
     borderRadius: 20,
-    backgroundColor: "#EEF3FB",
+    backgroundColor: THEME.accentBlueSoft,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 14,
@@ -804,6 +882,234 @@ const styles = StyleSheet.create({
     color: THEME.textGray,
     textAlign: "center",
     lineHeight: 20,
+  },
+  doctorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  doctorListingCard: {
+    marginBottom: 24,
+  },
+  doctorListingCompact: {
+    width: 246,
+    marginRight: 18,
+  },
+  doctorListingGrid: {
+    width: "48%",
+  },
+  doctorImageShell: {
+    position: "relative",
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: 28,
+    backgroundColor: THEME.highlight,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  doctorListingImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  doctorListingFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E8F4EF",
+  },
+  doctorListingFallbackAvatar: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  doctorListingFallbackAura: {
+    position: "absolute",
+    top: "10%",
+    width: "58%",
+    height: "34%",
+    borderRadius: 999,
+    backgroundColor: "#D8F1D6",
+  },
+  doctorListingFallbackHair: {
+    position: "absolute",
+    top: "20%",
+    width: "28%",
+    height: "15%",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 12,
+    backgroundColor: "#5B341F",
+  },
+  doctorListingFallbackHead: {
+    position: "absolute",
+    top: "23%",
+    width: "24%",
+    height: "19%",
+    borderRadius: 999,
+    backgroundColor: "#F2C9A5",
+  },
+  doctorListingFallbackNeck: {
+    position: "absolute",
+    top: "39%",
+    width: "8%",
+    height: "6%",
+    borderRadius: 10,
+    backgroundColor: "#E5B48C",
+  },
+  doctorListingFallbackCoat: {
+    position: "absolute",
+    bottom: "-4%",
+    width: "84%",
+    height: "48%",
+    borderTopLeftRadius: 90,
+    borderTopRightRadius: 90,
+    backgroundColor: "#FFFFFF",
+  },
+  doctorListingFallbackShirt: {
+    position: "absolute",
+    bottom: "16%",
+    width: "22%",
+    height: "18%",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    backgroundColor: "#8FD3DA",
+  },
+  doctorListingFallbackTie: {
+    position: "absolute",
+    bottom: "17%",
+    width: "5%",
+    height: "17%",
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    backgroundColor: "#1F2937",
+  },
+  doctorListingFallbackStethoscopeLeft: {
+    position: "absolute",
+    bottom: "24%",
+    left: "27%",
+    width: "17%",
+    height: "22%",
+    borderWidth: 3,
+    borderColor: "#2B77B7",
+    borderTopColor: "transparent",
+    borderRightColor: "#2B77B7",
+    borderBottomColor: "#2B77B7",
+    borderLeftColor: "#2B77B7",
+    borderRadius: 28,
+    transform: [{ rotate: "10deg" }],
+    backgroundColor: "transparent",
+  },
+  doctorListingFallbackStethoscopeRight: {
+    position: "absolute",
+    bottom: "24%",
+    right: "27%",
+    width: "17%",
+    height: "22%",
+    borderWidth: 3,
+    borderColor: "#2B77B7",
+    borderTopColor: "transparent",
+    borderRadius: 28,
+    transform: [{ rotate: "-10deg" }],
+    backgroundColor: "transparent",
+  },
+  doctorListingFallbackStethoscopeChest: {
+    position: "absolute",
+    bottom: "20%",
+    width: "18%",
+    height: "11%",
+    borderBottomWidth: 3,
+    borderColor: "#2B77B7",
+    borderRadius: 20,
+  },
+  doctorListingFallbackStethoscopeBell: {
+    position: "absolute",
+    bottom: "18%",
+    right: "26%",
+    width: "7%",
+    aspectRatio: 1,
+    borderRadius: 999,
+    backgroundColor: "#C7CDD4",
+    borderWidth: 2,
+    borderColor: "#9AA4AF",
+  },
+  doctorFavoriteBtn: {
+    position: "absolute",
+    right: 10,
+    top: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.98)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  doctorAvailabilityBadge: {
+    position: "absolute",
+    left: 10,
+    top: 10,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  doctorAvailabilityText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  doctorActionOrb: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: THEME.white,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: THEME.border,
+    shadowColor: "#03045E",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  doctorListingInfo: {
+    paddingTop: 12,
+  },
+  doctorListingName: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: THEME.textDark,
+  },
+  doctorListingSpecialty: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "400",
+    color: THEME.textGray,
+  },
+  doctorListingMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    color: THEME.textMuted,
+  },
+  doctorListingMetaSecondary: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: THEME.textGray,
   },
   doctorCard: {
     backgroundColor: THEME.white,
@@ -909,6 +1215,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: THEME.border,
   },
+  favoriteBtnDisabled: {
+    opacity: 0.55,
+  },
   cardFooter: {
     flexDirection: "row",
     gap: 10,
@@ -958,9 +1267,11 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.accentBlue,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: THEME.softAqua,
+    shadowColor: "#03045E",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
     elevation: 6,
   },
 });

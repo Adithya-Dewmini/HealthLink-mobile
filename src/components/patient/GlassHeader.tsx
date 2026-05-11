@@ -10,6 +10,9 @@ import {
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { patientTheme } from '../../constants/patientTheme';
+
+const THEME = patientTheme.colors;
 
 interface GlassHeaderProps {
   name: string;
@@ -26,7 +29,7 @@ export default function GlassHeader({
 }: GlassHeaderProps) {
   return (
     <LinearGradient
-      colors={['#7DD3FC', '#60A5FA']}
+      colors={[THEME.modernPrimary, THEME.modernPrimaryAlt]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.gradient}
@@ -98,7 +101,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: 'rgba(255, 255, 255, 0.8)',
-    letterSpacing: 0.3,
   },
   rightGroup: {
     flexDirection: 'row',

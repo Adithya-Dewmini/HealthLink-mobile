@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -12,11 +11,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { apiFetch } from "../../config/api";
 import { useAuth } from "../../utils/AuthContext";
 import { useImageUpload } from "../../hooks/useImageUpload";
+import { resolveImageUrl } from "../../utils/imageUrl";
 
 const THEME = {
   primary: "#2196F3",
@@ -41,6 +42,25 @@ type PatientProfileResponse = {
   bio?: string | null;
   qualifications?: string | null;
   consultation_fee?: string | number | null;
+  message?: string;
+};
+
+const parseJsonResponse = async <T,>(response: Response) => {
+  const raw = await response.text();
+
+  if (!raw.trim()) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(
+      response.ok
+        ? "The server returned an invalid response."
+        : "The server returned an unexpected error response."
+    );
+  }
 };
 
 const bustImageCache = (value?: string | null) => {
@@ -109,7 +129,7 @@ export default function ProfileEditScreen() {
           ? ""
           : String(user.consultation_fee),
     });
-    setProfileImage(user?.profile_image ?? null);
+    setProfileImage(resolveImageUrl(user?.profile_image ?? null));
   }, [
     user?.bio,
     user?.consultation_fee,
@@ -132,7 +152,7 @@ export default function ProfileEditScreen() {
         console.log("ROLE:", normalizedRole);
         console.log("API CALL:", endpoint);
         const response = await apiFetch(endpoint);
-        const data = (await response.json()) as PatientProfileResponse & { message?: string };
+        const data = await parseJsonResponse<PatientProfileResponse>(response);
 
         if (!response.ok) {
           if (response.status === 403) {
@@ -148,7 +168,7 @@ export default function ProfileEditScreen() {
           email: String(data?.email || prev?.email || ""),
           role: String(data?.role || prev?.role || "patient"),
           phone: data?.phone ?? null,
-          profile_image: data?.profile_image ?? prev?.profile_image ?? null,
+          profile_image: resolveImageUrl(data?.profile_image ?? null) ?? prev?.profile_image ?? null,
           specialization: data?.specialization ?? prev?.specialization ?? null,
           experience_years: data?.experience_years ?? prev?.experience_years ?? null,
           bio: data?.bio ?? prev?.bio ?? null,
@@ -179,7 +199,7 @@ export default function ProfileEditScreen() {
         return;
       }
 
-      const nextImageUrl = bustImageCache(response.imageUrl);
+      const nextImageUrl = bustImageCache(resolveImageUrl(response.imageUrl) ?? response.imageUrl);
       setProfileImage(nextImageUrl);
       setUser((prev) => ({
         ...(prev || {}),
@@ -241,7 +261,7 @@ export default function ProfileEditScreen() {
               }
         ),
       });
-      const data = (await saveResponse.json()) as PatientProfileResponse & { message?: string };
+      const data = await parseJsonResponse<PatientProfileResponse>(saveResponse);
 
       if (!saveResponse.ok) {
         if (saveResponse.status === 403) {
@@ -257,7 +277,9 @@ export default function ProfileEditScreen() {
         email: String(data?.email || email || prev?.email || ""),
         role: String(data?.role || prev?.role || "patient"),
         phone: data?.phone ?? (phone.trim() || null),
-        profile_image: data?.profile_image ? bustImageCache(data.profile_image) : prev?.profile_image ?? null,
+        profile_image: data?.profile_image
+          ? bustImageCache(resolveImageUrl(data.profile_image) ?? data.profile_image)
+          : prev?.profile_image ?? null,
         specialization: data?.specialization ?? (form.specialization.trim() || null),
         experience_years:
           data?.experience_years ??

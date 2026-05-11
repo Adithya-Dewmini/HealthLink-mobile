@@ -3,7 +3,6 @@ import {
   Alert,
   Dimensions,
   Modal,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -21,17 +21,9 @@ import { cancelAppointment, fetchAppointments, rescheduleAppointment } from "../
 import type { PatientStackParamList } from "../../types/navigation";
 import type { AppointmentItem, AppointmentStatus } from "../../types/appointments";
 import { APPOINTMENT_TABS, getAppointmentCounts, validateRescheduleInput } from "../../utils/appointments";
+import { patientTheme } from "../../constants/patientTheme";
 
-const THEME = {
-  background: "#F5F7FB",
-  white: "#FFFFFF",
-  textDark: "#1C1C1E",
-  textMuted: "#8E8E93",
-  border: "#E5E5EA",
-  primary: "#2196F3",
-  primarySoft: "#E3F2FD",
-  danger: "#DC2626",
-};
+const THEME = patientTheme.colors;
 
 type AppointmentRoute = {
   key: string;
@@ -168,7 +160,11 @@ export default function Appointments() {
         Alert.alert("Queue Unavailable", "Doctor information is missing for this appointment.");
         return;
       }
-      navigation.navigate("PatientQueue", { doctorId: appointment.doctorId });
+      navigation.navigate("PatientQueue", {
+        doctorId: appointment.doctorId,
+        clinicId: appointment.clinicId ?? undefined,
+        sessionId: appointment.sessionId ?? undefined,
+      });
     },
     [navigation]
   );

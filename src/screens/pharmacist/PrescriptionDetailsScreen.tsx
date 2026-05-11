@@ -13,11 +13,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import {
-  confirmDispense,
   getPrescriptionById,
   type PharmacyPrescriptionDetails,
 } from "../../services/pharmacyApi";
 import PrescriptionMedicineCard from "../../components/pharmacist/PrescriptionMedicineCard";
+import { mapPrescriptionDetailsToPreview } from "../../utils/pharmacyPrescription";
 
 const THEME = {
   primary: "#2BB673",
@@ -50,7 +50,6 @@ export default function PrescriptionDetailsScreen() {
   const [data, setData] = useState<PharmacyPrescriptionDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [dispensing, setDispensing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
@@ -102,43 +101,39 @@ export default function PrescriptionDetailsScreen() {
   }, [loadPrescription]);
 
   const hasInsufficientStock = useMemo(
-    () => (data?.items || []).some((item) => item.currentStock < item.requiredQuantity),
+    () =>
+      (data?.items || []).some(
+        (item) => item.currentStock < (item.remainingQuantity ?? item.requiredQuantity)
+      ),
     [data]
   );
-  const canDispense = Boolean(data?.items?.length) && !hasInsufficientStock && !dispensing;
+  const alreadyDispensed = Boolean(data?.prescription?.dispensedAt);
+  const hasDispensableRemainder = useMemo(
+    () =>
+      (data?.items || []).some(
+        (item) => (item.remainingQuantity ?? item.requiredQuantity) > 0 && item.currentStock > 0
+      ),
+    [data]
+  );
+  const canContinueToDispense = hasDispensableRemainder && !alreadyDispensed;
 
-  const handleConfirmDispense = async () => {
-    const normalizedPrescriptionId = String(prescriptionId ?? "").trim();
-    if (!normalizedPrescriptionId) {
-      Alert.alert("Invalid Prescription", "This prescription cannot be dispensed.");
+  const handleContinueToDispense = () => {
+    if (!data) {
+      Alert.alert("Prescription unavailable", "Reload the prescription details and try again.");
       return;
     }
-    if (hasInsufficientStock) {
-      Alert.alert("Insufficient Stock", "Resolve stock shortages before dispensing.");
+    if (alreadyDispensed) {
+      Alert.alert("Already dispensed", "This prescription has already been dispensed.");
+      return;
+    }
+    if (!hasDispensableRemainder) {
+      Alert.alert("No dispensable stock", "None of the remaining medicines are available in this pharmacy.");
       return;
     }
 
-    try {
-      setDispensing(true);
-      setError(null);
-      await confirmDispense(normalizedPrescriptionId);
-      Alert.alert("Success", "Prescription dispensed successfully.", [
-        {
-          text: "OK",
-          onPress: () => {
-            navigation.goBack();
-          },
-        },
-      ]);
-    } catch (dispenseError: any) {
-      setError(dispenseError?.message || "Failed to dispense prescription.");
-      Alert.alert(
-        "Dispense Failed",
-        dispenseError?.message || "Failed to dispense prescription."
-      );
-    } finally {
-      setDispensing(false);
-    }
+    navigation.navigate("PharmacyDispense", {
+      prescription: mapPrescriptionDetailsToPreview(data),
+    });
   };
 
   const prescription = data?.prescription;
@@ -146,14 +141,25 @@ export default function PrescriptionDetailsScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={22} color={THEME.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>
           <Text style={styles.headerTitle}>Prescription Details</Text>
           <Text style={styles.headerSub}>Review stock before dispensing</Text>
         </View>
-        <TouchableOpacity style={styles.iconBtn} onPress={onRefresh} disabled={loading || refreshing || dispensing}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={onRefresh}
+          disabled={loading || refreshing}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh prescription details"
+        >
           <Ionicons name="refresh-outline" size={22} color={THEME.textPrimary} />
         </TouchableOpacity>
       </View>
@@ -180,46 +186,91 @@ export default function PrescriptionDetailsScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.primary} />
           }
         >
+          <View style={styles.flowCard}>
+            <View style={styles.flowPill}>
+              <Text style={styles.flowPillText}>Step 1 of 2</Text>
+            </View>
+            <Text style={styles.flowTitle}>Review prescription and stock</Text>
+            <Text style={styles.flowText}>
+              Confirm the patient, check medicine availability, and continue to dispensing.
+            </Text>
+          </View>
+
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Patient</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoValue} numberOfLines={2}>
                   {prescription?.patientName || `Prescription #${prescription?.id ?? "-"}`}
                 </Text>
               </View>
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Doctor</Text>
-                <Text style={styles.infoValue}>{prescription?.doctorName || "N/A"}</Text>
+                <Text style={styles.infoValue} numberOfLines={2}>
+                  {prescription?.doctorName || "N/A"}
+                </Text>
               </View>
             </View>
 
             <View style={styles.infoRow}>
               <View style={styles.infoBlock}>
-                <Text style={styles.infoLabel}>Token</Text>
-                <Text style={styles.infoMeta}>{prescription?.token || prescription?.qrCode || "N/A"}</Text>
+                <Text style={styles.infoLabel}>Verification</Text>
+              <Text style={styles.infoMeta} numberOfLines={1}>
+                {alreadyDispensed ? "Already dispensed" : "QR verified"}
+              </Text>
               </View>
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Issued</Text>
-                <Text style={styles.infoMeta}>{formatDate(prescription?.issuedAt)}</Text>
+                <Text style={styles.infoMeta} numberOfLines={1}>
+                  {formatDate(prescription?.issuedAt)}
+                </Text>
               </View>
             </View>
           </View>
+
+          {alreadyDispensed && (
+            <View style={styles.successCard}>
+              <Ionicons name="checkmark-circle-outline" size={18} color={THEME.primary} />
+              <Text style={styles.successCardText}>
+                This prescription has already been dispensed.
+              </Text>
+            </View>
+          )}
 
           {hasInsufficientStock && (
             <View style={styles.warningCard}>
               <Ionicons name="warning-outline" size={18} color={THEME.danger} />
               <Text style={styles.warningText}>
-                One or more medicines do not have enough stock to complete dispensing.
+                One or more medicines do not have enough stock. You can continue with available medicines and leave the remainder tracked.
               </Text>
             </View>
           )}
 
-          <Text style={styles.sectionTitle}>Medicines</Text>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionEyebrow}>Stock check</Text>
+              <Text style={styles.sectionTitle}>Medicines</Text>
+            </View>
+            <Text style={styles.sectionCount}>{data?.items?.length ?? 0} items</Text>
+          </View>
 
           {(data?.items || []).length ? (
             (data?.items || []).map((item) => (
-              <PrescriptionMedicineCard key={item.id} item={item} />
+              <PrescriptionMedicineCard
+                key={item.id}
+                item={{
+                  medicineName: item.medicineName,
+                  meta: [item.dosage, item.frequency].filter(Boolean).join(" • ") || "Dose unavailable",
+                  instructions: item.instructions,
+                  requiredQuantity: item.requiredQuantity,
+                  dispensedQuantity: item.dispensedQuantity,
+                  remainingQuantity: item.remainingQuantity,
+                  currentStock: item.currentStock,
+                  lowStockAlert: item.lowStockAlert,
+                  demandCount: item.demandCount,
+                  substitutions: item.substitutions,
+                }}
+              />
             ))
           ) : (
             <View style={styles.emptyCard}>
@@ -237,19 +288,19 @@ export default function PrescriptionDetailsScreen() {
         <TouchableOpacity
           style={[
             styles.confirmButton,
-            !canDispense && styles.confirmButtonDisabled,
+            !canContinueToDispense && styles.confirmButtonDisabled,
           ]}
-          disabled={!canDispense}
-          onPress={handleConfirmDispense}
+          disabled={!canContinueToDispense}
+          onPress={handleContinueToDispense}
+          accessibilityRole="button"
+          accessibilityLabel={alreadyDispensed ? "Prescription already dispensed" : "Continue to dispense medicines"}
         >
-          {dispensing ? (
-            <ActivityIndicator color={THEME.white} />
-          ) : (
-            <>
-              <Text style={styles.confirmButtonText}>Confirm Dispense</Text>
-              <Ionicons name="checkmark-circle-outline" size={18} color={THEME.white} />
-            </>
-          )}
+          <>
+            <Text style={styles.confirmButtonText}>
+              {alreadyDispensed ? "Already Dispensed" : "Continue to Dispense"}
+            </Text>
+            <Ionicons name="arrow-forward" size={18} color={THEME.white} />
+          </>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -306,6 +357,39 @@ const styles = StyleSheet.create({
   },
   retryText: { color: THEME.white, fontWeight: "700" },
   content: { padding: 20, paddingBottom: 120, gap: 14 },
+  flowCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+  },
+  flowPill: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#E9F8F1",
+  },
+  flowPillText: {
+    color: THEME.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  flowTitle: {
+    marginTop: 12,
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  flowText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: THEME.textSecondary,
+    lineHeight: 20,
+  },
   infoCard: {
     backgroundColor: THEME.white,
     borderRadius: 18,
@@ -323,7 +407,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   infoValue: { fontSize: 16, fontWeight: "700", color: THEME.textPrimary },
-  infoMeta: { fontSize: 13, color: THEME.textSecondary, lineHeight: 18 },
+  infoMeta: { fontSize: 13, color: THEME.textSecondary, lineHeight: 18, flexShrink: 1 },
   warningCard: {
     flexDirection: "row",
     gap: 10,
@@ -333,11 +417,43 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   warningText: { flex: 1, color: THEME.danger, fontWeight: "600", lineHeight: 20 },
+  successCard: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    backgroundColor: THEME.successTint,
+    borderRadius: 16,
+    padding: 14,
+  },
+  successCardText: {
+    flex: 1,
+    color: THEME.primary,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  sectionEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: THEME.primary,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: THEME.textPrimary,
-    marginTop: 4,
+  },
+  sectionCount: {
+    color: THEME.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
   },
   emptyCard: {
     backgroundColor: THEME.white,
@@ -364,6 +480,11 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     bottom: 24,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   confirmButton: {
     height: 56,

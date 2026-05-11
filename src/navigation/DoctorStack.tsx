@@ -8,10 +8,9 @@ import ClinicDetailsScreen from "../screens/doctor/ClinicDetailsScreen";
 import ConsultationPage from "../screens/doctor/consultation/[queueId]";
 import PatientsScreen from "../screens/doctor/Patients";
 import PrescriptionsScreen from "../screens/doctor/Prescriptions";
+import DoctorPrescriptionDetailsScreen from "../screens/doctor/DoctorPrescriptionDetailsScreen";
 import ProfileEditScreen from "../screens/profile/ProfileEditScreen";
 import DoctorSchedulePreview from "../screens/doctor/DoctorSchedulePreview";
-import { TouchableOpacity } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 
 const Stack = createNativeStackNavigator();
 
@@ -58,6 +57,11 @@ export default function DoctorStack() {
         name="DoctorPrescriptions"
         component={PrescriptionsScreen}
         options={{ title: "Prescriptions", headerShown: false }}
+      />
+      <Stack.Screen
+        name="DoctorPrescriptionDetails"
+        component={DoctorPrescriptionDetailsScreen}
+        options={{ title: "Prescription Details", headerShown: false }}
       />
       <Stack.Screen
         name="ClinicDetails"

@@ -15,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiFetch } from "../../config/api";
 import { AuthContext, useAuth } from "../../utils/AuthContext";
 import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
+import { resolveImageUrl } from "../../utils/imageUrl";
 
 const THEME = {
   primary: "#2196F3",
@@ -129,13 +130,13 @@ export default function ProfileScreen() {
       const data = (await response.json()) as DoctorDashboardResponse;
       setDoctorName(data?.doctor?.name?.trim() || "Doctor");
       setSpecialization(data?.doctor?.specialization?.trim() || "Clinic dashboard");
-      setProfileImage(data?.doctor?.profile_image ?? null);
+      setProfileImage(resolveImageUrl(data?.doctor?.profile_image ?? null));
       setUser((prev) => ({
         ...(prev || {}),
         name: data?.doctor?.name?.trim() || prev?.name || "Doctor",
         specialization:
           data?.doctor?.specialization?.trim() || prev?.specialization || "Clinic dashboard",
-        profile_image: data?.doctor?.profile_image ?? prev?.profile_image ?? null,
+        profile_image: resolveImageUrl(data?.doctor?.profile_image ?? null) ?? prev?.profile_image ?? null,
         role: prev?.role || "doctor",
       }));
     } catch (error) {

@@ -7,6 +7,7 @@ import {
   uploadProfileImage,
   type UploadableAsset,
 } from "../services/mediaUploadService";
+import { resolveImageUrl } from "../utils/imageUrl";
 
 type UploadType = "profile" | "clinic" | "pharmacy";
 
@@ -103,9 +104,12 @@ export const useImageUpload = () => {
           }
 
           const response = await uploadProfileImage(asset);
-          setSelectedImage(response.data.imageUrl);
+          setSelectedImage(resolveImageUrl(response.data.imageUrl));
           setSelectedAsset(null);
-          return response.data;
+          return {
+            ...response.data,
+            imageUrl: resolveImageUrl(response.data.imageUrl) ?? response.data.imageUrl,
+          };
         }
 
         if (type === "clinic") {

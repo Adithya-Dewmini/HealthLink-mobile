@@ -1,5 +1,6 @@
 import { DEFAULT_PERMISSIONS } from "./constants";
 import type { FilterValue, Receptionist, ReceptionistPermissions, ReceptionistStatus } from "./types";
+import { normalizeReceptionistPermissions } from "../../../utils/receptionistPermissions";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -42,11 +43,7 @@ export const parseReceptionistPermissions = (
     return DEFAULT_PERMISSIONS;
   }
 
-  return {
-    can_manage_queue: readBoolean(value.can_manage_queue),
-    can_manage_appointments: readBoolean(value.can_manage_appointments),
-    can_check_in: readBoolean(value.can_check_in),
-  };
+  return normalizeReceptionistPermissions(value);
 };
 
 export const parseReceptionist = (value: unknown): Receptionist | null => {
@@ -83,9 +80,10 @@ export const parseReceptionistList = (value: unknown) =>
 export const getPermissionBadges = (permissions: ReceptionistPermissions) => {
   const badges: string[] = [];
 
-  if (permissions.can_manage_queue) badges.push("Queue Access");
-  if (permissions.can_manage_appointments) badges.push("Appointments");
-  if (permissions.can_check_in) badges.push("Check-in");
+  if (permissions.queue_access) badges.push("Queue Access");
+  if (permissions.appointments) badges.push("Appointments");
+  if (permissions.check_in) badges.push("Check-in");
+  if (permissions.schedule_management) badges.push("Schedule Management");
 
   return badges;
 };

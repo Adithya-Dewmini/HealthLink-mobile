@@ -16,11 +16,10 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import PrescriptionModal from "../../components/pharmacist/PrescriptionModal";
 import {
-  getPrescriptionById,
+  getPrescription,
   type PharmacyPrescription,
 } from "../../services/pharmacyApi";
 import {
-  mapPrescriptionDetailsToPreview,
   parsePrescriptionQrPayload,
 } from "../../utils/pharmacyPrescription";
 
@@ -33,6 +32,28 @@ const THEME = {
   white: "#FFFFFF",
   textPrimary: "#0F172A",
   textSecondary: "#CBD5E1",
+};
+
+const getScanFailureMessage = (message: string) => {
+  const normalized = message.trim().toLowerCase();
+
+  if (!normalized) {
+    return "Unable to read this prescription QR right now.";
+  }
+  if (normalized.includes("already dispensed")) {
+    return "This prescription has already been dispensed.";
+  }
+  if (normalized.includes("expired")) {
+    return "This prescription QR has expired. Ask the patient to refresh the prescription.";
+  }
+  if (normalized.includes("not found")) {
+    return "Prescription not found for this QR code.";
+  }
+  if (normalized.includes("invalid qr") || normalized.includes("invalid prescription") || normalized.includes("invalid")) {
+    return "Invalid QR code. Please scan a valid HealthLink prescription QR.";
+  }
+
+  return message;
 };
 
 export default function ScannerScreen() {
@@ -99,12 +120,19 @@ export default function ScannerScreen() {
       setLoading(true);
       setError(null);
 
-      const prescriptionId = parsePrescriptionQrPayload(data);
-      const response = await getPrescriptionById(prescriptionId);
-      setPrescription(mapPrescriptionDetailsToPreview(response));
+      const parsedPayload = parsePrescriptionQrPayload(data);
+      const response = await getPrescription(parsedPayload.qrToken);
+
+      if (response?.prescription?.dispensedAt) {
+        throw new Error("This prescription has already been dispensed.");
+      }
+
+      setPrescription(response);
       setModalVisible(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to fetch prescription";
+      const message = getScanFailureMessage(
+        err instanceof Error ? err.message : "Failed to fetch prescription"
+      );
       setError(message);
       Alert.alert("Scan Failed", message);
       setScanned(false);

@@ -98,9 +98,12 @@ export const normalizeAppointment = (item: AppointmentApiItem): AppointmentItem 
   return {
     id: String(item.id ?? ""),
     doctorId: Number.isFinite(Number(item.doctor_id)) ? Number(item.doctor_id) : null,
+    clinicId: typeof item.medical_center_id === "string" ? item.medical_center_id : null,
+    clinicName: item.medical_center_name ?? "Medical Center",
+    sessionId: Number.isFinite(Number(item.session_id)) ? Number(item.session_id) : null,
     doctor: item.doctor_name ?? "Doctor",
     type: "Appointment",
-    location: "City Clinic",
+    location: item.medical_center_name ?? "Medical Center",
     rawDate,
     rawTime,
     displayDate: formatAppointmentDate(rawDate),

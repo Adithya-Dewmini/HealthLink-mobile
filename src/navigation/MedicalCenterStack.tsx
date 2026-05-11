@@ -7,7 +7,6 @@ import AddReceptionistScreen from "../screens/medicalCenter/AddReceptionistScree
 import AddDoctorScreen from "../screens/medicalCenter/AddDoctorScreen";
 import DoctorProfileScreen from "../screens/medicalCenter/DoctorProfileScreen";
 import DoctorDetailsScreen from "../screens/medicalCenter/DoctorDetailsScreen";
-import DoctorScheduleManagementScreen from "../screens/medicalCenter/DoctorScheduleManagementScreen";
 import MedicalCenterDoctorAvailabilityScreen from "../screens/medicalCenter/DoctorAvailabilityScreen";
 import type { MedicalCenterStackParamList } from "../types/navigation";
 
@@ -34,10 +33,6 @@ export default function MedicalCenterStack() {
       <Stack.Screen
         name="MedicalCenterDoctorDetails"
         component={DoctorDetailsScreen}
-      />
-      <Stack.Screen
-        name="MedicalCenterDoctorSchedule"
-        component={DoctorScheduleManagementScreen}
       />
       <Stack.Screen
         name="MedicalCenterDoctorAvailability"

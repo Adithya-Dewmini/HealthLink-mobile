@@ -15,11 +15,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
@@ -120,7 +119,7 @@ const normalizeDoctor = (item: unknown): DoctorCardItem | null => {
     doctor_profile_id: typeof row.doctor_profile_id === "number" ? row.doctor_profile_id : null,
     name: toText(row.name) || null,
     email,
-    doctor_specialty: toText(row.doctor_specialty) || null,
+    doctor_specialty: toText(row.doctor_specialty) || toText(row.specialization) || null,
     clinic_specialty_id: toText(row.clinic_specialty_id) || null,
     clinic_specialty: toText(row.clinic_specialty) || null,
     status,
@@ -155,7 +154,8 @@ const getStatusTone = (status: DoctorRelationshipStatus) => {
 
 export default function MedicalCenterDoctors() {
   const navigation = useNavigation<NativeStackNavigationProp<MedicalCenterStackParamList>>();
-  const tabBarHeight = useBottomTabBarHeight();
+  const canAdministerDoctors = true;
+  const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const specialtyPickerRef = useRef<BottomSheetModal>(null);
   const menuTranslateX = useRef(new Animated.Value(-320)).current;
@@ -208,22 +208,30 @@ export default function MedicalCenterDoctors() {
         setClinicId(resolvedClinicId);
       }
 
-      const [doctorResponse, specialtyData] = await Promise.all([
-        apiFetch(`/api/clinics/${encodeURIComponent(resolvedClinicId)}/doctors`),
+      const [doctorResponse, specialtyResult] = await Promise.allSettled([
+        apiFetch("/api/center/doctors"),
         fetchSpecialties(),
       ]);
 
-      if (!doctorResponse.ok) {
-        throw new Error(await getResponseErrorMessage(doctorResponse, "Failed to load doctors"));
+      if (doctorResponse.status !== "fulfilled") {
+        throw doctorResponse.reason;
       }
 
-      const payload = await doctorResponse.json().catch(() => []);
+      if (!doctorResponse.value.ok) {
+        throw new Error(
+          await getResponseErrorMessage(doctorResponse.value, "Failed to load doctors")
+        );
+      }
+
+      const payload = await doctorResponse.value.json().catch(() => []);
       const normalized = Array.isArray(payload)
         ? (payload.map(normalizeDoctor).filter(Boolean) as DoctorCardItem[])
         : [];
 
-      setDoctors(normalized.filter((doctor) => !doctor.is_hidden));
-      setSpecialties(specialtyData);
+      setDoctors(normalized);
+      setSpecialties(
+        specialtyResult.status === "fulfilled" ? specialtyResult.value : []
+      );
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load doctors");
@@ -249,22 +257,22 @@ export default function MedicalCenterDoctors() {
       let response: Response;
 
       if (action === "pin") {
-        response = await apiFetch(`/api/doctors/${doctor.id}/pin`, {
+        response = await apiFetch(`/api/center/doctors/${doctor.id}/pin`, {
           method: "PATCH",
           body: JSON.stringify({ pinned: !doctor.is_pinned }),
         });
       } else if (action === "hide") {
-        response = await apiFetch(`/api/doctors/${doctor.id}/hide`, {
+        response = await apiFetch(`/api/center/doctors/${doctor.id}/hide`, {
           method: "PATCH",
           body: JSON.stringify({ hidden: !doctor.is_hidden }),
         });
       } else if (action === "toggle-status") {
-        response = await apiFetch(`/api/doctors/${doctor.id}/status`, {
+        response = await apiFetch(`/api/center/doctors/${doctor.id}/status`, {
           method: "PATCH",
           body: JSON.stringify({ status: doctor.status === "INACTIVE" ? "ACTIVE" : "INACTIVE" }),
         });
       } else {
-        response = await apiFetch(`/api/doctors/${doctor.id}`, {
+        response = await apiFetch(`/api/center/doctors/${doctor.id}`, {
           method: "DELETE",
         });
       }
@@ -302,6 +310,22 @@ export default function MedicalCenterDoctors() {
       }).start();
     });
   }, [menuTranslateX]);
+
+  const openDoctorDetails = useCallback(
+    (doctor: DoctorCardItem) => {
+      if (!doctor.doctor_profile_id || !doctor.doctor_id) {
+        Alert.alert("Doctor Details", "This doctor profile is not available yet.");
+        return;
+      }
+
+      navigation.navigate("MedicalCenterDoctorDetails", {
+        doctorId: doctor.doctor_profile_id,
+        doctorUserId: doctor.doctor_id,
+        status: doctor.status,
+      });
+    },
+    [navigation]
+  );
 
   const closeAdminMenu = useCallback(() => {
     Animated.timing(menuTranslateX, {
@@ -347,24 +371,34 @@ export default function MedicalCenterDoctors() {
   const filteredDoctors = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    return doctors.filter((doctor) => {
-      const effectiveSpecialty = (doctor.clinic_specialty || doctor.doctor_specialty || "").trim();
-      const matchesStatus =
-        selectedStatusFilter === "ALL" ? true : doctor.status === selectedStatusFilter;
-      const matchesFilter =
-        selectedSpecialtyFilter === "ALL" ? true : effectiveSpecialty === selectedSpecialtyFilter;
-      const haystack = [
-        doctor.name || "",
-        doctor.email,
-        doctor.clinic_specialty || "",
-        doctor.doctor_specialty || "",
-      ]
-        .join(" ")
-        .toLowerCase();
+    return doctors
+      .filter((doctor) => {
+        const effectiveSpecialty = (doctor.clinic_specialty || doctor.doctor_specialty || "").trim();
+        const matchesStatus =
+          selectedStatusFilter === "ALL" ? true : doctor.status === selectedStatusFilter;
+        const matchesFilter =
+          selectedSpecialtyFilter === "ALL" ? true : effectiveSpecialty === selectedSpecialtyFilter;
+        const haystack = [
+          doctor.name || "",
+          doctor.email,
+          doctor.clinic_specialty || "",
+          doctor.doctor_specialty || "",
+        ]
+          .join(" ")
+          .toLowerCase();
 
-      const matchesSearch = normalizedSearch.length === 0 || haystack.includes(normalizedSearch);
-      return matchesStatus && matchesFilter && matchesSearch;
-    });
+        const matchesSearch = normalizedSearch.length === 0 || haystack.includes(normalizedSearch);
+        return matchesStatus && matchesFilter && matchesSearch;
+      })
+      .sort((left, right) => {
+        if (left.is_hidden !== right.is_hidden) {
+          return left.is_hidden ? 1 : -1;
+        }
+        if (left.is_pinned !== right.is_pinned) {
+          return left.is_pinned ? -1 : 1;
+        }
+        return getDisplayName(left).localeCompare(getDisplayName(right));
+      });
   }, [doctors, search, selectedSpecialtyFilter, selectedStatusFilter]);
 
   const specialtyFilters = useMemo(() => {
@@ -417,6 +451,14 @@ export default function MedicalCenterDoctors() {
         tint: THEME.softRed,
         color: THEME.danger,
       },
+      {
+        key: "hidden",
+        label: "Hidden",
+        value: doctors.filter((doctor) => doctor.is_hidden).length,
+        icon: "eye-off-outline" as const,
+        tint: THEME.softAmber,
+        color: THEME.warning,
+      },
     ],
     [doctors]
   );
@@ -426,25 +468,9 @@ export default function MedicalCenterDoctors() {
       <DoctorCard
         doctor={item}
         busy={busyId === item.id}
-        onPress={() => {
-          if (!item.doctor_profile_id) {
-            Alert.alert("Doctor Profile", "This doctor profile is not available yet.");
-            return;
-          }
-          navigation.navigate("MedicalCenterDoctorProfile", { doctorId: item.doctor_profile_id });
-        }}
-        onAddSchedule={() => {
-          if (!item.doctor_profile_id || !item.doctor_id) {
-            Alert.alert("Add Schedule", "This doctor is not ready for scheduling yet.");
-            return;
-          }
-          navigation.navigate("MedicalCenterDoctorSchedule", {
-            doctorId: item.doctor_profile_id,
-            doctorUserId: item.doctor_id,
-            doctorName: getDisplayName(item),
-            specialization: getSpecialization(item),
-          });
-        }}
+        onPress={() => openDoctorDetails(item)}
+        primaryActionLabel="View Details"
+        onPrimaryAction={() => openDoctorDetails(item)}
         onViewAvailability={() => {
           if (!item.doctor_profile_id || !item.doctor_id) {
             Alert.alert("View Availability", "This doctor is not ready for availability viewing yet.");
@@ -457,10 +483,16 @@ export default function MedicalCenterDoctors() {
             specialization: getSpecialization(item),
           });
         }}
-        onOpenMenu={(anchor) => openDoctorActions(item, anchor)}
+        onOpenMenu={canAdministerDoctors ? (anchor) => openDoctorActions(item, anchor) : undefined}
       />
     ),
-    [busyId, navigation, openDoctorActions]
+    [
+      busyId,
+      canAdministerDoctors,
+      navigation,
+      openDoctorActions,
+      openDoctorDetails,
+    ]
   );
 
   const listHeader = (
@@ -533,11 +565,15 @@ export default function MedicalCenterDoctors() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={openAdminMenu}>
-          <Ionicons name="menu-outline" size={22} color={THEME.textPrimary} />
-        </TouchableOpacity>
+        {canAdministerDoctors ? (
+          <TouchableOpacity style={styles.headerButton} onPress={openAdminMenu}>
+            <Ionicons name="menu-outline" size={22} color={THEME.textPrimary} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerButton} />
+        )}
 
-        <View style={styles.headerCopy}>
+          <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>Doctors</Text>
           <Text style={styles.headerSub}>Management dashboard</Text>
         </View>
@@ -571,32 +607,35 @@ export default function MedicalCenterDoctors() {
                 <Ionicons name="medkit-outline" size={28} color={THEME.textSecondary} />
               </View>
               <Text style={styles.emptyTitle}>No doctors match this view</Text>
-              <Text style={styles.emptyText}>Adjust the search or filter, or add a new doctor.</Text>
-              <TouchableOpacity
-                style={styles.emptyButton}
-                onPress={() => navigation.navigate("MedicalCenterAddDoctor")}
-              >
-                <Ionicons name="add" size={18} color={THEME.white} />
-                <Text style={styles.emptyButtonText}>Add Doctor</Text>
-              </TouchableOpacity>
+              <Text style={styles.emptyText}>
+                {canAdministerDoctors
+                  ? "Adjust the search or filter, or add a new doctor."
+                  : "Adjust the search or filter to find doctors available for schedule management."}
+              </Text>
+              {canAdministerDoctors ? (
+                <TouchableOpacity
+                  style={styles.emptyButton}
+                  onPress={() => navigation.navigate("MedicalCenterAddDoctor")}
+                >
+                  <Ionicons name="add" size={18} color={THEME.white} />
+                  <Text style={styles.emptyButtonText}>Add Doctor</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           }
         />
       )}
 
-      <TouchableOpacity
-        style={[styles.fab, { bottom: tabBarHeight + 28 }]}
-        onPress={() => navigation.navigate("MedicalCenterAddDoctor")}
-      >
-        <Ionicons name="add" size={26} color={THEME.white} />
-      </TouchableOpacity>
+      {canAdministerDoctors ? (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: Math.max(insets.bottom, 16) + 28 }]}
+          onPress={() => navigation.navigate("MedicalCenterAddDoctor")}
+        >
+          <Ionicons name="add" size={26} color={THEME.white} />
+        </TouchableOpacity>
+      ) : null}
 
-      <Modal
-        visible={adminMenuVisible}
-        transparent
-        animationType="none"
-        onRequestClose={closeAdminMenu}
-      >
+      <Modal visible={canAdministerDoctors && adminMenuVisible} transparent animationType="none" onRequestClose={closeAdminMenu}>
         <Pressable style={styles.drawerOverlay} onPress={closeAdminMenu}>
           <Animated.View style={[styles.drawerPanel, { transform: [{ translateX: menuTranslateX }] }]}>
             <Pressable onPress={(event) => event.stopPropagation()}>
@@ -643,7 +682,7 @@ export default function MedicalCenterDoctors() {
       </Modal>
 
       <Popover
-        isVisible={doctorMenuVisible}
+        isVisible={canAdministerDoctors && doctorMenuVisible}
         from={doctorMenuAnchor}
         onRequestClose={() => setDoctorMenuVisible(false)}
         placement={"bottom" as any}
@@ -744,16 +783,18 @@ function DoctorCard({
   doctor,
   busy,
   onPress,
-  onAddSchedule,
+  primaryActionLabel,
+  onPrimaryAction,
   onViewAvailability,
   onOpenMenu,
 }: {
   doctor: DoctorCardItem;
   busy: boolean;
   onPress: () => void;
-  onAddSchedule: () => void;
+  primaryActionLabel: string;
+  onPrimaryAction: () => void;
   onViewAvailability: () => void;
-  onOpenMenu: (anchor: MenuAnchor) => void;
+  onOpenMenu?: ((anchor: MenuAnchor) => void) | undefined;
 }) {
   const tone = getStatusTone(doctor.status);
   const menuButtonRef = useRef<MenuAnchor>(null);
@@ -777,33 +818,41 @@ function DoctorCard({
           </View>
         </View>
 
-        <TouchableOpacity
-          ref={(ref) => {
-            menuButtonRef.current = ref;
-          }}
-          style={styles.menuButton}
-          onPress={() => onOpenMenu(menuButtonRef.current)}
-          disabled={busy}
-        >
-          <Ionicons name="ellipsis-vertical" size={18} color={THEME.textPrimary} />
-        </TouchableOpacity>
+        {onOpenMenu ? (
+          <TouchableOpacity
+            ref={(ref) => {
+              menuButtonRef.current = ref;
+            }}
+            style={styles.menuButton}
+            onPress={() => onOpenMenu(menuButtonRef.current)}
+            disabled={busy}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color={THEME.textPrimary} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <View style={styles.metaRow}>
         <View style={[styles.badge, { backgroundColor: tone.bg }]}>
           <Text style={[styles.badgeText, { color: tone.color }]}>{tone.label}</Text>
         </View>
-        {doctor.is_pinned ? (
+      {doctor.is_pinned ? (
           <View style={styles.pinChip}>
             <Ionicons name="pin" size={12} color={THEME.primary} />
             <Text style={styles.pinChipText}>Pinned</Text>
           </View>
         ) : null}
+        {doctor.is_hidden ? (
+          <View style={styles.hiddenChip}>
+            <Ionicons name="eye-off" size={12} color={THEME.warning} />
+            <Text style={styles.hiddenChipText}>Hidden</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.primaryAction} onPress={onAddSchedule} disabled={busy}>
-          <Text style={styles.primaryActionText}>+ Add Schedule</Text>
+        <TouchableOpacity style={styles.primaryAction} onPress={onPrimaryAction} disabled={busy}>
+          <Text style={styles.primaryActionText}>{primaryActionLabel}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryAction} onPress={onViewAvailability} disabled={busy}>
           <Text style={styles.secondaryActionText}>View Availability</Text>
@@ -1033,6 +1082,16 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.softBlue,
   },
   pinChipText: { fontSize: 12, fontWeight: "700", color: THEME.primary },
+  hiddenChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: THEME.softAmber,
+  },
+  hiddenChipText: { fontSize: 12, fontWeight: "700", color: THEME.warning },
   actionsRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   primaryAction: {
     flex: 1,

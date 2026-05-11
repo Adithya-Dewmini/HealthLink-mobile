@@ -2,13 +2,14 @@ import React, { useContext, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthContext } from "../../utils/AuthContext";
-import { apiFetch } from "../../config/api";
+import { api } from "../../api/client";
+import { pickSingleImage, type UploadableAsset } from "../../services/mediaUploadService";
 import AuthLayout from "../../components/auth/AuthLayout";
 import AuthHeader from "../../components/auth/AuthHeader";
 import AuthCard from "../../components/auth/AuthCard";
@@ -16,19 +17,43 @@ import AuthInput from "../../components/auth/AuthInput";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
 
 export default function RegisterPharmacist({ navigation }: any) {
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
+  const [pharmacyName, setPharmacyName] = useState("");
+  const [location, setLocation] = useState("");
+  const [pharmacyEmail, setPharmacyEmail] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
-  const [pharmacyId, setPharmacyId] = useState("");
+  const [verificationDocument, setVerificationDocument] = useState<UploadableAsset | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { refreshAuth } = useContext(AuthContext);
-  const rootNavigation = navigation.getParent();
+  const { login } = useContext(AuthContext);
+
+  const handlePickDocument = async () => {
+    try {
+      const asset = await pickSingleImage();
+      if (asset) {
+        setVerificationDocument(asset);
+      }
+    } catch (caughtError) {
+      Alert.alert(
+        "Upload unavailable",
+        caughtError instanceof Error ? caughtError.message : "Unable to select a document"
+      );
+    }
+  };
 
   const handleRegister = async () => {
-    if (!fullName || !email || !password || !phone || !pharmacyId) {
-      setError("Please fill in all required fields.");
+    if (
+      !pharmacyName ||
+      !location ||
+      !ownerName ||
+      !ownerEmail ||
+      !password ||
+      !phone ||
+      !verificationDocument
+    ) {
+      setError("Please fill in all required fields and upload a license or certification image.");
       return;
     }
 
@@ -36,42 +61,37 @@ export default function RegisterPharmacist({ navigation }: any) {
     setError("");
 
     try {
-      const response = await apiFetch("/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: fullName,
-          email,
-          password,
-          phone,
-          pharmacyId,
-          role: "pharmacist",
-        }),
+      const formData = new FormData();
+      formData.append("pharmacy_name", pharmacyName);
+      formData.append("location", location);
+      formData.append("phone", phone);
+      formData.append("pharmacy_email", pharmacyEmail);
+      formData.append("owner_name", ownerName);
+      formData.append("owner_email", ownerEmail);
+      formData.append("password", password);
+      formData.append("verification_document", verificationDocument as any);
+
+      const response = await api.post("/api/auth/register-pharmacy", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        const message = typeof data.message === "string" ? data.message : "Unable to register";
-        setError(message);
-        Alert.alert("Registration failed", message);
-        return;
+      const token = String(response.data?.token || "");
+      if (!token) {
+        throw new Error("Registration succeeded without a token");
       }
 
-      await AsyncStorage.setItem("token", data.token);
-      await refreshAuth();
-
-      rootNavigation?.navigate("AuthSuccess", {
-        icon: "shield-checkmark",
-        title: "Registration submitted",
-        subtitle: "Your pharmacist account has been created.",
-        message: "Your account is under verification. You will be notified once approved.",
-        actionLabel: "Go to Dashboard",
-        target: "PharmacistStack",
-      });
-    } catch (caughtError) {
-      setError("Unable to connect to server");
-      Alert.alert("Registration failed", "Unable to connect to server");
+      await login(response.data?.user ?? null, token);
+    } catch (caughtError: any) {
+      const message =
+        typeof caughtError?.response?.data?.message === "string"
+          ? caughtError.response.data.message
+          : caughtError instanceof Error
+            ? caughtError.message
+            : "Unable to register pharmacy";
+      setError(message);
+      Alert.alert("Registration failed", message);
     } finally {
       setLoading(false);
     }
@@ -81,16 +101,27 @@ export default function RegisterPharmacist({ navigation }: any) {
     <AuthLayout>
       <AuthHeader
         icon="flask-outline"
-        title="Pharmacist Registration"
-        subtitle="Create your account with your pharmacy assignment details."
+        title="Pharmacy Registration"
+        subtitle="Create your pharmacy account and submit it for approval."
       />
 
       <AuthCard>
-        <AuthInput label="Full Name" value={fullName} onChangeText={setFullName} placeholder="Full name" icon="person-outline" />
-        <AuthInput label="Email" value={email} onChangeText={setEmail} placeholder="name@pharmacy.com" keyboardType="email-address" icon="mail-outline" />
+        <AuthInput label="Pharmacy Name" value={pharmacyName} onChangeText={setPharmacyName} placeholder="Pharmacy name" icon="business-outline" />
+        <AuthInput label="Location" value={location} onChangeText={setLocation} placeholder="City or address" icon="location-outline" />
+        <AuthInput label="Pharmacy Email" value={pharmacyEmail} onChangeText={setPharmacyEmail} placeholder="contact@pharmacy.com" keyboardType="email-address" icon="mail-outline" />
+        <AuthInput label="Owner Full Name" value={ownerName} onChangeText={setOwnerName} placeholder="Owner name" icon="person-outline" />
+        <AuthInput label="Owner Email" value={ownerEmail} onChangeText={setOwnerEmail} placeholder="owner@pharmacy.com" keyboardType="email-address" icon="mail-outline" />
         <AuthInput label="Password" value={password} onChangeText={setPassword} placeholder="Create a password" secureTextEntry icon="lock-closed-outline" />
         <AuthInput label="Phone" value={phone} onChangeText={setPhone} placeholder="+94 77 123 4567" keyboardType="phone-pad" icon="call-outline" />
-        <AuthInput label="Pharmacy ID" value={pharmacyId} onChangeText={setPharmacyId} placeholder="Assigned pharmacy ID" icon="business-outline" />
+
+        <Pressable style={styles.uploadCard} onPress={() => void handlePickDocument()}>
+          <Text style={styles.uploadTitle}>License / Certification</Text>
+          <Text style={styles.uploadSubtitle}>
+            {verificationDocument
+              ? verificationDocument.name
+              : "Upload your pharmacy registration or certification document"}
+          </Text>
+        </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -116,6 +147,25 @@ export default function RegisterPharmacist({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
+  uploadCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: AUTH_COLORS.border,
+    marginBottom: 16,
+  },
+  uploadTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: AUTH_COLORS.textPrimary,
+    marginBottom: 6,
+  },
+  uploadSubtitle: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: AUTH_COLORS.textSecondary,
+  },
   primaryButton: {
     width: "100%",
     minHeight: 56,

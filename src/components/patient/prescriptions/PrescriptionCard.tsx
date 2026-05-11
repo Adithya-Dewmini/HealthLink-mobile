@@ -3,15 +3,9 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import MedicineItem, { type PrescriptionMedicine } from "./MedicineItem";
 import ProgressBar from "./ProgressBar";
+import { patientTheme } from "../../../constants/patientTheme";
 
-const THEME = {
-  primary: "#2563EB",
-  white: "#FFFFFF",
-  textPrimary: "#0F172A",
-  textSecondary: "#64748B",
-  success: "#10B981",
-  softBlue: "#EFF6FF",
-};
+const THEME = patientTheme.colors;
 
 export type PrescriptionCardData = {
   id: string;
@@ -136,10 +130,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     marginBottom: 20,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    ...patientTheme.shadows.soft,
   },
   cardHeader: { flexDirection: "row", alignItems: "center" },
   docIconBox: {
@@ -168,8 +161,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  activeBadge: { backgroundColor: "#DCFCE7" },
-  completedBadge: { backgroundColor: "#E2E8F0" },
+  activeBadge: { backgroundColor: THEME.successSoft },
+  completedBadge: { backgroundColor: THEME.graySoft },
   statusText: { fontSize: 10, fontWeight: "900" },
   activeBadgeText: { color: THEME.success },
   completedBadgeText: { color: THEME.textSecondary },
@@ -182,7 +175,7 @@ const styles = StyleSheet.create({
   specialtyText: { color: THEME.textSecondary, fontWeight: "400" },
   metaRow: { flexDirection: "row", alignItems: "center", marginTop: 12, gap: 6 },
   metaText: { fontSize: 12, color: THEME.textSecondary, flex: 1 },
-  divider: { height: 1, backgroundColor: "#F8FAFC", marginVertical: 15 },
+  divider: { height: 1, backgroundColor: THEME.border, marginVertical: 15 },
   sectionLabel: {
     fontSize: 12,
     fontWeight: "800",
@@ -201,7 +194,7 @@ const styles = StyleSheet.create({
     flex: 1.5,
     height: 48,
     borderRadius: 14,
-    backgroundColor: THEME.textPrimary,
+    backgroundColor: THEME.primary,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
@@ -213,7 +206,8 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: THEME.primary,
+    borderColor: THEME.softAqua,
+    backgroundColor: THEME.highlight,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
@@ -223,7 +217,7 @@ const styles = StyleSheet.create({
   fullWidthBtn: {
     height: 48,
     borderRadius: 14,
-    backgroundColor: THEME.softBlue,
+    backgroundColor: THEME.highlight,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",

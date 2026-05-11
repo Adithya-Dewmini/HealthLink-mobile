@@ -11,11 +11,8 @@ import AuthHeader from "../../components/auth/AuthHeader";
 import PasswordInput from "../../components/auth/PasswordInput";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
 import { apiFetch } from "../../config/api";
-import { api } from "../../api/client";
 import type { RootStackParamList } from "../../types/navigation";
 import { AuthContext } from "../../utils/AuthContext";
-import { getExpoPushToken } from "../../services/notifications";
-import { getDashboardRouteForRole } from "./passwordSetupFlow";
 
 type SetPasswordRouteProp = RouteProp<RootStackParamList, "SetPassword">;
 type SetPasswordNavigationProp = NativeStackNavigationProp<RootStackParamList, "SetPassword">;
@@ -27,7 +24,7 @@ export default function SetPasswordScreen({
   navigation: SetPasswordNavigationProp;
 }) {
   const route = useRoute<SetPasswordRouteProp>();
-  const { login, role, token } = useContext(AuthContext);
+  const { logout } = useContext(AuthContext);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -56,9 +53,24 @@ export default function SetPasswordScreen({
   }, [route.params?.token, url]);
 
   const registrationEmail = route.params?.email?.trim() || "";
-  const autoLogin = Boolean(route.params?.autoLogin);
-  const authenticatedRole = String(role || "").trim().toLowerCase();
-  const isAuthenticated = Boolean(token) && authenticatedRole.length > 0;
+  const goToLogin = async (flashMessage?: string) => {
+    await logout();
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: "AuthStack",
+          params: {
+            screen: "Login",
+            params: {
+              initialEmail: registrationEmail || undefined,
+              flashMessage,
+            },
+          },
+        },
+      ],
+    });
+  };
 
   React.useEffect(() => {
     let active = true;
@@ -135,19 +147,7 @@ export default function SetPasswordScreen({
   }, [setupToken]);
 
   const goToRecoveryDestination = () => {
-    if (isAuthenticated) {
-      const target = getDashboardRouteForRole(authenticatedRole);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: target as any }],
-      });
-      return;
-    }
-
-    navigation.reset({
-      index: 0,
-      routes: [{ name: "AuthStack", params: { screen: "Login" } }],
-    });
+    void goToLogin();
   };
 
   const validateForm = () => {
@@ -206,31 +206,7 @@ export default function SetPasswordScreen({
         return;
       }
 
-      const responseToken =
-        typeof data?.token === "string" && data.token.trim().length > 0 ? data.token.trim() : "";
-      const responseUser = data?.user && typeof data.user === "object" ? data.user : null;
-
-      if (responseToken && responseUser) {
-        await login(responseUser, responseToken);
-      } else if (registrationEmail) {
-        const expoPushToken = await getExpoPushToken();
-        const loginResponse = await api.post("/api/auth/login", {
-          email: registrationEmail,
-          password,
-          expoPushToken,
-        });
-        const loginData = loginResponse.data;
-        await login(loginData.user ?? null, loginData.token);
-      }
-
-      navigation.replace("PasswordSetupSuccess", {
-        role:
-          typeof responseUser?.role === "string" && responseUser.role.trim().length > 0
-            ? responseUser.role
-            : route.params?.role,
-        email: registrationEmail || route.params?.email,
-        autoLogin,
-      });
+      await goToLogin("Password set successfully. Please log in.");
     } catch (requestError: any) {
       const responseMessage =
         typeof requestError?.response?.data?.message === "string"
@@ -269,9 +245,7 @@ export default function SetPasswordScreen({
           activeOpacity={0.88}
           onPress={goToRecoveryDestination}
         >
-          <Text style={styles.primaryButtonText}>
-            {isAuthenticated ? "Go to Dashboard" : "Go to Login"}
-          </Text>
+          <Text style={styles.primaryButtonText}>Go to Login</Text>
         </TouchableOpacity>
       </View>
     );

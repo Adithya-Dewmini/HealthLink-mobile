@@ -1,7 +1,6 @@
 import React, { memo, useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -11,25 +10,21 @@ import {
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import QRCode from "react-native-qrcode-svg";
 import type { PatientStackParamList } from "../../types/navigation";
-import { apiFetch } from "../../config/api";
+import {
+  fetchPatientPrescriptionDetail,
+  markPatientPrescriptionSeen,
+} from "../../services/patientPrescriptionService";
+import { patientTheme } from "../../constants/patientTheme";
 
 const THEME = {
-  primary: "#2196F3",
-  background: "#F4F8FC",
-  card: "#FFFFFF",
-  textPrimary: "#0F172A",
-  textSecondary: "#64748B",
-  border: "#E2E8F0",
-  success: "#10B981",
-  shadow: "#000000",
-  softBlue: "#E3F2FD",
-  softGray: "#F1F5F9",
-  softMint: "#ECFDF3",
-  softAmber: "#FFF7E8",
-  primaryBorder: "#BFDBFE",
-  warning: "#F59E0B",
+  ...patientTheme.colors,
+  card: patientTheme.colors.surface,
+  shadow: patientTheme.colors.navy,
+  softMint: patientTheme.colors.successSoft,
+  primaryBorder: patientTheme.colors.softAqua,
 };
 
 type Medicine = {
@@ -359,19 +354,16 @@ export default function PrescriptionDetails() {
           throw new Error("Missing prescription id");
         }
 
-        const res = await apiFetch(`/api/prescriptions/${prescriptionId}`);
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || "Failed to load prescription");
-        }
-
-        const data = (await res.json()) as PrescriptionApiResponse;
+        const data = (await fetchPatientPrescriptionDetail(prescriptionId)) as PrescriptionApiResponse;
         const normalized = buildPrescriptionModel(data);
         if (!normalized) {
           throw new Error("Prescription details are unavailable");
         }
 
         setPrescription(normalized);
+        void markPatientPrescriptionSeen(prescriptionId).catch((markError) => {
+          console.log("Mark prescription seen error:", markError);
+        });
       } catch (err: any) {
         setPrescription(null);
         setError(err?.message || "Failed to load prescription");
@@ -388,12 +380,28 @@ export default function PrescriptionDetails() {
     [prescription]
   );
 
+  const qrPayload = useMemo(() => {
+    if (!prescription?.id || !prescription?.qrToken) return null;
+    return JSON.stringify({
+      prescriptionId: prescription.id,
+      token: prescription.qrToken,
+    });
+  }, [prescription?.id, prescription?.qrToken]);
+
   const handleDownload = () => {
     Alert.alert("Download", "Prescription download will be available soon.");
   };
 
   const handleCheckAvailability = () => {
     navigation.navigate("MedicineSearch");
+  };
+
+  const handleOrderMedicines = () => {
+    if (!prescription?.id) return;
+    navigation.navigate("PrescriptionFulfillment", {
+      prescriptionId: prescription.id,
+      title: prescription.title,
+    });
   };
 
   const handleNearbyPharmacies = () => {
@@ -449,6 +457,31 @@ export default function PrescriptionDetails() {
               prescribedAt={prescription.prescribedAt}
             />
 
+            <View style={styles.qrCard}>
+              <View style={styles.qrHeader}>
+                <View>
+                  <Text style={styles.qrTitle}>Pharmacy QR</Text>
+                  <Text style={styles.qrSub}>Show this at the pharmacy counter</Text>
+                </View>
+                <Ionicons name="qr-code-outline" size={24} color={THEME.primary} />
+              </View>
+              <View style={styles.qrBox}>
+                {qrPayload ? (
+                  <QRCode
+                    value={qrPayload}
+                    size={170}
+                    color={THEME.textPrimary}
+                    backgroundColor={THEME.card}
+                  />
+                ) : (
+                  <View style={styles.qrPlaceholder}>
+                    <Ionicons name="alert-circle-outline" size={32} color={THEME.textSecondary} />
+                    <Text style={styles.qrPlaceholderText}>QR token is not available yet</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Medicines</Text>
@@ -495,17 +528,17 @@ export default function PrescriptionDetails() {
           >
             <TouchableOpacity
               style={styles.primaryBtn}
-              onPress={handleCheckAvailability}
+              onPress={handleOrderMedicines}
             >
-              <Text style={styles.primaryText}>Check Medicine Availability</Text>
+              <Text style={styles.primaryText}>Order Medicines</Text>
             </TouchableOpacity>
 
             <View style={styles.secondaryRow}>
               <TouchableOpacity
                 style={styles.secondaryBtn}
-                onPress={handleDownload}
+                onPress={handleCheckAvailability}
               >
-                <Text style={styles.secondaryText}>Download</Text>
+                <Text style={styles.secondaryText}>Availability</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -635,6 +668,63 @@ const styles = StyleSheet.create({
   },
   metaDateWrap: {
     alignItems: "flex-end",
+  },
+  qrCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E8EEF5",
+    shadowColor: THEME.shadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  qrHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 16,
+  },
+  qrTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.textPrimary,
+  },
+  qrSub: {
+    marginTop: 3,
+    fontSize: 14,
+    color: THEME.textSecondary,
+  },
+  qrBox: {
+    alignSelf: "center",
+    minWidth: 212,
+    minHeight: 212,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: THEME.card,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  qrPlaceholder: {
+    width: 170,
+    height: 170,
+    borderRadius: 18,
+    backgroundColor: THEME.softGray,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+  },
+  qrPlaceholderText: {
+    marginTop: 10,
+    textAlign: "center",
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.textSecondary,
   },
   section: {
     gap: 16,

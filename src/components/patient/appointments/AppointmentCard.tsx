@@ -2,36 +2,22 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { AppointmentItem, AppointmentStatus } from "../../../types/appointments";
+import { getPatientStatusTone, patientTheme } from "../../../constants/patientTheme";
 
-const THEME = {
-  white: "#FFFFFF",
-  textDark: "#1C1C1E",
-  textMuted: "#8E8E93",
-  border: "#E5E5EA",
-  primary: "#2196F3",
-  primarySoft: "#E3F2FD",
-  success: "#16A34A",
-  successSoft: "#EAF8EF",
-  danger: "#FF3B30",
-  dangerSoft: "#FAE3E3",
-  gray: "#64748B",
-  graySoft: "#EEF2F6",
-  inProgress: "#1C1C1E",
-  inProgressSoft: "#E5E7EB",
-};
+const THEME = patientTheme.colors;
 
 const getStatusPalette = (status: AppointmentStatus) => {
   switch (status) {
     case "UPCOMING":
-      return { bg: THEME.primarySoft, text: THEME.primary };
+      return getPatientStatusTone("upcoming");
     case "COMPLETED":
-      return { bg: THEME.successSoft, text: THEME.success };
+      return getPatientStatusTone("completed");
     case "MISSED":
-      return { bg: THEME.dangerSoft, text: THEME.danger };
+      return getPatientStatusTone("missed");
     case "CANCELLED":
-      return { bg: THEME.graySoft, text: THEME.gray };
+      return getPatientStatusTone("cancelled");
     default:
-      return { bg: THEME.primarySoft, text: THEME.primary };
+      return getPatientStatusTone("upcoming");
   }
 };
 
@@ -57,14 +43,14 @@ export default function AppointmentCard({
     <View style={styles.card}>
       <View style={styles.cardTop}>
         <View style={styles.iconWrap}>
-          <Ionicons name="medical" size={20} color="#2196F3" />
+          <Ionicons name="medical" size={20} color={THEME.primary} />
         </View>
         <View style={styles.cardText}>
           <Text style={styles.cardLabel}>{appointment.type}</Text>
           <Text style={styles.cardDoctor}>{appointment.doctor}</Text>
         </View>
         <TouchableOpacity style={styles.moreButton} activeOpacity={0.8}>
-          <Ionicons name="ellipsis-horizontal" size={20} color="#8E8E93" />
+          <Ionicons name="ellipsis-horizontal" size={20} color={THEME.textMuted} />
         </TouchableOpacity>
       </View>
 
@@ -96,7 +82,7 @@ export default function AppointmentCard({
         <View style={styles.warningBanner}>
           <Ionicons name="alert-circle-outline" size={16} color="#B45309" />
           <Text style={styles.warningText}>
-            You are late for this appointment. Please go to the queue before it becomes missed.
+            You are late for this appointment. Please go to the queue before it is marked missed.
           </Text>
         </View>
       ) : null}
@@ -178,11 +164,9 @@ const styles = StyleSheet.create({
     padding: 18,
     marginHorizontal: 16,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    ...patientTheme.shadows.soft,
   },
   cardTop: { flexDirection: "row", alignItems: "center" },
   iconWrap: {
@@ -191,7 +175,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EAF2FF",
+    backgroundColor: THEME.lightBlueBg,
   },
   cardText: { flex: 1, marginLeft: 12, paddingRight: 12 },
   cardLabel: {
@@ -233,7 +217,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 14,
-    backgroundColor: "#F2F2F7",
+    backgroundColor: THEME.background,
   },
   metaChipText: { fontSize: 13, fontWeight: "500", color: THEME.textDark },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14, marginLeft: 2 },
@@ -245,7 +229,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     borderRadius: 14,
     padding: 10,
-    backgroundColor: "#FFF7E8",
+    backgroundColor: THEME.warningSoft,
   },
   warningText: {
     flex: 1,
@@ -268,13 +252,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryBtn: { backgroundColor: "#1C1C1E" },
+  primaryBtn: { backgroundColor: THEME.primary },
   primaryBtnText: { color: THEME.white, fontWeight: "600", fontSize: 11 },
   secondaryBtn: {
-    backgroundColor: "#DCEBFF",
+    backgroundColor: THEME.highlight,
+    borderWidth: 1,
+    borderColor: THEME.softAqua,
   },
   secondaryBtnText: { color: THEME.primary, fontWeight: "600", fontSize: 11 },
-  dangerBtn: { backgroundColor: "#FDE2E2" },
+  dangerBtn: { backgroundColor: THEME.dangerSoft },
   dangerBtnText: { color: THEME.danger, fontWeight: "600", fontSize: 11 },
   rebookBtn: {
     marginTop: 18,
@@ -282,7 +268,7 @@ const styles = StyleSheet.create({
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#DCEBFF",
+    backgroundColor: THEME.highlight,
   },
   rebookBtnText: { color: THEME.primary, fontWeight: "600", fontSize: 11 },
 });

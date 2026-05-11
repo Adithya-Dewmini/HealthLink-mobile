@@ -16,6 +16,9 @@ export type AppointmentApiItem = {
   id?: string | number;
   doctor_id?: string | number | null;
   doctor_name?: string | null;
+  medical_center_id?: string | null;
+  medical_center_name?: string | null;
+  session_id?: string | number | null;
   date?: string | null;
   time?: string | null;
   scheduled_at?: string | null;
@@ -31,6 +34,9 @@ export type AppointmentApiItem = {
 export type AppointmentItem = {
   id: string;
   doctorId: number | null;
+  clinicId: string | null;
+  clinicName: string;
+  sessionId: number | null;
   doctor: string;
   type: string;
   location: string;

@@ -1,32 +1,28 @@
-import React, { useContext, useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import {
-  Animated,
-  StatusBar,
-  Text,
-  TouchableOpacity,
-  Vibration,
-  View,
-  StyleSheet,
-} from "react-native";
+import { Animated, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Home from "../screens/receptionist/Home";
 import Registration from "../screens/receptionist/Registration";
 import AppointmentManagement from "../screens/receptionist/AppointmentManagement";
 import QueueManagement from "../screens/receptionist/QueueManagement";
-import AppointmentBooking from "../screens/receptionist/AppointmentBooking";
-import Patients from "../screens/receptionist/Patients";
+import ReceptionistSessions from "../screens/receptionist/Sessions";
 import { AuthContext } from "../utils/AuthContext";
 import { getSocket } from "../services/socket";
+import { RECEPTION_THEME } from "../components/receptionist/PanelUI";
 
 const Tab = createBottomTabNavigator();
-const SCREEN_PERMISSION_MAP: Record<string, "can_manage_queue" | "can_manage_appointments" | "can_check_in"> = {
-  queue: "can_manage_queue",
-  registration: "can_check_in",
-  booking: "can_manage_appointments",
-  appointments: "can_manage_appointments",
+
+const SCREEN_PERMISSION_MAP: Record<
+  string,
+  "queue_access" | "appointments" | "check_in" | "schedule_management"
+> = {
+  queue: "queue_access",
+  registration: "check_in",
+  appointments: "appointments",
+  schedule: "schedule_management",
 };
 
 export default function ReceptionistTabs() {
@@ -39,131 +35,131 @@ export default function ReceptionistTabs() {
     refreshReceptionPermissions,
     setPendingPermissionUpdate,
   } = useContext(AuthContext);
-  const [toastVisible, setToastVisible] = useState(false);
-  const [accessModalVisible, setAccessModalVisible] = useState(false);
-  const [accessModalMessage, setAccessModalMessage] = useState(
-    "You no longer have permission for this feature."
+  const [bannerVisible, setBannerVisible] = useState(false);
+  const translateY = useRef(new Animated.Value(-120)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const lastPermissionSnapshot = useRef(JSON.stringify(receptionistPermissions));
+
+  const hasAnyTabs = useMemo(
+    () =>
+      receptionistPermissions.queue_access ||
+      receptionistPermissions.appointments ||
+      receptionistPermissions.check_in ||
+      receptionistPermissions.schedule_management,
+    [receptionistPermissions]
   );
-  const bannerTranslateY = useRef(new Animated.Value(-140)).current;
-  const bannerOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(bannerTranslateY, {
-        toValue: toastVisible ? 0 : -140,
-        duration: toastVisible ? 240 : 180,
+      Animated.timing(translateY, {
+        toValue: bannerVisible ? 0 : -120,
+        duration: bannerVisible ? 220 : 180,
         useNativeDriver: true,
       }),
-      Animated.timing(bannerOpacity, {
-        toValue: toastVisible ? 1 : 0,
-        duration: toastVisible ? 220 : 160,
+      Animated.timing(opacity, {
+        toValue: bannerVisible ? 1 : 0,
+        duration: bannerVisible ? 220 : 160,
         useNativeDriver: true,
       }),
     ]).start();
-  }, [bannerOpacity, bannerTranslateY, toastVisible]);
+  }, [bannerVisible, opacity, translateY]);
+
+  useEffect(() => {
+    lastPermissionSnapshot.current = JSON.stringify(receptionistPermissions);
+  }, [receptionistPermissions]);
+
+  const syncPermissions = React.useCallback(async () => {
+    const nextPermissions = await refreshReceptionPermissions();
+    const nextSnapshot = JSON.stringify(nextPermissions);
+    const changed = nextSnapshot !== lastPermissionSnapshot.current;
+
+    if (changed) {
+      lastPermissionSnapshot.current = nextSnapshot;
+      setBannerVisible(true);
+    }
+
+    const requiredPermission =
+      activeTask && SCREEN_PERMISSION_MAP[activeTask] ? SCREEN_PERMISSION_MAP[activeTask] : null;
+
+    if (requiredPermission && !nextPermissions[requiredPermission]) {
+      navigation.navigate("ReceptionistHome");
+    }
+
+    return nextPermissions;
+  }, [activeTask, navigation, refreshReceptionPermissions]);
 
   useEffect(() => {
     const socket = getSocket();
-    let dismissTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const handlePermissionUpdate = async () => {
-      Vibration.vibrate(35);
-      setToastVisible(true);
-      if (dismissTimer) {
-        clearTimeout(dismissTimer);
-      }
-      dismissTimer = setTimeout(() => {
-        setToastVisible(false);
-      }, 5500);
-
+    const handlePermissionUpdate = () => {
       setPendingPermissionUpdate(true);
-
-      try {
-        const nextPermissions = await refreshReceptionPermissions();
-        const requiredPermission =
-          activeTask && SCREEN_PERMISSION_MAP[activeTask]
-            ? SCREEN_PERMISSION_MAP[activeTask]
-            : null;
-
-        if (requiredPermission && !nextPermissions[requiredPermission]) {
-          setAccessModalMessage("You no longer have permission for this feature.");
-          setAccessModalVisible(true);
-          return;
-        }
-      } catch {
-        setToastVisible(true);
-      }
+      void syncPermissions().catch(() => {
+        setBannerVisible(true);
+      });
     };
 
-    socket.on("reception:permissionsUpdated", () => {
-      void handlePermissionUpdate();
-    });
+    socket.on("reception:permissionsUpdated", handlePermissionUpdate);
     return () => {
-      if (dismissTimer) {
-        clearTimeout(dismissTimer);
-      }
-      socket.off("reception:permissionsUpdated");
+      socket.off("reception:permissionsUpdated", handlePermissionUpdate);
     };
-  }, [activeTask, refreshReceptionPermissions, setPendingPermissionUpdate]);
+  }, [setPendingPermissionUpdate, syncPermissions]);
 
-  useEffect(() => {
-    if (!activeTask && pendingPermissionUpdate) {
-      void refreshReceptionPermissions()
-        .then(() => {})
-        .catch(() => {
-          setToastVisible(true);
-        });
-    }
-  }, [activeTask, pendingPermissionUpdate, refreshReceptionPermissions]);
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
 
-  const handleRefreshPermissions = async () => {
-    try {
-      await refreshReceptionPermissions();
-      setToastVisible(false);
-    } catch {
-      setToastVisible(true);
-    }
-  };
+      const run = async () => {
+        try {
+          await syncPermissions();
+        } catch {
+          if (active) {
+            setBannerVisible(true);
+          }
+        }
+      };
 
-  const handleReviewChanges = async () => {
-    await handleRefreshPermissions();
-    navigation.navigate("ReceptionistHome");
-  };
+      void run();
+      return () => {
+        active = false;
+      };
+    }, [syncPermissions])
+  );
 
   return (
     <View style={styles.container}>
-      <StatusBar
-        barStyle={toastVisible ? "light-content" : "dark-content"}
-        backgroundColor={toastVisible ? "#0F172A" : undefined}
-      />
+      <StatusBar barStyle="dark-content" backgroundColor={RECEPTION_THEME.background} />
+
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: "#2BB673",
-          tabBarInactiveTintColor: "#9CA3AF",
-          tabBarLabelStyle: { fontSize: 10, marginBottom: 4, fontWeight: "600" },
-          tabBarItemStyle: { paddingVertical: 4, paddingHorizontal: 0 },
+          tabBarActiveTintColor: RECEPTION_THEME.primary,
+          tabBarInactiveTintColor: "#8B97A8",
+          tabBarLabelStyle: { fontSize: 11, marginBottom: 4, fontWeight: "700" },
+          tabBarItemStyle: { paddingVertical: 4 },
           tabBarStyle: {
             position: "absolute",
-            bottom: 0,
-            left: 12,
-            right: 12,
-            height: 76,
-            backgroundColor: "#FFFFFF",
-            borderRadius: 25,
-            elevation: 10,
-            shadowColor: "#000",
-            shadowOpacity: 0.1,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 5 },
+            left: 14,
+            right: 14,
+            bottom: 8,
+            height: 80 + insets.bottom,
+            paddingBottom: Math.max(insets.bottom, 10),
+            paddingTop: 8,
+            backgroundColor: RECEPTION_THEME.surface,
+            borderRadius: 28,
             borderTopWidth: 0,
+            shadowColor: RECEPTION_THEME.navy,
+            shadowOpacity: 0.12,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 16,
           },
           tabBarBackground: () => (
             <View
               style={{
                 ...StyleSheet.absoluteFillObject,
-                backgroundColor: "#FFFFFF",
-                borderRadius: 25,
+                backgroundColor: RECEPTION_THEME.surface,
+                borderRadius: 28,
+                borderWidth: 1,
+                borderColor: "rgba(3, 4, 94, 0.06)",
               }}
             />
           ),
@@ -174,175 +170,121 @@ export default function ReceptionistTabs() {
           component={Home}
           options={{
             tabBarLabel: "Home",
-            tabBarIcon: ({ color }) => (
-              <TabIconWithPendingDot
-                name="people-outline"
-                color={color}
-                pending={pendingPermissionUpdate}
-              />
+            tabBarIcon: ({ color, focused }) => (
+              <TabIcon name="home-outline" color={color} focused={focused} pending={pendingPermissionUpdate} />
             ),
           }}
         />
-        {receptionistPermissions.can_check_in && (
-          <Tab.Screen
-            name="ReceptionistRegistration"
-            component={Registration}
-            options={{
-              headerShown: false,
-              tabBarLabel: "Registration",
-              headerTitle: "Patient Registration",
-              tabBarIcon: ({ color }) => (
-                <TabIconWithPendingDot
-                  name="person-add-outline"
-                  color={color}
-                  pending={pendingPermissionUpdate}
-                />
-              ),
-            }}
-          />
-        )}
-        {receptionistPermissions.can_manage_appointments && (
-          <Tab.Screen
-            name="ReceptionistAppointments"
-            component={AppointmentManagement}
-            options={{
-              tabBarLabel: "Appointments",
-              headerTitle: "Appointment Management",
-              tabBarIcon: ({ color }) => (
-                <TabIconWithPendingDot name="calendar" color={color} pending={pendingPermissionUpdate} />
-              ),
-            }}
-          />
-        )}
-        {receptionistPermissions.can_manage_queue && (
+        {receptionistPermissions.queue_access && (
           <Tab.Screen
             name="ReceptionistQueue"
             component={QueueManagement}
             options={{
               tabBarLabel: "Queue",
-              headerTitle: "Queue Management",
-              tabBarIcon: ({ color }) => (
-                <TabIconWithPendingDot
+              tabBarIcon: ({ color, focused }) => (
+                <TabIcon
                   name="people-circle-outline"
                   color={color}
+                  focused={focused}
                   pending={pendingPermissionUpdate}
                 />
               ),
             }}
           />
         )}
-        {receptionistPermissions.can_manage_appointments && (
+        {receptionistPermissions.appointments && (
           <Tab.Screen
-            name="ReceptionistBookAppointment"
-            component={AppointmentBooking}
+            name="ReceptionistAppointments"
+            component={AppointmentManagement}
             options={{
-              headerShown: false,
-              tabBarLabel: "Book",
-              headerTitle: "Book Appointment",
-              tabBarIcon: ({ color }) => (
-                <TabIconWithPendingDot
-                  name="calendar-clear-outline"
-                  color={color}
-                  pending={pendingPermissionUpdate}
-                />
+              tabBarLabel: "Visits",
+              tabBarIcon: ({ color, focused }) => (
+                <TabIcon name="calendar-outline" color={color} focused={focused} pending={pendingPermissionUpdate} />
               ),
             }}
           />
         )}
-        <Tab.Screen
-          name="ReceptionistPatients"
-          component={Patients}
-          options={{
-            headerShown: false,
-            tabBarLabel: "Patients",
-            tabBarIcon: ({ color }) => (
-              <TabIconWithPendingDot name="people" color={color} pending={pendingPermissionUpdate} />
-            ),
-          }}
-        />
+        {receptionistPermissions.check_in && (
+          <Tab.Screen
+            name="ReceptionistRegistration"
+            component={Registration}
+            options={{
+              tabBarLabel: "Check-in",
+              tabBarIcon: ({ color, focused }) => (
+                <TabIcon name="person-add-outline" color={color} focused={focused} pending={pendingPermissionUpdate} />
+              ),
+            }}
+          />
+        )}
+        {receptionistPermissions.schedule_management && (
+          <Tab.Screen
+            name="ReceptionistSessions"
+            component={ReceptionistSessions}
+            options={{
+              tabBarLabel: "Sessions",
+              tabBarIcon: ({ color, focused }) => (
+                <TabIcon name="time-outline" color={color} focused={focused} pending={pendingPermissionUpdate} />
+              ),
+            }}
+          />
+        )}
       </Tab.Navigator>
+
       <Animated.View
-        pointerEvents={toastVisible ? "auto" : "none"}
+        pointerEvents={bannerVisible ? "auto" : "none"}
         style={[
-          styles.toastWrap,
+          styles.bannerWrap,
           {
-            paddingTop: insets.top,
-            backgroundColor: "#0F172A",
-            opacity: bannerOpacity,
-            transform: [{ translateY: bannerTranslateY }],
+            paddingTop: insets.top + 4,
+            opacity,
+            transform: [{ translateY }],
           },
         ]}
       >
-        <View style={styles.toastCard}>
-          <View style={styles.toastHeader}>
-            <View style={styles.toastHeaderLeft}>
-              <View style={styles.toastIconWrap}>
-                <Ionicons name="notifications-outline" size={18} color="#FFFFFF" />
-              </View>
-              <Text style={styles.toastTitle}>Responsibilities Updated</Text>
-            </View>
-            <TouchableOpacity style={styles.toastCloseButton} onPress={() => setToastVisible(false)}>
-              <Ionicons name="close" size={18} color="#CBD5E1" />
-            </TouchableOpacity>
+        <View style={styles.bannerCard}>
+          <View style={styles.bannerIcon}>
+            <Ionicons name="shield-checkmark-outline" size={18} color={RECEPTION_THEME.navy} />
           </View>
-          <View style={styles.toastMetaRow}>
-            <Text style={styles.toastSubtitle}>Permissions updated</Text>
-            <TouchableOpacity
-              style={styles.toastInlineAction}
-              onPress={() => {
-                void handleReviewChanges();
-              }}
-            >
-              <Text style={styles.toastInlineActionText}>Review</Text>
-            </TouchableOpacity>
+          <View style={styles.bannerTextWrap}>
+            <Text style={styles.bannerTitle}>Your responsibilities were updated.</Text>
+            <Text style={styles.bannerSubtitle}>
+              Review the latest access changes in the panel.
+            </Text>
           </View>
+          <TouchableOpacity
+            style={styles.bannerAction}
+            onPress={() => {
+              void syncPermissions().finally(() => {
+                navigation.navigate("ReceptionistHome");
+                setBannerVisible(false);
+              });
+            }}
+          >
+            <Text style={styles.bannerActionText}>Review</Text>
+          </TouchableOpacity>
         </View>
       </Animated.View>
-      {accessModalVisible ? (
-        <AccessUpdatedModal
-          message={accessModalMessage}
-          onClose={() => setAccessModalVisible(false)}
-        />
-      ) : null}
+
+      {!hasAnyTabs ? <View pointerEvents="none" style={styles.bottomSpacer} /> : null}
     </View>
   );
 }
 
-function TabIconWithPendingDot({
+function TabIcon({
   name,
   color,
+  focused,
   pending,
 }: {
   name: keyof typeof Ionicons.glyphMap;
   color: string;
+  focused: boolean;
   pending: boolean;
 }) {
   return (
-    <View style={styles.tabIconWrap}>
-      <Ionicons name={name} size={22} color={color} />
+    <View style={[styles.tabIconWrap, focused && styles.tabIconWrapActive]}>
+      <Ionicons name={name} size={20} color={color} />
       {pending ? <View style={styles.pendingDot} /> : null}
-    </View>
-  );
-}
-
-function AccessUpdatedModal({
-  message,
-  onClose,
-}: {
-  message: string;
-  onClose: () => void;
-}) {
-  return (
-    <View style={styles.modalBackdrop}>
-      <View style={styles.modalCard}>
-        <Text style={styles.modalTitle}>Access Updated</Text>
-        <Text style={styles.modalBody}>
-          {message} You can finish the current view, but further actions are restricted.
-        </Text>
-        <TouchableOpacity style={styles.modalButton} onPress={onClose}>
-          <Text style={styles.modalButtonText}>OK</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -350,146 +292,87 @@ function AccessUpdatedModal({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: RECEPTION_THEME.background,
   },
-  toastWrap: {
+  bannerWrap: {
     position: "absolute",
     top: 0,
-    left: 0,
-    right: 0,
-    width: "100%",
-    zIndex: 999,
-    elevation: 20,
+    left: 14,
+    right: 14,
+    zIndex: 20,
   },
-  toastCard: {
-    minHeight: 68,
-    backgroundColor: "#0F172A",
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.24,
+  bannerCard: {
+    backgroundColor: RECEPTION_THEME.lightAqua,
+    borderWidth: 1,
+    borderColor: "#B9E6F0",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: RECEPTION_THEME.navy,
+    shadowOpacity: 0.08,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 18,
+    elevation: 8,
   },
-  toastHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  toastHeaderLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  toastIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.14)",
+  bannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.6)",
     alignItems: "center",
     justifyContent: "center",
   },
-  toastTitle: {
+  bannerTextWrap: {
+    flex: 1,
     marginLeft: 10,
-    color: "#FFFFFF",
-    fontSize: 15,
+  },
+  bannerTitle: {
+    color: RECEPTION_THEME.navy,
     fontWeight: "800",
-    lineHeight: 18,
-  },
-  toastMetaRow: {
-    marginTop: 6,
-    marginLeft: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  toastSubtitle: {
-    color: "#CBD5E1",
     fontSize: 13,
-    lineHeight: 18,
-    flex: 1,
   },
-  toastInlineAction: {
-    marginLeft: 12,
-    paddingHorizontal: 0,
-    paddingVertical: 2,
-    alignItems: "center",
-    justifyContent: "center",
+  bannerSubtitle: {
+    marginTop: 2,
+    color: RECEPTION_THEME.navy,
+    fontSize: 12,
+    lineHeight: 17,
   },
-  toastInlineActionText: {
-    color: "#93C5FD",
-    fontSize: 13,
+  bannerAction: {
+    backgroundColor: RECEPTION_THEME.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginLeft: 10,
+  },
+  bannerActionText: {
+    color: RECEPTION_THEME.primary,
     fontWeight: "800",
-    lineHeight: 18,
-  },
-  toastCloseButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    fontSize: 12,
   },
   tabIconWrap: {
-    width: 24,
-    height: 24,
+    width: 34,
+    height: 34,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+  },
+  tabIconWrapActive: {
+    backgroundColor: RECEPTION_THEME.infoSurface,
   },
   pendingDot: {
     position: "absolute",
-    top: 0,
-    right: -1,
+    top: 3,
+    right: 3,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#EF4444",
+    backgroundColor: RECEPTION_THEME.danger,
     borderWidth: 1.5,
-    borderColor: "#FFFFFF",
+    borderColor: RECEPTION_THEME.surface,
   },
-  modalBackdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.24)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  modalCard: {
-    width: "100%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 22,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#D9E2EC",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#1F2937",
-  },
-  modalBody: {
-    marginTop: 12,
-    fontSize: 15,
-    lineHeight: 22,
-    color: "#475569",
-  },
-  modalButton: {
-    alignSelf: "flex-end",
-    marginTop: 18,
-    backgroundColor: "#2196F3",
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  modalButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
+  bottomSpacer: {
+    height: 90,
   },
 });

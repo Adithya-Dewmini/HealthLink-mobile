@@ -1,26 +1,37 @@
-import React, { useContext } from "react";
+import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { AuthContext } from "../../utils/AuthContext";
 import type { RootStackParamList } from "../../types/navigation";
-import { getDashboardRouteForRole, getWelcomeMessageForRole } from "./passwordSetupFlow";
+import { getWelcomeMessageForRole } from "./passwordSetupFlow";
 import AuthLayout from "../../components/auth/AuthLayout";
 import AuthHeader from "../../components/auth/AuthHeader";
 import AuthCard from "../../components/auth/AuthCard";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
+import { useAuth } from "../../utils/AuthContext";
 
 type Props = NativeStackScreenProps<RootStackParamList, "PasswordSetupWelcome">;
 
 export default function PasswordSetupWelcomeScreen({ navigation, route }: Props) {
-  const { role: authenticatedRole } = useContext(AuthContext);
-  const resolvedRole = route.params?.role ?? authenticatedRole;
+  const { logout } = useAuth();
+  const resolvedRole = route.params?.role;
 
-  const handleGoToDashboard = () => {
-    const target = getDashboardRouteForRole(resolvedRole);
+  const handleGoToLogin = async () => {
+    await logout();
     navigation.reset({
       index: 0,
-      routes: [{ name: target as any }],
+      routes: [
+        {
+          name: "AuthStack",
+          params: {
+            screen: "Login",
+            params: {
+              initialEmail: route.params?.email,
+              flashMessage: "Password set successfully. Please log in.",
+            },
+          },
+        },
+      ],
     });
   };
 
@@ -40,9 +51,9 @@ export default function PasswordSetupWelcomeScreen({ navigation, route }: Props)
         <TouchableOpacity
           style={styles.primaryButton}
           activeOpacity={0.88}
-          onPress={handleGoToDashboard}
+          onPress={() => void handleGoToLogin()}
         >
-          <Text style={styles.primaryButtonText}>Go to Dashboard</Text>
+          <Text style={styles.primaryButtonText}>Go to Login</Text>
         </TouchableOpacity>
       </AuthCard>
     </AuthLayout>

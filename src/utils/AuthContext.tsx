@@ -2,20 +2,21 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
 import { apiFetch } from "../config/api";
-
-type ReceptionistPermissions = {
-  can_manage_queue: boolean;
-  can_manage_appointments: boolean;
-  can_check_in: boolean;
-};
+import {
+  DEFAULT_RECEPTIONIST_PERMISSIONS,
+  normalizeReceptionistPermissions,
+  type ReceptionistPermissions,
+} from "./receptionistPermissions";
 
 export type AuthUser = {
   id?: number;
+  doctor_id?: number | null;
   name?: string;
   email?: string;
   role?: string | null;
   status?: string | null;
   verification_status?: string | null;
+  verification_notes?: string | null;
   phone?: string | null;
   profile_image?: string | null;
   specialization?: string | null;
@@ -44,15 +45,9 @@ interface AuthContextType {
   refreshReceptionPermissions: () => Promise<ReceptionistPermissions>;
   setPendingPermissionUpdate: React.Dispatch<React.SetStateAction<boolean>>;
   setActiveTask: React.Dispatch<React.SetStateAction<string | null>>;
-  refreshAuth: () => Promise<void> | void; // FIX
+  refreshAuth: () => Promise<AuthUser | null> | AuthUser | null; // FIX
   logout: () => Promise<void> | void;      // FIX
 }
-
-const DEFAULT_RECEPTIONIST_PERMISSIONS: ReceptionistPermissions = {
-  can_manage_queue: false,
-  can_manage_appointments: false,
-  can_check_in: false,
-};
 
 export const AuthContext = createContext<AuthContextType>({
   token: null,
@@ -69,7 +64,7 @@ export const AuthContext = createContext<AuthContextType>({
   refreshReceptionPermissions: async () => DEFAULT_RECEPTIONIST_PERMISSIONS,
   setPendingPermissionUpdate: () => null,
   setActiveTask: () => null,
-  refreshAuth: async () => {},
+  refreshAuth: async () => null,
   logout: async () => {},
 });
 
@@ -92,9 +87,6 @@ export function AuthProvider({ children }: any) {
 
   const normalizeDoctorStatus = useCallback((value: unknown) => {
     const statusValue = String(value || "").trim().toLowerCase();
-    if (statusValue === "approved") {
-      return "verified";
-    }
     return statusValue.length > 0 ? statusValue : null;
   }, []);
 
@@ -147,37 +139,33 @@ export function AuthProvider({ children }: any) {
             : prev?.verification_status ?? prev?.status ?? null,
     }));
     setClinicId(resolvedClinicId);
-    setReceptionistPermissions({
-      can_manage_queue: Boolean(
-        input.receptionistPermissions?.can_manage_queue ??
-          input.decoded?.receptionistPermissions?.can_manage_queue
-      ),
-      can_manage_appointments: Boolean(
-        input.receptionistPermissions?.can_manage_appointments ??
-          input.decoded?.receptionistPermissions?.can_manage_appointments
-      ),
-      can_check_in: Boolean(
-        input.receptionistPermissions?.can_check_in ??
-          input.decoded?.receptionistPermissions?.can_check_in
-      ),
-    });
+    setReceptionistPermissions(
+      normalizeReceptionistPermissions({
+        ...(input.decoded?.receptionistPermissions || {}),
+        ...(input.receptionistPermissions || {}),
+      })
+    );
   }, [normalizeDoctorStatus, normalizeRole]);
 
   // 🔥 Refresh token + decode role
+  const clearAuthState = useCallback(() => {
+    setToken(null);
+    setRole(null);
+    setUser(null);
+    setClinicId(null);
+    setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
+    setPendingPermissionUpdate(false);
+    setActiveTask(null);
+  }, []);
+
   const refreshAuth = useCallback(async () => {
     let decoded: any = null;
     try {
       const storedToken = await AsyncStorage.getItem("token");
 
       if (!storedToken) {
-        setToken(null);
-        setRole(null);
-        setUser(null);
-        setClinicId(null);
-        setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
-        setPendingPermissionUpdate(false);
-        setActiveTask(null);
-        return;
+        clearAuthState();
+        return null;
       }
 
       decoded = jwtDecode(storedToken);
@@ -204,25 +192,24 @@ export function AuthProvider({ children }: any) {
                 ? (context as any).permissions
                 : null,
           });
-          return;
+          return (context as any).user && typeof (context as any).user === "object"
+            ? ((context as any).user as AuthUser)
+            : null;
         }
       }
+
+      return null;
     } catch (err) {
       if (!decoded) {
         console.log("Token decode error:", err);
-        setToken(null);
-        setRole(null);
-        setUser(null);
-        setClinicId(null);
-        setReceptionistPermissions(DEFAULT_RECEPTIONIST_PERMISSIONS);
-        setPendingPermissionUpdate(false);
-        setActiveTask(null);
-        return;
+        clearAuthState();
+        return null;
       }
 
       console.log("Auth refresh error:", err);
+      return user ?? null;
     }
-  }, [applyAuthState]);
+  }, [applyAuthState, clearAuthState, user]);
 
   const refreshReceptionPermissions = useCallback(async () => {
     const storedToken = token ?? (await AsyncStorage.getItem("token"));
@@ -250,13 +237,9 @@ export function AuthProvider({ children }: any) {
     }
 
     const data = await response.json().catch(() => null);
-    const nextPermissions: ReceptionistPermissions =
+    const nextPermissions =
       data && typeof data === "object"
-        ? {
-            can_manage_queue: Boolean((data as any).can_manage_queue),
-            can_manage_appointments: Boolean((data as any).can_manage_appointments),
-            can_check_in: Boolean((data as any).can_check_in),
-          }
+        ? normalizeReceptionistPermissions(data as Record<string, unknown>)
         : DEFAULT_RECEPTIONIST_PERMISSIONS;
 
     setReceptionistPermissions(nextPermissions);
@@ -292,6 +275,11 @@ export function AuthProvider({ children }: any) {
 
   // 🔥 Logout clears token + resets role
   const logout = useCallback(async () => {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch (error) {
+      console.log("Logout audit call failed:", error);
+    }
     await AsyncStorage.removeItem("token");
     setToken(null);
     setRole(null); // RootNavigator will switch to AuthStack

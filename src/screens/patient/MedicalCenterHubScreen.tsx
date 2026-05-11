@@ -1,12 +1,12 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   FlatList,
   Image,
   Pressable,
   RefreshControl,
   StyleSheet,
+  StatusBar,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,12 +14,17 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { LinearGradient } from "expo-linear-gradient";
 import { apiFetch } from "../../config/api";
+import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../services/favoritesApi";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
+import { resolveImageUrl } from "../../utils/imageUrl";
 
 type PatientNavigation = NativeStackNavigationProp<PatientStackParamList>;
+type IconName = keyof typeof Ionicons.glyphMap;
 
 type FilterKey = "ALL" | "NEARBY" | "OPEN" | "FAVORITES";
 
@@ -39,41 +44,16 @@ type MedicalCenter = {
   isFavorite: boolean;
 };
 
-const THEME = {
-  background: "#F5F7FB",
-  white: "#FFFFFF",
-  primary: "#2F6FED",
-  textPrimary: "#172033",
-  textSecondary: "#6B7280",
-  textMuted: "#94A3B8",
-  border: "#E5EAF1",
-  chipBg: "#EEF2F7",
-  chipActive: "#DCE8FF",
-  green: "#16A34A",
-  red: "#DC2626",
-  blue: "#2563EB",
-  amber: "#F59E0B",
-};
+const THEME = patientTheme.colors;
+const HEADER_NAVY = THEME.modernPrimary;
 
-const SHADOW = {
-  shadowColor: "#000",
-  shadowOpacity: 0.06 as const,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 3 },
-  elevation: 4,
-};
+const SHADOW = patientTheme.shadows.card;
 
-const FILTERS: Array<{ key: FilterKey; label: string }> = [
-  { key: "ALL", label: "All" },
-  { key: "NEARBY", label: "Nearby" },
-  { key: "OPEN", label: "Open Now" },
-  { key: "FAVORITES", label: "Favorites" },
-];
-
-const FALLBACK_CENTER_IMAGES = [
-  "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1579684385127-1ecd15d5bfbc?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1606811841689-23dfddce3e95?q=80&w=1200&auto=format&fit=crop",
+const FILTERS: Array<{ key: FilterKey; label: string; icon: IconName }> = [
+  { key: "ALL", label: "All", icon: "grid-outline" },
+  { key: "NEARBY", label: "Nearby", icon: "navigate-outline" },
+  { key: "OPEN", label: "Open Now", icon: "flash-outline" },
+  { key: "FAVORITES", label: "Favorites", icon: "heart-outline" },
 ];
 
 const normalize = (value: string) => value.trim().toLowerCase();
@@ -85,12 +65,6 @@ const toTitle = (value: string) =>
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
-
-const statusTone = (status: MedicalCenterStatus) => {
-  if (status === "OPEN") return THEME.green;
-  if (status === "QUEUE LIVE") return THEME.blue;
-  return THEME.red;
-};
 
 const parseCenters = (payload: unknown): MedicalCenter[] => {
   const rows = Array.isArray(payload)
@@ -123,20 +97,21 @@ const parseCenters = (payload: unknown): MedicalCenter[] => {
         id: String(center.id ?? center.medical_center_id ?? index + 1),
         name: String(center.name ?? center.clinic_name ?? "Medical Center"),
         location: String(center.location ?? center.city ?? center.address ?? "Sri Lanka"),
-        rating: Number(center.rating ?? 4.5) || 4.5,
+        rating: Number(center.rating ?? 0) || 0,
         waitTime,
         status,
         nextAvailable: String(center.nextAvailable ?? center.next_available ?? "10:30 AM"),
-        image:
-          typeof center.image === "string" && center.image.trim()
-            ? center.image
-            : typeof center.cover_image_url === "string" && center.cover_image_url.trim()
-              ? center.cover_image_url
-            : typeof center.image_url === "string" && center.image_url.trim()
-              ? center.image_url
-              : typeof center.logo_url === "string" && center.logo_url.trim()
-                ? center.logo_url
-              : FALLBACK_CENTER_IMAGES[index % FALLBACK_CENTER_IMAGES.length],
+        image: resolveImageUrl(
+          (typeof center.cover_image_url === "string" && center.cover_image_url.trim()
+            ? center.cover_image_url
+            : typeof center.image === "string" && center.image.trim()
+              ? center.image
+              : typeof center.image_url === "string" && center.image_url.trim()
+                ? center.image_url
+                : typeof center.logo_url === "string" && center.logo_url.trim()
+                  ? center.logo_url
+                  : "") || null
+        ) || "",
         specialty: String(center.specialty ?? center.type ?? "General"),
         liveQueueCount,
         isFavorite: Boolean(center.isFavorite ?? false),
@@ -150,13 +125,22 @@ const LoadingCard = memo(function LoadingCard() {
     <View style={styles.card}>
       <View style={styles.skeletonImage} />
       <View style={styles.cardContent}>
-        <View style={styles.skeletonTitle} />
-        <View style={styles.skeletonLine} />
-        <View style={styles.skeletonMetaRow}>
-          <View style={styles.skeletonBadge} />
-          <View style={styles.skeletonBadge} />
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.skeletonHeaderText}>
+            <View style={styles.skeletonTitle} />
+            <View style={styles.skeletonLine} />
+          </View>
+          <View style={styles.skeletonCircle} />
         </View>
-        <View style={styles.skeletonButton} />
+        <View style={styles.skeletonMetaRow} />
+        <View style={styles.skeletonTagRow}>
+          <View style={styles.skeletonTag} />
+          <View style={styles.skeletonTag} />
+        </View>
+        <View style={styles.skeletonActionRow}>
+          <View style={styles.skeletonButtonHalf} />
+          <View style={styles.skeletonButtonHalf} />
+        </View>
       </View>
     </View>
   );
@@ -187,11 +171,13 @@ const MedicalCenterCard = memo(function MedicalCenterCard({
   onView,
   onBook,
   onToggleFavorite,
+  favoriteBusy,
 }: {
   item: MedicalCenter;
   onView: () => void;
   onBook: () => void;
   onToggleFavorite: () => void;
+  favoriteBusy: boolean;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -213,67 +199,77 @@ const MedicalCenterCard = memo(function MedicalCenterCard({
     }).start();
   }, [scale]);
 
+  const isLive = item.status === "QUEUE LIVE";
+  const primaryCopy = isLive ? "Join Queue" : "Book Appointment";
+  const statusText = isLive ? "Queue Live" : item.status === "OPEN" ? "Open" : "Closed";
+  const secondaryStatusText = isLive ? THEME.success : item.status === "OPEN" ? THEME.success : THEME.textSecondary;
+
   return (
     <Animated.View style={[styles.cardWrap, { transform: [{ scale }] }]}>
       <Pressable style={styles.card} onPress={onView} onPressIn={handlePressIn} onPressOut={handlePressOut}>
-        <View style={styles.imageWrap}>
+        {item.image ? (
           <Image source={{ uri: item.image }} style={styles.cardImage} />
-          <View style={[styles.statusBadge, { backgroundColor: statusTone(item.status) }]}>
-            <Text style={styles.statusBadgeText}>{item.status}</Text>
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Ionicons name="business-outline" size={34} color={THEME.primary} />
           </View>
-        </View>
-
+        )}
         <View style={styles.cardContent}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardHeaderText}>
               <Text style={styles.cardTitle} numberOfLines={1}>
                 {item.name}
               </Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location-outline" size={14} color={THEME.textSecondary} />
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {item.location}
-                </Text>
-              </View>
+              <Text style={styles.locationLabel} numberOfLines={1}>
+                {item.location}
+              </Text>
             </View>
-
+            <View style={styles.cardHeaderActions}>
+              {item.rating > 0 ? (
+                <View style={styles.ratingBox}>
+                  <Ionicons name="star" size={14} color={THEME.star} />
+                  <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
+                </View>
+              ) : null}
+            </View>
             <TouchableOpacity
               onPress={onToggleFavorite}
               activeOpacity={0.88}
-              style={styles.favoriteButton}
+              style={[styles.favoriteButton, favoriteBusy ? styles.favoriteButtonDisabled : null]}
+              disabled={favoriteBusy}
             >
               <Ionicons
                 name={item.isFavorite ? "heart" : "heart-outline"}
-                size={18}
+                size={20}
                 color={item.isFavorite ? "#EF4444" : THEME.textSecondary}
               />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.metricsRow}>
-            <View style={styles.metricPill}>
-              <Ionicons name="star" size={14} color={THEME.amber} />
-              <Text style={styles.metricText}>{item.rating.toFixed(1)}</Text>
-            </View>
-            <View style={styles.metricPill}>
-              <Ionicons name="time-outline" size={14} color={THEME.textSecondary} />
-              <Text style={styles.metricText}>{item.waitTime}</Text>
-            </View>
+          <View style={styles.metaRow}>
+            <Text style={[styles.metaText, { color: secondaryStatusText, fontWeight: "700" }]}>
+              {statusText}
+            </Text>
+            <View style={styles.dot} />
+            <Text style={[styles.metaText, { color: THEME.primary, fontWeight: "700" }]}>
+              {toTitle(item.specialty)}
+            </Text>
           </View>
 
-          <Text style={styles.queueText}>
-            {item.status === "QUEUE LIVE"
-              ? `Live Queue (${item.liveQueueCount} patients)`
-              : `Opens at ${item.nextAvailable}`}
-          </Text>
-          <Text style={styles.nextAvailableText}>Next available: {item.nextAvailable}</Text>
+          {isLive ? (
+            <View style={styles.tagRow}>
+              <View style={styles.tagBadge}>
+                <Text style={styles.tagText}>{`${item.liveQueueCount} waiting`}</Text>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.actionsRow}>
             <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.88} onPress={onView}>
-              <Text style={styles.secondaryButtonText}>View</Text>
+              <Text style={styles.secondaryButtonText}>View Details</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.primaryButton} activeOpacity={0.88} onPress={onBook}>
-              <Text style={styles.primaryButtonText}>Book Appointment</Text>
+              <Text style={styles.primaryButtonText}>{primaryCopy}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -290,6 +286,7 @@ export default function MedicalCenterHubScreen() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("ALL");
+  const [favoriteBusyIds, setFavoriteBusyIds] = useState<string[]>([]);
 
   const loadCenters = useCallback(async (showSpinner = true) => {
     try {
@@ -300,7 +297,13 @@ export default function MedicalCenterHubScreen() {
       }
 
       setError(null);
-      const response = await apiFetch("/api/clinics");
+      const [response, favorites] = await Promise.all([
+        apiFetch("/api/clinics"),
+        getFavorites().catch((favoriteError) => {
+          console.error("Load medical center favorites error:", favoriteError);
+          return null;
+        }),
+      ]);
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -309,7 +312,15 @@ export default function MedicalCenterHubScreen() {
         );
       }
 
-      setCenters(parseCenters(payload));
+      const favoriteIds = new Set(
+        (favorites?.medicalCenters ?? []).map((center) => String(center.entityId))
+      );
+      setCenters(
+        parseCenters(payload).map((center) => ({
+          ...center,
+          isFavorite: favoriteIds.has(center.id),
+        }))
+      );
     } catch (err) {
       console.error("Load clinics error:", err);
       setCenters([]);
@@ -320,9 +331,12 @@ export default function MedicalCenterHubScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadCenters();
-  }, [loadCenters]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadCenters(centers.length === 0);
+      return undefined;
+    }, [centers.length, loadCenters])
+  );
 
   const filteredCenters = useMemo(() => {
     let next = [...centers];
@@ -352,48 +366,87 @@ export default function MedicalCenterHubScreen() {
     return next;
   }, [activeFilter, centers, search]);
 
-  const toggleFavorite = useCallback((id: string) => {
+  const toggleFavorite = useCallback(async (id: string) => {
+    if (favoriteBusyIds.includes(id)) return;
+
+    const center = centers.find((entry) => entry.id === id);
+    if (!center) return;
+
+    const isFavorite = center.isFavorite;
+    setFavoriteBusyIds((current) => [...current, id]);
     setCenters((prev) =>
-      prev.map((center) =>
-        center.id === id ? { ...center, isFavorite: !center.isFavorite } : center
-      )
+      prev.map((entry) => (entry.id === id ? { ...entry, isFavorite: !isFavorite } : entry))
     );
-  }, []);
 
-  const renderHeader = useCallback(
+    try {
+      await toggleFavoriteRequest("medical_center", id, isFavorite);
+    } catch (err) {
+      console.error("Toggle medical center favorite error:", err);
+      setCenters((prev) =>
+        prev.map((entry) => (entry.id === id ? { ...entry, isFavorite } : entry))
+      );
+    } finally {
+      setFavoriteBusyIds((current) => current.filter((entry) => entry !== id));
+    }
+  }, [centers, favoriteBusyIds]);
+
+  const renderFixedHeader = useCallback(
     () => (
-      <View style={styles.headerBlock}>
-        <Text style={styles.screenTitle}>Medical Centers</Text>
-        <Text style={styles.screenSubtitle}>Find your clinic, check queue status, and book faster.</Text>
-
-        <View style={styles.searchWrap}>
-          <Ionicons name="search-outline" size={18} color={THEME.textMuted} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search clinic or specialty"
-            placeholderTextColor={THEME.textMuted}
-            style={styles.searchInput}
-          />
+      <View>
+        <View style={styles.headerBlock}>
+          <View style={styles.headerTopRow}>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              activeOpacity={0.88}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="chevron-back" size={22} color={THEME.white} />
+            </TouchableOpacity>
+            <View style={styles.headerTitleWrap}>
+              <Text style={styles.eyebrow}>Patient Care</Text>
+              <Text style={styles.screenTitle}>Medical Centers</Text>
+            </View>
+            <View style={styles.resultBadge}>
+              <Text style={styles.resultBadgeValue}>{filteredCenters.length}</Text>
+              <Text style={styles.resultBadgeLabel}>found</Text>
+            </View>
+          </View>
         </View>
 
-        <FlatList
-          horizontal
-          data={FILTERS}
-          keyExtractor={(item) => item.key}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtersContent}
-          renderItem={({ item }) => (
-            <FilterChip
-              label={item.label}
-              active={activeFilter === item.key}
-              onPress={() => setActiveFilter(item.key)}
-            />
-          )}
-        />
+        <View style={styles.searchSection}>
+          <View style={styles.searchShell}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={18} color={THEME.modernMuted} />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search clinic or specialty"
+                placeholderTextColor={THEME.modernMuted}
+                style={styles.searchInput}
+              />
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.filtersPanel}>
+          <FlatList
+            horizontal
+            data={FILTERS}
+            keyExtractor={(item) => item.key}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filtersContent}
+            renderItem={({ item }) => (
+              <FilterChip
+                label={item.label}
+                active={activeFilter === item.key}
+                onPress={() => setActiveFilter(item.key)}
+              />
+            )}
+          />
+        </View>
       </View>
     ),
-    [activeFilter, search]
+    [activeFilter, filteredCenters.length, search]
   );
 
   const renderCenterCard = useCallback(
@@ -414,14 +467,23 @@ export default function MedicalCenterHubScreen() {
           })
         }
         onBook={() =>
-          navigation.navigate("DoctorSearchScreen", {
+          navigation.navigate("PatientClinicDetails", {
+            clinicId: item.id,
+            clinicName: item.name,
+            location: item.location,
+            status: item.status,
+            image: item.image,
+            rating: item.rating,
+            waitTime: item.waitTime,
+            nextAvailable: item.nextAvailable,
             specialty: item.specialty,
           })
         }
-        onToggleFavorite={() => toggleFavorite(item.id)}
+        onToggleFavorite={() => void toggleFavorite(item.id)}
+        favoriteBusy={favoriteBusyIds.includes(item.id)}
       />
     ),
-    [navigation, toggleFavorite]
+    [favoriteBusyIds, navigation, toggleFavorite]
   );
 
   const renderEmpty = useCallback(
@@ -450,21 +512,24 @@ export default function MedicalCenterHubScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={HEADER_NAVY} />
+      <LinearGradient colors={[THEME.modernPrimary, "#1E293B"]} style={styles.headerBackground} />
+      {renderFixedHeader()}
       {loading ? (
         <FlatList
+          style={styles.list}
           data={[1, 2, 3]}
           keyExtractor={(item) => String(item)}
-          ListHeaderComponent={renderHeader}
           contentContainerStyle={styles.listContent}
           renderItem={() => <LoadingCard />}
           showsVerticalScrollIndicator={false}
         />
       ) : (
         <FlatList
+          style={styles.list}
           data={filteredCenters}
           keyExtractor={(item) => item.id}
           renderItem={renderCenterCard}
-          ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -486,35 +551,116 @@ export default function MedicalCenterHubScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: THEME.modernBackground,
+  },
+  headerBackground: {
+    position: "absolute",
+    top: 0,
+    width: "100%",
+    height: 190,
+  },
+  list: {
+    flex: 1,
+    backgroundColor: THEME.modernBackground,
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 2,
     paddingBottom: 120,
   },
   headerBlock: {
-    marginBottom: 18,
+    width: "100%",
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 0,
+    minHeight: 112,
+  },
+  headerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 0,
+  },
+  headerIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerTitleWrap: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 2,
+  },
+  eyebrow: {
+    color: "rgba(255,255,255,0.64)",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+    marginBottom: 4,
+    textTransform: "uppercase",
   },
   screenTitle: {
     fontSize: 28,
-    fontWeight: "800",
-    color: THEME.textPrimary,
-    marginBottom: 6,
+    fontWeight: "900",
+    color: THEME.white,
+    marginBottom: 0,
+    textAlign: "center",
   },
-  screenSubtitle: {
-    fontSize: 14,
-    color: THEME.textSecondary,
-    marginBottom: 16,
+  resultBadge: {
+    width: 52,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    marginBottom: 0,
+  },
+  resultBadgeValue: {
+    color: THEME.white,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  resultBadgeLabel: {
+    color: "rgba(255,255,255,0.64)",
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 1,
+  },
+  searchSection: {
+    marginTop: -8,
+    marginBottom: 10,
+    paddingHorizontal: 16,
+    zIndex: 10,
+  },
+  searchShell: {
+    borderRadius: 32,
+    padding: 4,
+    backgroundColor: "rgba(255,255,255,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.65)",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.12,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: THEME.white,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginBottom: 14,
-    ...SHADOW,
+    borderRadius: 28,
+    paddingHorizontal: 18,
+    height: 52,
+    borderWidth: 1,
+    borderColor: "rgba(191, 219, 254, 0.9)",
   },
   searchInput: {
     flex: 1,
@@ -522,20 +668,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: THEME.textPrimary,
   },
+  filtersPanel: {
+    paddingHorizontal: 16,
+    marginTop: 0,
+    marginBottom: 12,
+  },
   filtersContent: {
-    paddingRight: 8,
+    paddingRight: 16,
   },
   filterChip: {
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: THEME.chipBg,
     paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 20,
     marginRight: 10,
+    backgroundColor: THEME.white,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   filterChipActive: {
-    backgroundColor: THEME.chipActive,
+    backgroundColor: THEME.primary,
+    borderColor: THEME.primary,
   },
   filterChipText: {
     fontSize: 13,
@@ -543,144 +695,113 @@ const styles = StyleSheet.create({
     color: THEME.textSecondary,
   },
   filterChipTextActive: {
-    color: THEME.primary,
+    color: THEME.white,
   },
   cardWrap: {
-    marginBottom: 18,
+    marginBottom: 16,
   },
   card: {
     backgroundColor: THEME.white,
     borderRadius: 20,
     overflow: "hidden",
-    ...SHADOW,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 15,
+    elevation: 4,
   },
-  imageWrap: {
-    height: 140,
+  cardImage: { width: "100%", height: 130, backgroundColor: "#E5E7EB" },
+  imagePlaceholder: {
     width: "100%",
+    height: 130,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  cardImage: {
-    width: "100%",
-    height: "100%",
-  },
-  statusBadge: {
-    position: "absolute",
-    top: 12,
-    right: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  statusBadgeText: {
-    color: THEME.white,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-  },
-  cardContent: {
-    padding: 16,
-  },
-  cardHeaderRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 10,
-  },
+  cardContent: { padding: 16 },
+  cardHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardHeaderText: {
     flex: 1,
-    paddingRight: 12,
+    minWidth: 0,
   },
   cardTitle: {
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "700",
     color: THEME.textPrimary,
-    marginBottom: 4,
   },
-  locationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  locationText: {
-    marginLeft: 5,
-    fontSize: 13,
+  locationLabel: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: "600",
     color: THEME.textSecondary,
   },
+  cardHeaderActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  ratingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFFBEB",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  ratingText: { fontSize: 12, fontWeight: "700", color: THEME.star },
   favoriteButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#F8FAFC",
-    alignItems: "center",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F9FAFB",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  metricsRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-  },
-  metricPill: {
-    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: "#F8FAFC",
-    marginRight: 8,
   },
-  metricText: {
-    marginLeft: 5,
-    fontSize: 12,
-    color: THEME.textPrimary,
-    fontWeight: "700",
+  favoriteButtonDisabled: {
+    opacity: 0.55,
   },
-  queueText: {
-    fontSize: 13,
-    color: THEME.textPrimary,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  nextAvailableText: {
-    fontSize: 13,
-    color: THEME.primary,
-    fontWeight: "600",
-    marginBottom: 14,
-  },
+  metaRow: { flexDirection: "row", alignItems: "center", marginTop: 6 },
+  metaText: { fontSize: 13, color: THEME.textSecondary },
+  dot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: THEME.border, marginHorizontal: 8 },
+  tagRow: { flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" },
+  tagBadge: { backgroundColor: "#F3F4F6", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  tagText: { fontSize: 11, fontWeight: "600", color: THEME.textSecondary },
   actionsRow: {
     flexDirection: "row",
+    marginTop: 12,
   },
   secondaryButton: {
     flex: 1,
-    height: 46,
-    borderRadius: 12,
+    height: 44,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: THEME.border,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: THEME.white,
   },
   secondaryButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
     color: THEME.textPrimary,
   },
   primaryButton: {
-    flex: 1.45,
-    height: 46,
-    borderRadius: 12,
+    flex: 1.3,
+    height: 44,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: THEME.primary,
   },
   primaryButtonText: {
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 13,
+    fontWeight: "700",
     color: THEME.white,
   },
   emptyState: {
     backgroundColor: THEME.white,
-    borderRadius: 20,
+    borderRadius: 28,
     padding: 24,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: THEME.modernBorder,
     ...SHADOW,
   },
   emptyTitle: {
@@ -698,7 +819,7 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     marginTop: 14,
-    backgroundColor: THEME.primary,
+    backgroundColor: THEME.modernAccentDark,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 999,
@@ -709,37 +830,59 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   skeletonImage: {
-    height: 140,
+    width: "100%",
+    height: 130,
     backgroundColor: "#E9EEF5",
   },
+  skeletonHeaderText: {
+    flex: 1,
+  },
   skeletonTitle: {
-    width: "58%",
+    width: "68%",
     height: 18,
     borderRadius: 8,
     backgroundColor: "#E9EEF5",
     marginBottom: 10,
   },
   skeletonLine: {
-    width: "42%",
+    width: "48%",
     height: 14,
     borderRadius: 7,
     backgroundColor: "#EEF2F7",
-    marginBottom: 14,
+  },
+  skeletonCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EEF2F7",
   },
   skeletonMetaRow: {
-    flexDirection: "row",
-    marginBottom: 16,
-  },
-  skeletonBadge: {
-    width: 88,
-    height: 28,
-    borderRadius: 12,
+    width: "48%",
+    height: 14,
+    borderRadius: 7,
     backgroundColor: "#EEF2F7",
-    marginRight: 10,
+    marginTop: 12,
   },
-  skeletonButton: {
-    height: 46,
-    borderRadius: 12,
+  skeletonTagRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  skeletonTag: {
+    width: 110,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: "#EEF2F7",
+  },
+  skeletonActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  skeletonButtonHalf: {
+    flex: 1,
+    height: 44,
+    borderRadius: 16,
     backgroundColor: "#E9EEF5",
   },
 });

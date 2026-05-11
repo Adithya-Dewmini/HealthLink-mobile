@@ -2,12 +2,12 @@ import React, { type PropsWithChildren } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { AUTH_COLORS } from "./authTheme";
 
 type Props = PropsWithChildren<{

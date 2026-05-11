@@ -4,28 +4,62 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ScrollView,
+  Alert,
 } from "react-native";
+import * as Calendar from "expo-calendar";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
+import {
+  formatLocalDateKey,
+  parseSessionDate,
+} from "../../utils/sessionPresentation";
 
-const THEME = {
-  background: "#F2F5F9",
-  white: "#FFFFFF",
-  textDark: "#1A1C1E",
-  textGray: "#6A6D7C",
-  accentBlue: "#2196F3",
-  softBlue: "#E3F2FD",
-  accentGreen: "#4CAF50",
-  softGreen: "#E8F5E9",
-  border: "#E0E6ED",
-};
+const THEME = patientTheme.colors;
+
+function parseTimePart(label: string) {
+  const match = label.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] ?? "0");
+  const meridiem = match[3].toUpperCase();
+
+  if (meridiem === "PM" && hours !== 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+
+  return { hours, minutes };
+}
+
+function buildCalendarRange(baseDate: Date, clinicTime: string) {
+  const normalized = clinicTime.replace(/[–—]/g, "-");
+  const [startLabelRaw, endLabelRaw] = normalized.split("-").map((part) => part.trim()).filter(Boolean);
+  const startTime = parseTimePart(startLabelRaw);
+  if (!startTime) return null;
+
+  const start = new Date(baseDate);
+  start.setHours(startTime.hours, startTime.minutes, 0, 0);
+
+  const end = new Date(start);
+  const endTime = endLabelRaw ? parseTimePart(endLabelRaw) : null;
+
+  if (endTime) {
+    end.setHours(endTime.hours, endTime.minutes, 0, 0);
+    if (end <= start) {
+      end.setDate(end.getDate() + 1);
+    }
+  } else {
+    end.setHours(end.getHours() + 1);
+  }
+
+  return { start, end };
+}
 
 export default function AppointmentSummaryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
@@ -34,17 +68,19 @@ export default function AppointmentSummaryScreen() {
   const {
     doctorName = "Dr. Silva",
     clinicName = "Family Care Clinic",
+    clinicId,
     specialty = "General Physician",
-    date = new Date().toISOString(),
+    date = formatLocalDateKey(new Date()),
     clinicTime = "9:00 AM – 12:00 PM",
     tokenNumber = "13",
     nowServing = "08",
     estimatedWait = "25 min",
     queueOpensAt = "8:45 AM",
     doctorId,
+    sessionId,
   } = route?.params ?? {};
 
-  const selectedDate = new Date(date);
+  const selectedDate = parseSessionDate(String(date)) ?? new Date();
   const isSameDay = (d1: Date, d2: Date) =>
     d1.getDate() === d2.getDate() &&
     d1.getMonth() === d2.getMonth() &&
@@ -57,31 +93,60 @@ export default function AppointmentSummaryScreen() {
     (selectedDate.getFullYear() === today.getFullYear() &&
       (selectedDate.getMonth() > today.getMonth() ||
         (selectedDate.getMonth() === today.getMonth() && selectedDate.getDate() > today.getDate())));
+  const appointmentRange = buildCalendarRange(selectedDate, clinicTime);
+
+  const handleAddToCalendar = async () => {
+    if (!appointmentRange) {
+      Alert.alert("Unable to add event", "The appointment time is invalid.");
+      return;
+    }
+
+    try {
+      const isCalendarAvailable = await Calendar.isAvailableAsync();
+      if (!isCalendarAvailable) {
+        Alert.alert("Unable to open calendar", "Calendar is not available on this device.");
+        return;
+      }
+
+      await Calendar.createEventInCalendarAsync({
+        title: `Appointment with ${doctorName}`,
+        startDate: appointmentRange.start,
+        endDate: appointmentRange.end,
+        location: "Floor 2, Room 204",
+        notes: `Clinic: ${clinicName}\nSpecialty: ${specialty}\nReminder: 1 hour before`,
+      });
+    } catch (error) {
+      console.log("Add to calendar error:", error);
+      Alert.alert("Unable to add event", "The calendar dialog could not be opened.");
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
-      <TouchableOpacity
-        style={[styles.closeBtn, { top: insets.top + 8 }]}
-        onPress={() => navigation.goBack()}
-      >
-        <Ionicons name="close" size={20} color={THEME.textDark} />
-      </TouchableOpacity>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.heroStart} />
+      <View style={[styles.topBackdrop, { height: insets.top + 240 }]} />
+      <SafeAreaView style={styles.safe}>
+        <TouchableOpacity
+          style={[styles.closeBtn, { top: insets.top + 12 }]}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="close" size={20} color={THEME.textDark} />
+        </TouchableOpacity>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.successHeader}>
-          <View style={styles.checkIcon}>
-            <Ionicons name="checkmark-circle" size={80} color={THEME.accentGreen} />
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.successHeader}>
+            <View style={styles.checkIcon}>
+              <Ionicons name="checkmark-circle" size={80} color={THEME.accentGreen} />
+            </View>
+            <Text style={styles.confirmTitle}>
+              {isFuture ? "Appointment Reserved!" : "Appointment Confirmed!"}
+            </Text>
+            <Text style={styles.confirmSub}>
+              {isFuture ? "Your slot is secured for next week" : `You're all set to see ${doctorName}`}
+            </Text>
           </View>
-          <Text style={styles.confirmTitle}>
-            {isFuture ? "Appointment Reserved!" : "Appointment Confirmed!"}
-          </Text>
-          <Text style={styles.confirmSub}>
-            {isFuture ? "Your slot is secured for next week" : `You're all set to see ${doctorName}`}
-          </Text>
-        </View>
 
-        {isFuture ? (
+          {isFuture ? (
           <View style={styles.ticketCard}>
             <View style={styles.ticketTop}>
               <View style={styles.docAvatar}>
@@ -225,70 +290,89 @@ export default function AppointmentSummaryScreen() {
           </View>
         </View>
 
-        <View style={styles.actionGroup}>
-          {isToday && (
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={() => navigation.navigate("PatientQueue", { doctorId })}
-              disabled={!doctorId}
-            >
-              <Ionicons name="notifications-outline" size={20} color={THEME.white} />
-              <Text style={styles.primaryBtnText}>Notify Me</Text>
-            </TouchableOpacity>
-          )}
-          {isFuture && (
-            <TouchableOpacity style={styles.primaryBtn}>
-              <Ionicons name="calendar-outline" size={20} color={THEME.white} />
-              <Text style={styles.primaryBtnText}>Add to Calendar</Text>
-            </TouchableOpacity>
-          )}
+          <View style={styles.actionGroup}>
+            {isToday && (
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => navigation.navigate("PatientQueue", { doctorId, clinicId, sessionId })}
+                disabled={!doctorId}
+              >
+                <Ionicons name="notifications-outline" size={20} color={THEME.white} />
+                <Text style={styles.primaryBtnText}>Notify Me</Text>
+              </TouchableOpacity>
+            )}
+            {isFuture && (
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => void handleAddToCalendar()}>
+                <Ionicons name="calendar-outline" size={20} color={THEME.white} />
+                <Text style={styles.primaryBtnText}>Add to Calendar</Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={styles.secondaryBtn}
-            onPress={() => navigation.navigate("Appointments")}
-          >
-            <Text style={styles.secondaryBtnText}>View Appointments</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => navigation.navigate("Appointments")}
+            >
+              <Text style={styles.secondaryBtnText}>View Appointments</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.background },
-  scrollContent: { padding: 24, alignItems: "center" },
+  container: { flex: 1, backgroundColor: THEME.modernBackground },
+  topBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: THEME.heroStart,
+  },
+  safe: { flex: 1, backgroundColor: "transparent" },
+  scrollContent: { padding: 24, paddingTop: 0, paddingBottom: 32, alignItems: "center" },
   closeBtn: {
     position: "absolute",
-    top: 16,
+    top: 8,
     left: 16,
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 14,
     backgroundColor: THEME.white,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
+    shadowColor: "#0F172A",
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 4,
     zIndex: 2,
+    borderWidth: 1,
+    borderColor: "rgba(3, 4, 94, 0.06)",
   },
 
-  successHeader: { alignItems: "center", marginBottom: 30 },
+  successHeader: {
+    alignItems: "center",
+    marginBottom: 20,
+    paddingTop: 28,
+    paddingBottom: 20,
+    width: "100%",
+  },
   checkIcon: { marginBottom: 15 },
-  confirmTitle: { fontSize: 24, fontWeight: "bold", color: THEME.textDark },
+  confirmTitle: { fontSize: 24, fontWeight: "800", color: THEME.textDark },
   confirmSub: { fontSize: 14, color: THEME.textGray, marginTop: 5 },
 
   ticketCard: {
     width: "100%",
     backgroundColor: THEME.white,
-    borderRadius: 30,
+    borderRadius: 24,
     elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.07,
     shadowRadius: 20,
     marginBottom: 25,
+    borderWidth: 1,
+    borderColor: THEME.modernBorder,
   },
   ticketTop: {
     padding: 24,
@@ -387,7 +471,7 @@ const styles = StyleSheet.create({
 
   actionGroup: { width: "100%", gap: 15 },
   primaryBtn: {
-    backgroundColor: THEME.accentBlue,
+    backgroundColor: THEME.modernAccent,
     height: 60,
     borderRadius: 20,
     flexDirection: "row",
@@ -395,14 +479,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     elevation: 8,
-    shadowColor: THEME.accentBlue,
+    shadowColor: THEME.modernAccent,
     shadowOpacity: 0.3,
     shadowRadius: 15,
   },
   primaryBtnText: { color: THEME.white, fontSize: 16, fontWeight: "bold" },
   secondaryBtn: {
     height: 50,
-    backgroundColor: "#000000",
+    backgroundColor: THEME.modernPrimary,
     borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",

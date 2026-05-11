@@ -1,54 +1,57 @@
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { Alert } from "react-native";
-import { useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useState } from "react";
 import { useAuth } from "../utils/AuthContext";
 
-type PermissionKey = "can_manage_queue" | "can_manage_appointments" | "can_check_in";
+type PermissionKey =
+  | "queue_access"
+  | "appointments"
+  | "check_in"
+  | "schedule_management";
 
 export const useReceptionPermissionGuard = (
   taskName: string,
-  requiredPermission: PermissionKey
+  requiredPermission: PermissionKey,
+  enabled = true
 ) => {
-  const navigation = useNavigation<any>();
   const {
     receptionistPermissions,
     pendingPermissionUpdate,
     refreshReceptionPermissions,
     setActiveTask,
   } = useAuth();
+  const [hasAccess, setHasAccess] = useState(
+    enabled ? Boolean(receptionistPermissions[requiredPermission]) : true
+  );
 
   useFocusEffect(
     useCallback(() => {
+      if (!enabled) {
+        setHasAccess(true);
+        return () => {
+          setActiveTask(null);
+        };
+      }
+
       let active = true;
 
       const run = async () => {
         try {
-          let effectivePermissions = receptionistPermissions;
-
-          if (pendingPermissionUpdate) {
-            effectivePermissions = await refreshReceptionPermissions();
-          }
+          const effectivePermissions =
+            pendingPermissionUpdate || enabled
+              ? await refreshReceptionPermissions()
+              : receptionistPermissions;
 
           if (!active) {
             return;
           }
 
           if (!effectivePermissions[requiredPermission]) {
-            Alert.alert(
-              "Access Updated",
-              "Your access has changed. You no longer have permission to use this feature.",
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    navigation.navigate("ReceptionistHome");
-                  },
-                },
-              ]
-            );
+            setHasAccess(false);
+            setActiveTask(null);
             return;
           }
 
+          setHasAccess(true);
           setActiveTask(taskName);
         } catch {
           if (!active) {
@@ -56,10 +59,12 @@ export const useReceptionPermissionGuard = (
           }
 
           if (!receptionistPermissions[requiredPermission]) {
-            navigation.navigate("ReceptionistHome");
+            setHasAccess(false);
+            setActiveTask(null);
             return;
           }
 
+          setHasAccess(true);
           setActiveTask(taskName);
         }
       };
@@ -71,13 +76,15 @@ export const useReceptionPermissionGuard = (
         setActiveTask(null);
       };
     }, [
-      navigation,
       pendingPermissionUpdate,
       receptionistPermissions,
       refreshReceptionPermissions,
       requiredPermission,
+      enabled,
       setActiveTask,
       taskName,
     ])
   );
+
+  return hasAccess;
 };

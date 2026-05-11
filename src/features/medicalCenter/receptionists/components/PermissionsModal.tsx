@@ -33,24 +33,29 @@ export function PermissionsModal({
   onToggle: (key: keyof ReceptionistPermissions) => void;
 }) {
   const permissionItems: Array<{
-    key: keyof ReceptionistPermissions;
+    key: Extract<keyof ReceptionistPermissions, string>;
     label: string;
     description: string;
   }> = [
     {
-      key: "can_manage_queue",
+      key: "queue_access",
       label: "Queue Access",
       description: "Allow managing queue flow and token progress.",
     },
     {
-      key: "can_manage_appointments",
+      key: "appointments",
       label: "Appointments",
       description: "Allow creating and managing appointments.",
     },
     {
-      key: "can_check_in",
+      key: "check_in",
       label: "Check-in",
       description: "Allow patient check-in and registration actions.",
+    },
+    {
+      key: "schedule_management",
+      label: "Schedule Management",
+      description: "Allow creating and managing doctor clinic sessions.",
     },
   ];
 

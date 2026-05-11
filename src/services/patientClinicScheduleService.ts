@@ -2,6 +2,7 @@ import { apiFetch } from "../config/api";
 
 export type ClinicDoctorSession = {
   id: number;
+  medical_center_id: string;
   date: string;
   start_time: string;
   end_time: string;

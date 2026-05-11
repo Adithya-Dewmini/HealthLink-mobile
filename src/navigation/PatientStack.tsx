@@ -8,12 +8,15 @@ import HeartRate from "../screens/patient/HeartRate";
 import Sleep from "../screens/patient/Sleep";
 import MedicalHistoryScreen from "../screens/patient/MedicalHistoryScreen";
 import DoctorSearchScreen from "../screens/patient/DoctorSearchScreen";
+import PatientDoctorDetailsScreen from "../screens/patient/PatientDoctorDetailsScreen";
 import DoctorAvailabilityScreen from "../screens/patient/DoctorAvailabilityScreen";
 import Appointments from "../screens/patient/Appointments";
 import BookAppointmentScreen from "../screens/patient/BookAppointmentScreen";
 import AppointmentSummaryScreen from "../screens/patient/AppointmentSummaryScreen";
 import ProfileEditScreen from "../screens/profile/ProfileEditScreen";
 import PrescriptionDetails from "../screens/patient/PrescriptionDetails";
+import PrescriptionFulfillmentScreen from "../screens/patient/PrescriptionFulfillmentScreen";
+import SubstitutionApprovalScreen from "../screens/patient/SubstitutionApprovalScreen";
 import Prescriptions from "../screens/patient/Prescriptions";
 import MedicineTracker from "../screens/patient/MedicineTracker";
 import UploadPrescriptionScreen from "../screens/patient/UploadPrescriptionScreen";
@@ -22,7 +25,14 @@ import SymptomCheckerScreen from "../screens/patient/SymptomCheckerScreen";
 import MedicineSearchScreen from "../screens/patient/MedicineSearchScreen";
 import PharmacyMarketplace from "../screens/patient/PharmacyMarketplace";
 import PharmacyStoreScreen from "../screens/patient/PharmacyStoreScreen";
+import PharmacyProductDetailsScreen from "../screens/patient/PharmacyProductDetailsScreen";
+import CartScreen from "../screens/patient/CartScreen";
+import CheckoutScreen from "../screens/patient/CheckoutScreen";
+import OrdersScreen from "../screens/patient/OrdersScreen";
+import OrderDetailsScreen from "../screens/patient/OrderDetailsScreen";
 import MyHealthDashboard from "../screens/patient/MyHealthDashboard";
+import NotificationCenterScreen from "../screens/shared/NotificationCenterScreen";
+import ActivityFeedScreen from "../screens/shared/ActivityFeedScreen";
 
 const Stack = createNativeStackNavigator<PatientStackParamList>();
 
@@ -84,6 +94,12 @@ export default function PatientStack() {
       />
 
       <Stack.Screen
+        name="PatientDoctorDetails"
+        component={PatientDoctorDetailsScreen}
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
         name="DoctorAvailabilityScreen"
         component={DoctorAvailabilityScreen}
         options={{ headerShown: false }}
@@ -110,6 +126,16 @@ export default function PatientStack() {
       <Stack.Screen
         name="PrescriptionDetails"
         component={PrescriptionDetails}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PrescriptionFulfillment"
+        component={PrescriptionFulfillmentScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SubstitutionApproval"
+        component={SubstitutionApprovalScreen}
         options={{ headerShown: false }}
       />
 
@@ -159,10 +185,46 @@ export default function PatientStack() {
         component={PharmacyStoreScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen
+        name="PharmacyProductDetails"
+        component={PharmacyProductDetailsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Cart"
+        component={CartScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Checkout"
+        component={CheckoutScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Orders"
+        component={OrdersScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="OrderDetails"
+        component={OrderDetailsScreen}
+        options={{ headerShown: false }}
+      />
 
       <Stack.Screen
         name="MyHealthDashboard"
         component={MyHealthDashboard}
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
+        name="NotificationCenter"
+        component={NotificationCenterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ActivityFeed"
+        component={ActivityFeedScreen}
         options={{ headerShown: false }}
       />
 

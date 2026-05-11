@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useContext, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,7 +18,7 @@ import AuthInput from "../../components/auth/AuthInput";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
 
 export default function RegisterMedicalCenter({ navigation }: any) {
-  const { refreshAuth } = useContext(AuthContext);
+  const { login } = useContext(AuthContext);
   const [step, setStep] = useState(1);
   const [centerName, setCenterName] = useState("");
   const [location, setLocation] = useState("");
@@ -33,7 +32,6 @@ export default function RegisterMedicalCenter({ navigation }: any) {
   const [verificationDocument, setVerificationDocument] = useState<UploadableAsset | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const rootNavigation = navigation.getParent();
   const TOTAL_STEPS = 3;
 
   const parsedSpecialties = useMemo(
@@ -119,29 +117,23 @@ export default function RegisterMedicalCenter({ navigation }: any) {
       return;
     }
 
-    const documentAsset = verificationDocument;
-
     setLoading(true);
     setError("");
 
     try {
       const formData = new FormData();
-      formData.append("centerName", centerName);
+      formData.append("center_name", centerName);
       formData.append("location", location);
       formData.append("address", address || location);
       formData.append("phone", phone);
-      formData.append("centerEmail", centerEmail);
-      formData.append("adminName", adminName);
-      formData.append("adminEmail", adminEmail);
+      formData.append("center_email", centerEmail);
+      formData.append("admin_name", adminName);
+      formData.append("admin_email", adminEmail);
       formData.append("password", password);
-      formData.append("specialties", JSON.stringify(parsedSpecialties));
-      formData.append("verificationDocument", {
-        uri: documentAsset.uri,
-        name: documentAsset.name,
-        type: documentAsset.type,
-      } as any);
+      formData.append("specialties", parsedSpecialties.join(","));
+      formData.append("verification_document", verificationDocument as any);
 
-      const response = await api.post("/auth/register-medical-center", formData, {
+      const response = await api.post("/api/auth/register-medical-center", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -152,17 +144,7 @@ export default function RegisterMedicalCenter({ navigation }: any) {
         throw new Error("Registration succeeded without a token");
       }
 
-      await AsyncStorage.setItem("token", token);
-      await refreshAuth();
-
-      rootNavigation?.navigate("AuthSuccess", {
-        icon: "shield-checkmark",
-        title: "Registration submitted",
-        subtitle: "Your medical center account has been created.",
-        message: "Your account is under verification. You will be notified once approved.",
-        actionLabel: "Go to Dashboard",
-        target: "MedicalCenterTabs",
-      });
+      await login(response.data?.user ?? null, token);
     } catch (caughtError: any) {
       const message =
         typeof caughtError?.response?.data?.message === "string"

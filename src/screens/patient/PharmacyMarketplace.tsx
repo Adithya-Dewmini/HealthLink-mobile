@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -6,130 +6,162 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  SafeAreaView,
   Image,
   Dimensions,
   Modal,
   Pressable,
+  RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { addFavorite, getFavorites, removeFavorite } from "../../services/favoritesApi";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
+import { PatientEmptyState, PatientErrorState, PatientLoadingState } from "../../components/patient/PatientFeedback";
+import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../services/favoritesApi";
+import {
+  getPatientPharmacies,
+  type PatientPharmacy,
+} from "../../services/patientPharmacyService";
+import { patientTheme } from "../../constants/patientTheme";
 
 const { width } = Dimensions.get("window");
 
-const THEME = {
-  primary: "#2563EB",
-  background: "#F9FAFB",
-  white: "#FFFFFF",
-  textPrimary: "#111827",
-  textSecondary: "#6B7280",
-  border: "#E5E7EB",
-  success: "#10B981",
-  star: "#F59E0B",
-};
+const THEME = patientTheme.colors;
 
 export default function PharmacyMarketplace() {
-  const [activeFilter, setActiveFilter] = useState("Nearest");
+  const [activeFilter, setActiveFilter] = useState("All");
   const [isOpen, setIsOpen] = useState(false);
-  const [favoritePharmacyIds, setFavoritePharmacyIds] = useState<number[]>([]);
+  const [favoritePharmacyIds, setFavoritePharmacyIds] = useState<string[]>([]);
+  const [favoriteBusyIds, setFavoriteBusyIds] = useState<string[]>([]);
+  const [pharmacies, setPharmacies] = useState<PatientPharmacy[]>([]);
+  const [searchText, setSearchText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigation = useNavigation<any>();
 
-  const pharmacies = [
-    {
-      id: 1,
-      name: "Lanka Pharmacy - Central",
-      rating: "4.8",
-      distance: "0.8 km",
-      location: "Colombo",
-      status: "Open Now",
-      tags: ["Delivery", "E-Prescription"],
-      image: "https://images.unsplash.com/photo-1587854692152-cbe660dbbb88?q=80&w=1000&auto=format&fit=crop",
-    },
-    {
-      id: 2,
-      name: "MediHelp Wellness Center",
-      rating: "4.5",
-      distance: "1.4 km",
-      location: "Kandy",
-      status: "Open Now",
-      tags: ["24/7", "Drive-thru"],
-      image: "https://images.unsplash.com/photo-1631549916768-4119b2e5f926?q=80&w=1000&auto=format&fit=crop",
-    },
-    {
-      id: 3,
-      name: "City Care Healthcare",
-      rating: "4.2",
-      distance: "2.1 km",
-      location: "Galle",
-      status: "Closing Soon",
-      tags: ["In-store only"],
-      image: "https://images.unsplash.com/photo-1576602976047-174e57a47881?q=80&w=1000&auto=format&fit=crop",
-    },
-  ];
+  const loadPharmacies = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "initial") {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+    setError(null);
 
-  React.useEffect(() => {
-    const loadFavorites = async () => {
-      try {
-        const data = await getFavorites();
-        setFavoritePharmacyIds(data.pharmacies.map((pharmacy) => Number(pharmacy.id)));
-      } catch (err) {
-        console.error("Load favorite pharmacies error:", err);
-      }
-    };
-    loadFavorites();
+    try {
+      const [pharmacyData, favoriteData] = await Promise.all([
+        getPatientPharmacies(),
+        getFavorites().catch((favoriteError) => {
+          console.log("Load pharmacy favorites error:", favoriteError);
+          return { doctors: [], pharmacies: [], medicalCenters: [], items: [] };
+        }),
+      ]);
+      setPharmacies(pharmacyData);
+      setFavoritePharmacyIds(favoriteData.pharmacies.map((item) => String(item.entityId)));
+    } catch (err) {
+      console.log("Load pharmacies error:", err);
+      setError(err instanceof Error ? err.message : "Failed to load pharmacies");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      void loadPharmacies("initial");
+      return undefined;
+    }, [loadPharmacies])
+  );
+
+  const visiblePharmacies = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    return pharmacies.filter((pharmacy) => {
+      const matchesSearch =
+        query.length === 0 ||
+        pharmacy.name.toLowerCase().includes(query) ||
+        pharmacy.location.toLowerCase().includes(query);
+
+      const status = pharmacy.status.toLowerCase();
+      const verificationStatus = pharmacy.verificationStatus.toLowerCase();
+      const matchesFilter =
+        activeFilter === "All" ||
+        (activeFilter === "Open Now" && status.includes("open")) ||
+        (activeFilter === "Verified" && verificationStatus === "approved") ||
+        (activeFilter === "Top Rated" && (pharmacy.rating ?? 0) >= 4);
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [activeFilter, pharmacies, searchText]);
+
   const toggleFavorite = async (pharmacyId: number) => {
-    const isFavorite = favoritePharmacyIds.includes(pharmacyId);
+    const favoriteKey = String(pharmacyId);
+    if (favoriteBusyIds.includes(favoriteKey)) return;
+
+    const isFavorite = favoritePharmacyIds.includes(favoriteKey);
+    setFavoriteBusyIds((current) => [...current, favoriteKey]);
     setFavoritePharmacyIds((current) =>
-      isFavorite ? current.filter((id) => id !== pharmacyId) : [...current, pharmacyId]
+      isFavorite ? current.filter((id) => id !== favoriteKey) : [...current, favoriteKey]
     );
 
     try {
-      if (isFavorite) {
-        await removeFavorite(pharmacyId, "pharmacy");
-      } else {
-        await addFavorite(pharmacyId, "pharmacy");
-      }
+      await toggleFavoriteRequest("pharmacy", favoriteKey, isFavorite);
     } catch (err) {
+      console.log("Toggle pharmacy favorite error:", err);
       setFavoritePharmacyIds((current) =>
-        isFavorite ? [...current, pharmacyId] : current.filter((id) => id !== pharmacyId)
+        isFavorite ? [...current, favoriteKey] : current.filter((id) => id !== favoriteKey)
       );
-      console.error("Toggle pharmacy favorite error:", err);
+    } finally {
+      setFavoriteBusyIds((current) => current.filter((id) => id !== favoriteKey));
     }
   };
 
   return (
     <SafeAreaView style={styles.safe}>
+      <LinearGradient colors={[THEME.modernPrimary, "#1E293B"]} style={styles.headerBackground} />
+
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={22} color={THEME.textPrimary} />
+        <TouchableOpacity style={styles.headerIconBtn} onPress={() => navigation.goBack()} activeOpacity={0.88}>
+          <Ionicons name="chevron-back" size={22} color={THEME.white} />
         </TouchableOpacity>
-        <View>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerEyebrow}>Pharmacy Hub</Text>
           <Text style={styles.headerTitle}>Pharmacies</Text>
-          <Text style={styles.headerSub}>Find trusted pharmacies near you</Text>
         </View>
-        <TouchableOpacity style={styles.cartBtn}>
-          <Ionicons name="cart-outline" size={24} color={THEME.primary} />
+        <TouchableOpacity
+          style={styles.headerIconBtn}
+          activeOpacity={0.88}
+          onPress={() => navigation.navigate("Cart")}
+        >
+          <Ionicons name="cart-outline" size={22} color={THEME.white} />
           <View style={styles.badge} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.searchContainer}>
+      <View style={styles.searchContainer}>
+        <View style={styles.searchShell}>
           <View style={styles.searchBar}>
             <Ionicons name="search-outline" size={20} color={THEME.textSecondary} />
             <TextInput
               style={styles.searchInput}
               placeholder="Search pharmacy or medicine"
               placeholderTextColor={THEME.textSecondary}
+              value={searchText}
+              onChangeText={setSearchText}
             />
           </View>
         </View>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => void loadPharmacies("refresh")} />
+        }
+      >
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-          {["Nearest", "Open Now", "Top Rated", "24/7 Service"].map((filter) => (
+          {["All", "Open Now", "Verified", "Top Rated"].map((filter) => (
             <TouchableOpacity
               key={filter}
               onPress={() => setActiveFilter(filter)}
@@ -142,15 +174,28 @@ export default function PharmacyMarketplace() {
           ))}
         </ScrollView>
 
-        {pharmacies.map((pharmacy) => (
-          <PharmacyCard
-            key={pharmacy.id}
-            {...pharmacy}
-            isFavorite={favoritePharmacyIds.includes(pharmacy.id)}
-            onToggleFavorite={() => toggleFavorite(pharmacy.id)}
-            onPress={() => navigation.navigate("PharmacyStore", { pharmacyId: pharmacy.id })}
+        {loading ? (
+          <PatientLoadingState label="Loading pharmacies..." />
+        ) : error ? (
+          <PatientErrorState message={error} onRetry={() => void loadPharmacies()} />
+        ) : visiblePharmacies.length === 0 ? (
+          <PatientEmptyState
+            icon="storefront-outline"
+            title="No pharmacies found"
+            message="Try another search term or pull down to refresh."
           />
-        ))}
+        ) : (
+          visiblePharmacies.map((pharmacy) => (
+            <PharmacyCard
+              key={pharmacy.id}
+              pharmacy={pharmacy}
+              isFavorite={favoritePharmacyIds.includes(String(pharmacy.id))}
+              favoriteBusy={favoriteBusyIds.includes(String(pharmacy.id))}
+              onToggleFavorite={() => toggleFavorite(pharmacy.id)}
+              onPress={() => navigation.navigate("PharmacyStore", { pharmacyId: pharmacy.id })}
+            />
+          ))
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -231,27 +276,44 @@ export default function PharmacyMarketplace() {
 }
 
 const PharmacyCard = ({
-  name,
-  rating,
-  distance,
-  status,
-  tags,
-  image,
+  pharmacy,
   isFavorite,
+  favoriteBusy,
   onToggleFavorite,
   onPress,
-}: any) => (
+}: {
+  pharmacy: PatientPharmacy;
+  isFavorite: boolean;
+  favoriteBusy: boolean;
+  onToggleFavorite: () => void;
+  onPress: () => void;
+}) => (
   <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={onPress}>
-    <Image source={{ uri: image }} style={styles.cardImage} />
+    {pharmacy.imageUrl ? (
+      <Image source={{ uri: pharmacy.imageUrl }} style={styles.cardImage} />
+    ) : (
+      <View style={styles.imagePlaceholder}>
+        <Ionicons name="storefront-outline" size={34} color={THEME.primary} />
+      </View>
+    )}
     <View style={styles.cardContent}>
       <View style={styles.cardHeaderRow}>
-        <Text style={styles.cardName}>{name}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardName}>{pharmacy.name}</Text>
+          <Text style={styles.locationLabel}>{pharmacy.location}</Text>
+        </View>
         <View style={styles.cardHeaderActions}>
-          <View style={styles.ratingBox}>
-            <Ionicons name="star" size={14} color={THEME.star} />
-            <Text style={styles.ratingText}>{rating}</Text>
-          </View>
-          <TouchableOpacity style={styles.favoriteBtn} onPress={onToggleFavorite}>
+          {pharmacy.rating !== null ? (
+            <View style={styles.ratingBox}>
+              <Ionicons name="star" size={14} color={THEME.star} />
+              <Text style={styles.ratingText}>{pharmacy.rating.toFixed(1)}</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.favoriteBtn, favoriteBusy ? styles.favoriteBtnDisabled : null]}
+            onPress={onToggleFavorite}
+            disabled={favoriteBusy}
+          >
             <Ionicons
               name={isFavorite ? "heart" : "heart-outline"}
               size={20}
@@ -262,27 +324,25 @@ const PharmacyCard = ({
       </View>
 
       <View style={styles.metaRow}>
-        <Text style={styles.metaText}>{distance} away</Text>
-        <View style={styles.dot} />
-        <Text style={[styles.metaText, { color: THEME.success, fontWeight: "700" }]}>{status}</Text>
+        <Text style={[styles.metaText, { color: THEME.success, fontWeight: "700" }]}>
+          {pharmacy.status}
+        </Text>
+        {pharmacy.verificationStatus === "approved" ? (
+          <>
+            <View style={styles.dot} />
+            <Text style={[styles.metaText, { color: THEME.primary, fontWeight: "700" }]}>
+              Verified
+            </Text>
+          </>
+        ) : null}
       </View>
 
       <View style={styles.tagRow}>
-        {tags.map((tag: string) => (
+        {["QR prescription", "Patient handoff"].map((tag: string) => (
           <View key={tag} style={styles.tagBadge}>
             <Text style={styles.tagText}>{tag}</Text>
           </View>
         ))}
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.ctaRow}>
-        <Text style={styles.availabilityHint}>Popular medicines available</Text>
-        <TouchableOpacity style={styles.viewStoreBtn}>
-          <Text style={styles.viewStoreText}>View Store</Text>
-          <Ionicons name="arrow-forward" size={16} color={THEME.primary} />
-        </TouchableOpacity>
       </View>
     </View>
   </TouchableOpacity>
@@ -290,58 +350,104 @@ const PharmacyCard = ({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.background },
+  headerBackground: {
+    position: "absolute",
+    top: 0,
+    width: "100%",
+    height: 200,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
-    backgroundColor: THEME.white,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 18,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#EFF6FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  headerTitle: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
-  headerSub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  cartBtn: {
+  headerIconBtn: {
     width: 44,
     height: 44,
-    borderRadius: 12,
-    backgroundColor: "#EFF6FF",
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.12)",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
   },
+  headerTitleWrap: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  headerEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "rgba(255,255,255,0.64)",
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    marginBottom: 4,
+  },
+  headerTitle: { fontSize: 28, fontWeight: "900", color: THEME.white },
   badge: {
     position: "absolute",
-    top: 12,
-    right: 12,
+    top: 11,
+    right: 11,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: THEME.primary,
+    backgroundColor: "#EF4444",
     borderWidth: 2,
-    borderColor: "#EFF6FF",
+    borderColor: "rgba(15, 23, 42, 0.8)",
   },
-  scrollContent: { paddingHorizontal: 16 },
-  searchContainer: { marginVertical: 15 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 8 },
+  prototypeBanner: {
+    flexDirection: "row",
+    gap: 12,
+    padding: 14,
+    marginTop: 14,
+    borderRadius: 18,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#D7E8FF",
+  },
+  prototypeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.white,
+  },
+  prototypeTextWrap: { flex: 1 },
+  prototypeTitle: { fontSize: 15, fontWeight: "700", color: THEME.textPrimary },
+  prototypeText: { marginTop: 4, fontSize: 13, lineHeight: 19, color: THEME.textSecondary },
+  searchContainer: {
+    paddingHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    position: "relative",
+  },
+  searchShell: {
+    borderRadius: 32,
+    padding: 4,
+    backgroundColor: "rgba(255,255,255,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.65)",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.12,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: THEME.white,
-    borderRadius: 30,
+    borderRadius: 28,
     paddingHorizontal: 18,
     height: 52,
     borderWidth: 1,
-    borderColor: THEME.border,
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 10,
-    elevation: 2,
+    borderColor: "rgba(191, 219, 254, 0.9)",
   },
   searchInput: { flex: 1, marginLeft: 10, fontSize: 15, color: THEME.textPrimary },
   filterScroll: { marginBottom: 20, paddingBottom: 5 },
@@ -368,10 +474,18 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   cardImage: { width: "100%", height: 130, backgroundColor: "#E5E7EB" },
+  imagePlaceholder: {
+    width: "100%",
+    height: 130,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cardContent: { padding: 16 },
   cardHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   cardHeaderActions: { flexDirection: "row", alignItems: "center", gap: 10 },
-  cardName: { fontSize: 18, fontWeight: "800", color: THEME.textPrimary },
+  cardName: { fontSize: 18, fontWeight: "700", color: THEME.textPrimary },
+  locationLabel: { marginTop: 3, fontSize: 12, fontWeight: "600", color: THEME.textSecondary },
   ratingBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -381,7 +495,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
   },
-  ratingText: { fontSize: 12, fontWeight: "800", color: THEME.star },
+  ratingText: { fontSize: 12, fontWeight: "700", color: THEME.star },
   favoriteBtn: {
     width: 36,
     height: 36,
@@ -390,17 +504,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  favoriteBtnDisabled: {
+    opacity: 0.55,
+  },
   metaRow: { flexDirection: "row", alignItems: "center", marginTop: 6 },
   metaText: { fontSize: 13, color: THEME.textSecondary },
   dot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: THEME.border, marginHorizontal: 8 },
   tagRow: { flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" },
   tagBadge: { backgroundColor: "#F3F4F6", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
-  tagText: { fontSize: 11, fontWeight: "700", color: THEME.textSecondary },
-  divider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 15 },
-  ctaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  availabilityHint: { fontSize: 12, color: THEME.textSecondary, fontStyle: "italic" },
-  viewStoreBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  viewStoreText: { fontSize: 14, fontWeight: "800", color: THEME.primary },
+  tagText: { fontSize: 11, fontWeight: "600", color: THEME.textSecondary },
   fab: {
     position: "absolute",
     bottom: 130,
@@ -445,7 +557,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
     color: THEME.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -476,7 +588,7 @@ const styles = StyleSheet.create({
   sheetIconWarn: { backgroundColor: "#FEF3C7" },
   sheetIconPurple: { backgroundColor: "#F3E8FF" },
   sheetText: { flex: 1 },
-  sheetLabel: { fontSize: 16, fontWeight: "800", color: THEME.textPrimary },
+  sheetLabel: { fontSize: 16, fontWeight: "700", color: THEME.textPrimary },
   sheetDesc: { fontSize: 12, color: THEME.textSecondary, marginTop: 2 },
   sheetClose: { marginTop: 6, padding: 10, alignItems: "center" },
   sheetCloseText: { color: THEME.textSecondary, fontWeight: "700", fontSize: 14 },

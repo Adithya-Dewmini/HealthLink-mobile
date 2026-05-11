@@ -26,24 +26,26 @@ import {
 } from "../../services/doctorQueueService";
 import { connectSocket, joinDoctorRoom, joinSessionRoom, leaveSessionRoom, socket } from "../../services/socket";
 import { useAuth } from "../../utils/AuthContext";
+import { doctorColors, getDoctorStatusTone } from "../../constants/doctorTheme";
+import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
 
 const THEME = {
-  background: "#F3F6FB",
-  white: "#FFFFFF",
-  textDark: "#1F2937",
-  textGray: "#6B7280",
-  accentBlue: "#1E88E5",
-  accentBlueDark: "#1565C0",
-  softBlue: "#E7F1FE",
-  border: "#E6EDF5",
-  success: "#1E88E5",
-  softSuccess: "#ECFDF5",
-  warning: "#F5A05A",
-  danger: "#E05252",
-  softDanger: "#FDE9E9",
-  softWarning: "#FDEEDB",
-  softNeutral: "#EEF3F7",
-  cardDark: "#1B1E24",
+  background: doctorColors.background,
+  white: doctorColors.surface,
+  textDark: doctorColors.textPrimary,
+  textGray: doctorColors.textSecondary,
+  accentBlue: doctorColors.primary,
+  accentBlueDark: doctorColors.deep,
+  softBlue: "#EAF7F7",
+  border: doctorColors.border,
+  success: doctorColors.primary,
+  softSuccess: doctorColors.successBg,
+  warning: doctorColors.warningText,
+  danger: doctorColors.dangerText,
+  softDanger: doctorColors.dangerBg,
+  softWarning: doctorColors.warningBg,
+  softNeutral: "#EEF7F7",
+  cardDark: doctorColors.deep,
 };
 
 export default function QueueScreen() {
@@ -344,33 +346,6 @@ export default function QueueScreen() {
     }
   };
 
-  const handleCompleteConsultation = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
-      return;
-    }
-    try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) return;
-      const res = await callNextPatient(token);
-      if (res?.message) {
-        Toast.show({ type: "success", text1: res.message });
-      } else {
-        Toast.show({ type: "success", text1: "Patient marked completed" });
-      }
-      await loadDashboard();
-    } catch (error: any) {
-      if (isNotVerifiedError(error)) {
-        showApprovalRequiredToast();
-        return;
-      }
-      Toast.show({
-        type: "error",
-        text1: "Unable to complete consultation",
-      });
-    }
-  };
-
   const handleOpenConsultation = async () => {
     if (!isVerifiedDoctor) {
       showApprovalRequiredToast();
@@ -509,13 +484,19 @@ export default function QueueScreen() {
             <Text style={styles.title}>Patient Queue</Text>
             <Text style={styles.subtitle}>{queue?.name || "Daily Clinic"}</Text>
           </View>
-          <View style={[styles.liveBadge, { backgroundColor: queueStatusBg }]}>
-            <View
-              style={[styles.liveDot, { backgroundColor: queueStatusColor }]}
+        <View style={[styles.liveBadge, { backgroundColor: queueStatusBg }]}>
+            <ScheduleStatusBadge
+              label={queueStatusLabel}
+              tone={
+                queueStatus === "LIVE"
+                  ? "live"
+                  : queueStatus === "PAUSED"
+                    ? "conflict"
+                    : queueStatus === "ENDED"
+                      ? "completed"
+                      : "upcoming"
+              }
             />
-            <Text style={[styles.liveText, { color: queueStatusColor }]}>
-              {queueStatusLabel}
-            </Text>
           </View>
         </View>
 
@@ -539,16 +520,18 @@ export default function QueueScreen() {
           <View style={styles.heroActions}>
             <ActionTile
               icon="play"
-              label={isVerifiedDoctor ? "Start" : "Approval"}
+              label={isVerifiedDoctor ? "Start Clinic" : "Approval Needed"}
               color={THEME.accentBlue}
               disabled={isQueueEnded}
+              accessibilityLabel="Start clinic queue"
               onPress={handleStartQueue}
             />
             <ActionTile
               icon="play-forward"
-              label="Next"
+              label="Call Next"
               color={THEME.textDark}
               disabled={!isQueueLive}
+              accessibilityLabel="Call next patient"
               onPress={handleNextPatient}
             />
             <ActionTile
@@ -556,13 +539,15 @@ export default function QueueScreen() {
               label="Skip"
               color={THEME.warning}
               disabled={!isQueueLive}
+              accessibilityLabel="Skip current patient"
               onPress={handleSkipPatient}
             />
             <ActionTile
               icon="stop"
-              label="End"
+              label="End Clinic"
               color={THEME.danger}
               disabled={isQueueEnded}
+              accessibilityLabel="End clinic queue"
               onPress={handleEndClinic}
             />
           </View>
@@ -578,7 +563,7 @@ export default function QueueScreen() {
             </View>
           </View>
 
-          <Text style={styles.focusName}>
+          <Text style={styles.focusName} numberOfLines={1}>
             {currentPatient?.name || "No patient yet"}
           </Text>
           <Text style={styles.focusMeta}>
@@ -600,6 +585,8 @@ export default function QueueScreen() {
                 style={[styles.focusActionSecondary, styles.focusActionPrimaryAlt]}
                 onPress={handleOpenConsultation}
                 disabled={!isVerifiedDoctor ? false : (!currentPatient && !isQueueActive)}
+                accessibilityRole="button"
+                accessibilityLabel="Open patient consultation"
               >
                 <Ionicons name="document-text-outline" size={16} color={THEME.white} />
                 <Text style={[styles.focusActionSecondaryText, styles.focusActionPrimaryAltText]}>
@@ -611,7 +598,7 @@ export default function QueueScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Upcoming Queue List</Text>
+          <Text style={styles.sectionTitle}>Waiting Queue</Text>
           <Text style={styles.countText}>
             {patients.filter((p) => p.status !== "WITH_DOCTOR").length} total
           </Text>
@@ -620,7 +607,7 @@ export default function QueueScreen() {
         {patients.filter((p) => p.status !== "WITH_DOCTOR").length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="people-outline" size={48} color={THEME.textGray} />
-            <Text style={styles.emptyText}>The queue is currently empty</Text>
+            <Text style={styles.emptyText}>No patients are waiting right now.</Text>
           </View>
         ) : (
           patients
@@ -651,7 +638,7 @@ export default function QueueScreen() {
                   </Text>
                 </View>
                 <View style={styles.queueInfo}>
-                  <Text style={styles.queueName}>
+                  <Text style={styles.queueName} numberOfLines={1}>
                     {p.name || `Patient ${p.patient_id}`}
                   </Text>
                   <View style={styles.queueMetaRow}>
@@ -661,25 +648,36 @@ export default function QueueScreen() {
                         {typeLabel}
                       </Text>
                     </View>
-                    <View style={styles.metaPill}>
-                      <Text style={styles.metaText}>{statusLabel}</Text>
-                    </View>
+                    <ScheduleStatusBadge
+                      label={statusLabel}
+                      tone={p?.status === "SKIPPED" ? "cancelled" : "upcoming"}
+                    />
                   </View>
                 </View>
                 <View style={styles.queueActions}>
                   <TouchableOpacity
                     style={styles.queueActionButton}
                     onPress={() =>
-                      Alert.alert("Not wired yet", "Prioritize not implemented")
+                      Alert.alert(
+                        "Queue order unchanged",
+                        "Queue reordering is not available in this version."
+                      )
                     }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Prioritize ${p.name || `patient ${p.patient_id}`}`}
                   >
                     <Ionicons name="arrow-up" size={16} color={THEME.accentBlue} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.queueActionButton}
                     onPress={() =>
-                      Alert.alert("Not wired yet", "Remove not implemented")
+                      Alert.alert(
+                        "Queue removal unavailable",
+                        "Removing a patient from the queue is not available in this version."
+                      )
                     }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${p.name || `patient ${p.patient_id}`} from queue`}
                   >
                     <Ionicons name="close" size={16} color={THEME.danger} />
                   </TouchableOpacity>
@@ -693,11 +691,22 @@ export default function QueueScreen() {
   );
 }
 
-const ActionTile = ({ icon, label, color, onPress, disabled }: any) => (
+type ActionTileProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  onPress: () => void;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+};
+
+const ActionTile = ({ icon, label, color, onPress, disabled, accessibilityLabel }: ActionTileProps) => (
   <TouchableOpacity
     style={[styles.actionTile, disabled && styles.actionTileDisabled]}
     onPress={onPress}
     disabled={disabled}
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel || label}
   >
     <View style={[styles.actionIcon, { backgroundColor: color + "1A" }]}>
       <Ionicons name={icon} size={22} color={color} />
@@ -732,8 +741,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 6,
   },
-  liveDot: { width: 6, height: 6, borderRadius: 3 },
-  liveText: { fontSize: 9, fontWeight: "800" },
 
   heroCard: {
     backgroundColor: THEME.cardDark,

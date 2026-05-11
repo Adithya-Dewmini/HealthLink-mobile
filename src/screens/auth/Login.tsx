@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import axios from "axios";
+import { useRoute, type RouteProp } from "@react-navigation/native";
 import { AuthContext } from "../../utils/AuthContext";
 import { api } from "../../api/client";
 import { getExpoPushToken } from "../../services/notifications";
@@ -16,12 +17,20 @@ import AuthCard from "../../components/auth/AuthCard";
 import AuthHeader from "../../components/auth/AuthHeader";
 import AuthInput from "../../components/auth/AuthInput";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
+import type { AuthStackParamList } from "../../types/navigation";
 
 export default function Login({ navigation }: any) {
+  const route = useRoute<RouteProp<AuthStackParamList, "Login">>();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useContext(AuthContext);
+
+  useEffect(() => {
+    if (route.params?.initialEmail) {
+      setEmail(route.params.initialEmail);
+    }
+  }, [route.params?.initialEmail]);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -62,6 +71,9 @@ export default function Login({ navigation }: any) {
       </LinearGradient>
 
       <AuthCard style={styles.card}>
+            {route.params?.flashMessage ? (
+              <Text style={styles.flashMessage}>{route.params.flashMessage}</Text>
+            ) : null}
             <AuthInput
               label="Email"
               value={email}
@@ -124,6 +136,17 @@ const styles = StyleSheet.create({
   },
   card: {
     marginBottom: 14,
+  },
+  flashMessage: {
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#ECFDF3",
+    color: "#166534",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "600",
   },
   linkRow: {
     alignSelf: "flex-end",

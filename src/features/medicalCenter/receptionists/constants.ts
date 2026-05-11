@@ -1,4 +1,5 @@
 import type { FilterValue, ReceptionistPermissions } from "./types";
+import { DEFAULT_RECEPTIONIST_PERMISSIONS } from "../../../utils/receptionistPermissions";
 
 export const THEME = {
   primary: "#2F6FED",
@@ -24,8 +25,4 @@ export const FILTERS: Array<{ key: FilterValue; label: string }> = [
   { key: "disabled", label: "Disabled" },
 ];
 
-export const DEFAULT_PERMISSIONS: ReceptionistPermissions = {
-  can_manage_queue: false,
-  can_manage_appointments: false,
-  can_check_in: false,
-};
+export const DEFAULT_PERMISSIONS: ReceptionistPermissions = DEFAULT_RECEPTIONIST_PERMISSIONS;

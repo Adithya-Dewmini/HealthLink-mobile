@@ -45,6 +45,10 @@ type InventoryMedicine = {
   brand_name?: string | null;
   description?: string | null;
   image_url?: string | null;
+  generic_name?: string | null;
+  active_ingredient?: string | null;
+  strength?: string | null;
+  dosage_form?: string | null;
   quantity: number | null;
   price: number | null;
   expiry_date: string | null;
