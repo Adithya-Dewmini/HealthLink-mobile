@@ -12,13 +12,17 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { doctorColors } from "../../constants/doctorTheme";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
 import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
 import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
+import DoctorAvatar from "../../components/common/DoctorAvatar";
 import {
   fetchDoctorPrescriptionDetail,
   type DoctorPrescriptionDetail,
 } from "../../services/doctorPrescriptionService";
 import { useAuth } from "../../utils/AuthContext";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import { getDisplayInitials, resolveDoctorImage } from "../../utils/imageUtils";
 
 const THEME = {
   background: doctorColors.background,
@@ -83,7 +87,7 @@ export default function DoctorPrescriptionDetailsScreen() {
       setData(response);
     } catch (fetchError: any) {
       setData(null);
-      setError(fetchError?.message || "Failed to load prescription");
+      setError(getFriendlyError(fetchError, "Failed to load prescription"));
     } finally {
       if (showSpinner) setLoading(false);
       setRefreshing(false);
@@ -96,21 +100,14 @@ export default function DoctorPrescriptionDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.headerButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={20} color={THEME.text} />
-        </TouchableOpacity>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.headerSub}>Doctor Panel</Text>
-          <Text style={styles.headerTitle}>Prescription Details</Text>
-        </View>
-        <View style={styles.headerButtonPlaceholder} />
-      </View>
+      <DoctorPanelHeader
+        showBack
+        eyebrow="Doctor Panel"
+        title="Prescription Details"
+        subtitle="Medication instructions and pharmacy handoff"
+        rightAvatarUrl={resolveDoctorImage(user?.profile_image ?? null)}
+        onAvatarPress={() => navigation.navigate("ProfileEdit")}
+      />
 
       {!isVerifiedDoctor ? (
         <View style={styles.blockedWrap}>
@@ -159,6 +156,12 @@ export default function DoctorPrescriptionDetailsScreen() {
         >
           <View style={styles.summaryCard}>
             <View style={styles.summaryTopRow}>
+              <DoctorAvatar
+                name={data.patient.name}
+                imageUrl={resolveDoctorImage(data.patient.profile_image ?? null)}
+                size={54}
+                fallbackLabel={getDisplayInitials(data.patient.name, "PT")}
+              />
               <View style={styles.summaryIdentity}>
                 <Text style={styles.patientName} numberOfLines={1}>{data.patient.name}</Text>
                 <Text style={styles.patientMeta}>
@@ -173,11 +176,18 @@ export default function DoctorPrescriptionDetailsScreen() {
               />
             </View>
 
-            <View style={styles.metaGrid}>
-              <View style={styles.metaBlock}>
-                <Text style={styles.metaLabel}>Issued</Text>
-                <Text style={styles.metaValue}>{formatDateTime(data.issuedAt)}</Text>
+            <View style={styles.headerMetaRow}>
+              <View style={styles.headerMetaPill}>
+                <Text style={styles.headerMetaLabel}>Prescription ID</Text>
+                <Text style={styles.headerMetaValue}>#{data.id}</Text>
               </View>
+              <View style={styles.headerMetaPill}>
+                <Text style={styles.headerMetaLabel}>Issued</Text>
+                <Text style={styles.headerMetaValue}>{formatDateTime(data.issuedAt)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.metaGrid}>
               <View style={styles.metaBlock}>
                 <Text style={styles.metaLabel}>Medical Center</Text>
                 <Text style={styles.metaValue}>
@@ -199,6 +209,32 @@ export default function DoctorPrescriptionDetailsScreen() {
                 </Text>
               </View>
             </View>
+          </View>
+
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Care Team</Text>
+            <View style={styles.careTeamRow}>
+              <DoctorAvatar
+                name={data.doctor.name}
+                imageUrl={resolveDoctorImage(data.doctor.profile_image ?? null)}
+                size={44}
+                fallbackLabel={getDisplayInitials(data.doctor.name, "DR")}
+              />
+              <View style={styles.careTeamCopy}>
+                <Text style={styles.careTeamName}>{data.doctor.name}</Text>
+                <Text style={styles.careTeamMeta}>{data.doctor.specialization}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>QR Code</Text>
+            <Text style={styles.fieldLabel}>Scan at pharmacy</Text>
+            <Text style={styles.fieldText}>
+              {data.qr.available
+                ? `QR is ${data.qr.status}. ${data.qr.expiresAt ? `Valid until ${formatDateTime(data.qr.expiresAt)}.` : "The pharmacy can scan this prescription."}`
+                : "QR code is not available for this prescription yet."}
+            </Text>
           </View>
 
           <View style={styles.sectionCard}>
@@ -247,45 +283,6 @@ export default function DoctorPrescriptionDetailsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.background },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: THEME.surface,
-  },
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: "#EAF6F5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerButtonPlaceholder: {
-    width: 44,
-    height: 44,
-  },
-  headerTextWrap: {
-    flex: 1,
-    paddingHorizontal: 12,
-  },
-  headerSub: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "700",
-    color: THEME.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  headerTitle: {
-    marginTop: 2,
-    fontSize: 22,
-    lineHeight: 28,
-    fontWeight: "800",
-    color: THEME.text,
-  },
   scroll: { flex: 1 },
   content: { padding: 20, gap: 16, paddingBottom: 28 },
   blockedWrap: {
@@ -365,6 +362,31 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: THEME.textSecondary,
   },
+  headerMetaRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  headerMetaPill: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: "#F6FBFB",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  headerMetaLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: THEME.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  headerMetaValue: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: THEME.text,
+  },
   metaGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -420,6 +442,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: THEME.text,
+  },
+  careTeamRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  careTeamCopy: {
+    flex: 1,
+  },
+  careTeamName: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  careTeamMeta: {
+    marginTop: 3,
+    fontSize: 13,
+    color: THEME.textSecondary,
   },
   medicineCard: {
     borderRadius: 18,

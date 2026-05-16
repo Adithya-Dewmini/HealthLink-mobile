@@ -10,6 +10,8 @@ import {
 } from "./socket";
 import type { OrderSummary } from "./commerceService";
 
+export const ORDER_SOCKET_EVENT = "order:update";
+
 export type OrderUpdatedEvent = {
   orderId: number;
   patientId: number;
@@ -62,9 +64,9 @@ export const onOrderUpdated = (
   handler: (payload: OrderUpdatedEvent) => void
 ): (() => void) => {
   const socket: Socket = getSocket();
-  socket.on("order.updated", handler);
+  socket.on(ORDER_SOCKET_EVENT, handler);
   return () => {
-    socket.off("order.updated", handler);
+    socket.off(ORDER_SOCKET_EVENT, handler);
   };
 };
 

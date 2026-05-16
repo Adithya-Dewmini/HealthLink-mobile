@@ -209,7 +209,7 @@ export default function ReceptionistTabs() {
             name="ReceptionistRegistration"
             component={Registration}
             options={{
-              tabBarLabel: "Check-in",
+              tabBarLabel: "Walk-ins",
               tabBarIcon: ({ color, focused }) => (
                 <TabIcon name="person-add-outline" color={color} focused={focused} pending={pendingPermissionUpdate} />
               ),

@@ -36,10 +36,9 @@ export const useReceptionPermissionGuard = (
 
       const run = async () => {
         try {
-          const effectivePermissions =
-            pendingPermissionUpdate || enabled
-              ? await refreshReceptionPermissions()
-              : receptionistPermissions;
+          const effectivePermissions = pendingPermissionUpdate
+            ? await refreshReceptionPermissions()
+            : receptionistPermissions;
 
           if (!active) {
             return;

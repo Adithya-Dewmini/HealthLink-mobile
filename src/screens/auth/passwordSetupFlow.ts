@@ -7,7 +7,7 @@ export function getDashboardRouteForRole(role: string | null | undefined): keyof
     case "doctor":
       return "Doctor";
     case "admin":
-      return "AdminTabs";
+      return "AuthStack";
     case "pharmacist":
       return "PharmacistStack";
     case "medical_center_admin":
@@ -28,7 +28,7 @@ export function getWelcomeMessageForRole(role: string | null | undefined) {
     case "doctor":
       return "Your account will be reviewed by admin before full activation.";
     case "admin":
-      return "You can now manage the platform.";
+      return "Platform admin access is available through the HealthLink web portal only.";
     case "pharmacist":
       return "You can now manage inventory and prescriptions.";
     case "medical_center_admin":

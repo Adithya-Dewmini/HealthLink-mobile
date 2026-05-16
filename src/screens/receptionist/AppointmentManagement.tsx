@@ -1,8 +1,10 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
+  Platform,
   RefreshControl,
+  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -10,11 +12,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
 import { useAuth } from "../../utils/AuthContext";
+import type { ReceptionistStackParamList } from "../../types/navigation";
 import {
   cancelReceptionVisit,
   checkInReceptionVisit,
@@ -29,10 +32,12 @@ import {
   ErrorState,
   RECEPTION_THEME,
   ReceptionistButton,
-  ReceptionistHeader,
   SurfaceCard,
   StatusBadge,
 } from "../../components/receptionist/PanelUI";
+import { formatShortDate } from "../../utils/dateUtils";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import { getSocket } from "../../services/socket";
 
 type VisitStatus =
   | "booked"
@@ -92,6 +97,18 @@ const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "missed", label: "Missed" },
 ];
 
+const SUMMARY_METRICS: Array<{
+  key: keyof VisitsPayload["summary"];
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tint: string;
+}> = [
+  { key: "todaysVisits", label: "Today's Visits", icon: "calendar-outline", tint: "#E0F2FE" },
+  { key: "checkedIn", label: "Checked In", icon: "log-in-outline", tint: "#EDE9FE" },
+  { key: "waiting", label: "Waiting", icon: "time-outline", tint: "#FEF3C7" },
+  { key: "completed", label: "Completed", icon: "checkmark-done-outline", tint: "#DCFCE7" },
+];
+
 const statusBadgeTone = (status: VisitStatus): "info" | "warning" | "success" | "danger" | "neutral" => {
   switch (status) {
     case "booked":
@@ -122,16 +139,6 @@ const statusLabel = (status: VisitStatus) =>
     cancelled: "Cancelled",
   })[status];
 
-const prettyDate = (value: string) => {
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    weekday: "short",
-  });
-};
-
 const actionCopy = {
   "check-in": "check in this patient",
   "send-to-queue": "send this patient to the queue",
@@ -141,7 +148,7 @@ const actionCopy = {
 } as const;
 
 export default function AppointmentManagement() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<NativeStackNavigationProp<ReceptionistStackParamList>>();
   const hasAccess = useReceptionPermissionGuard("appointments", "appointments");
   const { receptionistPermissions } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -192,7 +199,7 @@ export default function AppointmentManagement() {
         });
         setError(null);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load clinic visits");
+        setError(getFriendlyError(loadError, "Could not load clinic visits."));
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -206,6 +213,26 @@ export default function AppointmentManagement() {
       void loadVisits("initial");
     }, [loadVisits])
   );
+
+  useEffect(() => {
+    const socket = getSocket();
+
+    const refresh = () => {
+      void loadVisits("refresh");
+    };
+
+    socket.on("queue:update", refresh);
+    socket.on("queue:next", refresh);
+    socket.on("session:start", refresh);
+    socket.on("connect", refresh);
+
+    return () => {
+      socket.off("queue:update", refresh);
+      socket.off("queue:next", refresh);
+      socket.off("session:start", refresh);
+      socket.off("connect", refresh);
+    };
+  }, [loadVisits]);
 
   const runVisitAction = useCallback(
     async (visit: VisitItem, action: VisitAction) => {
@@ -240,9 +267,7 @@ export default function AppointmentManagement() {
                 return loadVisits("refresh");
               })
               .catch((actionError) => {
-                setNotice(
-                  actionError instanceof Error ? actionError.message : "Unable to update visit."
-                );
+                setNotice(getFriendlyError(actionError, "Unable to update visit."));
               })
               .finally(() => {
                 setBusyKey(null);
@@ -271,172 +296,200 @@ export default function AppointmentManagement() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={RECEPTION_THEME.background} />
-      <FlatList
-        data={payload.visits}
-        keyExtractor={(item) => String(item.bookingId)}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={RECEPTION_THEME.primary}
-            onRefresh={() => void loadVisits("refresh")}
-          />
-        }
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <>
-            <ReceptionistHeader
-              eyebrow="VISITS"
-              title="Appointments & Bookings"
-              subtitle="Track and manage clinic visits from one place"
-              right={
-                <View style={styles.headerActionWrap}>
-                  <TouchableOpacity
-                    style={styles.bookFab}
-                    activeOpacity={0.9}
-                    onPress={() => navigation.navigate("ReceptionistBookAppointment")}
-                  >
-                    <Ionicons name="add" size={18} color="#FFFFFF" />
-                    <Text style={styles.bookFabText}>Book Visit</Text>
-                  </TouchableOpacity>
-                </View>
-              }
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor={RECEPTION_THEME.navy} />
+
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.brandRow}>
+            <Ionicons name="medical" size={18} color={RECEPTION_THEME.aqua} />
+            <Text style={styles.headerBrandText}>HealthLink</Text>
+          </View>
+          <Text style={styles.headerTitle}>Visits</Text>
+        </View>
+
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => void loadVisits("refresh")}>
+            <Ionicons name="refresh-outline" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          {receptionistPermissions.appointments ? (
+            <TouchableOpacity
+              style={styles.iconButtonPrimary}
+              activeOpacity={0.85}
+              onPress={() => navigation.navigate("ReceptionistBookAppointment")}
+            >
+              <Ionicons name="add" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.contentWrapper}>
+        <FlatList
+          data={payload.visits}
+          keyExtractor={(item) => String(item.bookingId)}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              tintColor={RECEPTION_THEME.primary}
+              onRefresh={() => void loadVisits("refresh")}
             />
+          }
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <>
+              {notice ? (
+                <SurfaceCard style={styles.noticeCard}>
+                  <Text style={styles.noticeText}>{notice}</Text>
+                </SurfaceCard>
+              ) : null}
 
-            {notice ? (
-              <SurfaceCard style={styles.noticeCard}>
-                <Text style={styles.noticeText}>{notice}</Text>
-              </SurfaceCard>
-            ) : null}
-
-            <View style={styles.summaryGrid}>
-              <SummaryCard label="Today's Visits" value={String(payload.summary.todaysVisits)} />
-              <SummaryCard label="Checked In" value={String(payload.summary.checkedIn)} />
-              <SummaryCard label="Waiting" value={String(payload.summary.waiting)} />
-              <SummaryCard label="Completed" value={String(payload.summary.completed)} />
-            </View>
-
-            <FlatList
-              horizontal
-              data={FILTERS}
-              keyExtractor={(item) => item.key}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}
-              renderItem={({ item }) => {
-                const active = activeFilter === item.key;
-                return (
-                  <TouchableOpacity
-                    activeOpacity={0.88}
-                    style={[styles.filterChip, active && styles.filterChipActive]}
-                    onPress={() => setActiveFilter(item.key)}
-                  >
-                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-
-            <SurfaceCard style={styles.controlsCard}>
-              <View style={styles.searchWrap}>
-                <Ionicons name="search" size={18} color={RECEPTION_THEME.textSecondary} />
-                <TextInput
-                  value={search}
-                  onChangeText={setSearch}
-                  placeholder="Search patient, phone, or doctor"
-                  placeholderTextColor={RECEPTION_THEME.textSecondary}
-                  style={styles.searchInput}
-                  returnKeyType="search"
-                  onSubmitEditing={() => void loadVisits("refresh")}
-                />
+              <View style={styles.summaryGrid}>
+                {SUMMARY_METRICS.map((metric) => (
+                  <SummaryCard
+                    key={metric.key}
+                    label={metric.label}
+                    value={String(payload.summary[metric.key])}
+                    icon={metric.icon}
+                    tint={metric.tint}
+                  />
+                ))}
               </View>
 
               <FlatList
                 horizontal
-                data={[
-                  { doctorId: null, doctorName: "All Doctors", specialty: null },
-                  ...payload.doctors,
-                ]}
-                keyExtractor={(item) => String(item.doctorId ?? "all")}
+                data={FILTERS}
+                keyExtractor={(item) => item.key}
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.doctorFiltersRow}
+                contentContainerStyle={styles.filterRow}
                 renderItem={({ item }) => {
-                  const active = selectedDoctorId === item.doctorId;
+                  const active = activeFilter === item.key;
                   return (
                     <TouchableOpacity
                       activeOpacity={0.88}
-                      style={[styles.doctorChip, active && styles.doctorChipActive]}
-                      onPress={() => setSelectedDoctorId(item.doctorId)}
+                      style={[styles.filterChip, active && styles.filterChipActive]}
+                      onPress={() => setActiveFilter(item.key)}
                     >
-                      <Text style={[styles.doctorChipText, active && styles.doctorChipTextActive]}>
-                        {item.doctorName}
+                      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                        {item.label}
                       </Text>
                     </TouchableOpacity>
                   );
                 }}
               />
-            </SurfaceCard>
-          </>
-        }
-        ListEmptyComponent={
-          loading ? (
-            <VisitsLoadingState />
-          ) : error ? (
-            <ErrorState
-              title="Visits unavailable"
-              message={error}
-              onRetry={() => void loadVisits("refresh")}
-            />
-          ) : (
-            <EmptyState
-              title="No visits found"
-              message={emptyMessage}
-              icon="calendar-outline"
-              action={
-                receptionistPermissions.appointments ? (
-                  <ReceptionistButton
-                    label="Book Visit"
-                    icon="add-outline"
-                    onPress={() => navigation.navigate("ReceptionistBookAppointment")}
+
+              <SurfaceCard style={styles.controlsCard}>
+                <View style={styles.searchWrap}>
+                  <Ionicons name="search" size={18} color={RECEPTION_THEME.textSecondary} />
+                  <TextInput
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Search patient, phone, or doctor"
+                    placeholderTextColor={RECEPTION_THEME.textSecondary}
+                    style={styles.searchInput}
+                    returnKeyType="search"
+                    onSubmitEditing={() => void loadVisits("refresh")}
                   />
-                ) : undefined
+                </View>
+
+                <FlatList
+                  horizontal
+                  data={[
+                    { doctorId: null, doctorName: "All Doctors", specialty: null },
+                    ...payload.doctors,
+                  ]}
+                  keyExtractor={(item) => String(item.doctorId ?? "all")}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.doctorFiltersRow}
+                  renderItem={({ item }) => {
+                    const active = selectedDoctorId === item.doctorId;
+                    return (
+                      <TouchableOpacity
+                        activeOpacity={0.88}
+                        style={[styles.doctorChip, active && styles.doctorChipActive]}
+                        onPress={() => setSelectedDoctorId(item.doctorId)}
+                      >
+                        <Text style={[styles.doctorChipText, active && styles.doctorChipTextActive]}>
+                          {item.doctorName}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              </SurfaceCard>
+            </>
+          }
+          ListEmptyComponent={
+            loading ? (
+              <VisitsLoadingState />
+            ) : error ? (
+              <ErrorState
+                title="Visits unavailable"
+                message={error}
+                onRetry={() => void loadVisits("refresh")}
+              />
+            ) : (
+              <EmptyState
+                title="No visits found"
+                message={emptyMessage}
+                icon="calendar-outline"
+                action={
+                  receptionistPermissions.appointments ? (
+                    <ReceptionistButton
+                      label="Book Visit"
+                      icon="add-outline"
+                      onPress={() => navigation.navigate("ReceptionistBookAppointment")}
+                    />
+                  ) : undefined
+                }
+              />
+            )
+          }
+          renderItem={({ item }) => (
+            <VisitCard
+              visit={item}
+              busyKey={busyKey}
+              canCheckIn={receptionistPermissions.check_in}
+              canQueue={receptionistPermissions.queue_access}
+              onViewDetails={() =>
+                navigation.navigate("ReceptionistVisitDetails", {
+                  visitId: item.bookingId,
+                })
               }
+              onOpenQueue={() => {
+                if (!item.queueId && !item.sessionId) return;
+                navigation.navigate("ReceptionistQueueDetails", {
+                  queueId: item.queueId ?? undefined,
+                  sessionId: item.sessionId ?? undefined,
+                  doctorName: item.doctorName,
+                });
+              }}
+              onAction={runVisitAction}
             />
-          )
-        }
-        renderItem={({ item }) => (
-          <VisitCard
-            visit={item}
-            busyKey={busyKey}
-            canCheckIn={receptionistPermissions.check_in}
-            canQueue={receptionistPermissions.queue_access}
-            onViewDetails={() =>
-              navigation.navigate("ReceptionistVisitDetails", {
-                visitId: item.bookingId,
-              })
-            }
-            onOpenQueue={() => {
-              if (!item.queueId && !item.sessionId) return;
-              navigation.navigate("ReceptionistQueueDetails", {
-                queueId: item.queueId ?? undefined,
-                sessionId: item.sessionId ?? undefined,
-                doctorName: item.doctorName,
-              });
-            }}
-            onAction={runVisitAction}
-          />
-        )}
-      />
+          )}
+        />
+      </View>
     </SafeAreaView>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function SummaryCard({
+  label,
+  value,
+  icon,
+  tint,
+}: {
+  label: string;
+  value: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tint: string;
+}) {
   return (
     <SurfaceCard style={styles.summaryCard}>
+      <View style={[styles.summaryIconWrap, { backgroundColor: tint }]}>
+        <Ionicons name={icon} size={16} color={RECEPTION_THEME.primary} />
+      </View>
       <Text style={styles.summaryValue}>{value}</Text>
       <Text style={styles.summaryLabel}>{label}</Text>
     </SurfaceCard>
@@ -472,7 +525,7 @@ function VisitCard({
             {visit.doctorName} • {visit.specialty}
           </Text>
           <Text style={styles.metaText}>
-            {prettyDate(visit.sessionDate)} • {visit.appointmentTime}
+            {formatShortDate(visit.sessionDate)} • {visit.appointmentTime}
             {visit.tokenNumber ? ` • Token #${visit.tokenNumber}` : ""}
           </Text>
         </View>
@@ -582,34 +635,91 @@ function VisitsLoadingState() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: RECEPTION_THEME.background,
+    backgroundColor: RECEPTION_THEME.navy,
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: "#DDEAF6",
   },
   content: {
-    padding: 18,
+    paddingHorizontal: 18,
+    paddingTop: 18,
     paddingBottom: 130,
   },
-  headerActionWrap: {
-    paddingTop: 18,
+
+  header: {
+    backgroundColor: RECEPTION_THEME.navy,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.12)",
+    zIndex: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: RECEPTION_THEME.navy,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.16,
+        shadowRadius: 8,
+      },
+      android: { elevation: 4 },
+    }),
   },
-  bookFab: {
-    minHeight: 44,
-    paddingHorizontal: 14,
+  headerLeft: {
+    flexDirection: "column",
+    justifyContent: "center",
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 2,
+  },
+  headerBrandText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.78)",
+    marginLeft: 6,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: -0.2,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  iconButtonPrimary: {
+    width: 44,
+    height: 44,
     borderRadius: 16,
     backgroundColor: RECEPTION_THEME.primary,
     alignItems: "center",
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  bookFabText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
   noticeCard: {
-    marginBottom: 14,
+    marginBottom: 12,
     backgroundColor: RECEPTION_THEME.infoSurface,
   },
   noticeText: {
@@ -620,59 +730,77 @@ const styles = StyleSheet.create({
   summaryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 14,
   },
   summaryCard: {
-    width: "47%",
-    minWidth: 148,
+    width: "48.4%",
+    minWidth: 146,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: RECEPTION_THEME.border,
+    gap: 7,
+  },
+  summaryIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
   summaryValue: {
     color: RECEPTION_THEME.navy,
-    fontSize: 24,
+    fontSize: 28,
+    lineHeight: 30,
     fontWeight: "800",
   },
   summaryLabel: {
-    marginTop: 6,
     color: RECEPTION_THEME.textSecondary,
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: "600",
   },
   filterRow: {
-    gap: 10,
+    gap: 8,
+    paddingTop: 2,
     paddingBottom: 10,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   filterChip: {
-    paddingHorizontal: 14,
-    height: 38,
-    borderRadius: 14,
+    paddingHorizontal: 16,
+    height: 39,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: RECEPTION_THEME.border,
+    borderColor: "#1D4868",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: RECEPTION_THEME.surface,
+    backgroundColor: RECEPTION_THEME.navy,
   },
   filterChipActive: {
-    backgroundColor: RECEPTION_THEME.primary,
-    borderColor: RECEPTION_THEME.primary,
+    backgroundColor: "#0B2E4A",
+    borderColor: RECEPTION_THEME.aqua,
   },
   filterChipText: {
-    color: RECEPTION_THEME.textSecondary,
+    color: "#CFD9E4",
+    fontSize: 15,
     fontWeight: "700",
   },
   filterChipTextActive: {
     color: "#FFFFFF",
   },
   controlsCard: {
-    marginBottom: 16,
+    marginBottom: 18,
+    borderRadius: 22,
+    padding: 16,
   },
   searchWrap: {
-    height: 48,
-    borderRadius: 14,
+    height: 52,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: RECEPTION_THEME.border,
     backgroundColor: "#FDFEFF",
-    paddingHorizontal: 14,
+    paddingHorizontal: 15,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -684,12 +812,12 @@ const styles = StyleSheet.create({
   },
   doctorFiltersRow: {
     gap: 10,
-    paddingTop: 14,
+    paddingTop: 12,
   },
   doctorChip: {
-    paddingHorizontal: 12,
-    height: 34,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 36,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: RECEPTION_THEME.border,
     justifyContent: "center",
@@ -701,7 +829,7 @@ const styles = StyleSheet.create({
   },
   doctorChipText: {
     color: RECEPTION_THEME.textSecondary,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "700",
   },
   doctorChipTextActive: {
@@ -709,7 +837,11 @@ const styles = StyleSheet.create({
   },
   visitCard: {
     marginBottom: 12,
-    gap: 14,
+    gap: 12,
+    borderRadius: 20,
+    borderColor: RECEPTION_THEME.border,
+    borderWidth: 1,
+    padding: 16,
   },
   visitHeader: {
     flexDirection: "row",
@@ -721,14 +853,14 @@ const styles = StyleSheet.create({
   },
   patientName: {
     color: RECEPTION_THEME.textPrimary,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "800",
   },
   metaText: {
-    marginTop: 4,
+    marginTop: 3,
     color: RECEPTION_THEME.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 19,
   },
   metaPillsRow: {
     flexDirection: "row",
@@ -740,12 +872,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F7FA",
     borderWidth: 1,
     borderColor: RECEPTION_THEME.border,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
   metaPillText: {
     color: RECEPTION_THEME.textSecondary,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
   },
   actionStack: {

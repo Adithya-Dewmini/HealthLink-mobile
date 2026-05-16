@@ -1,44 +1,58 @@
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
+  ImageBackground,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { LineChart } from "react-native-chart-kit";
-import { PharmacyGlassCard, PHARMACY_PANEL_THEME, PharmacyPanelHeader } from "../../components/pharmacist/PharmacyPanelUI";
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from "react-native-svg";
+import {
+  PharmacyGlassCard,
+  PharmacyMetricCard,
+  PharmacyScreenBackground,
+  PharmacySectionHeader,
+} from "../../components/pharmacist/PharmacyPanelUI";
 import { getPharmacyAnalyticsDashboard, type PharmacyAnalyticsDashboard } from "../../services/pharmacyAnalyticsService";
+import { pharmacyTheme } from "../../theme/pharmacyTheme";
 
-const formatMoney = (value: number) => `LKR ${Math.round(value).toLocaleString("en-LK")}`;
+const PHARMACY_DASHBOARD_HERO_BANNER = require("../../../assets/images/pharmacy_dashboard_hero_banner.png");
 
-const riskTone = {
-  low: {
-    shell: "rgba(52, 211, 153, 0.12)",
-    border: "rgba(52, 211, 153, 0.24)",
-    text: "#6EE7B7",
-  },
-  medium: {
-    shell: "rgba(251, 146, 60, 0.12)",
-    border: "rgba(251, 146, 60, 0.24)",
-    text: "#FDBA74",
-  },
-  high: {
-    shell: "rgba(251, 113, 133, 0.12)",
-    border: "rgba(251, 113, 133, 0.24)",
-    text: "#FDA4AF",
-  },
-} as const;
+const formatMoney = (value: number) => `LKR ${Math.round(value || 0).toLocaleString("en-LK")}`;
+
+const getRiskPalette = (risk: "low" | "medium" | "high") => {
+  if (risk === "high") {
+    return {
+      shell: "#FEE2E2",
+      border: "#FECACA",
+      text: pharmacyTheme.colors.danger,
+    };
+  }
+
+  if (risk === "medium") {
+    return {
+      shell: "#FFF1D6",
+      border: "#FFD69B",
+      text: pharmacyTheme.colors.orange,
+    };
+  }
+
+  return {
+    shell: "#DCF7EB",
+    border: "#B7E8D1",
+    text: pharmacyTheme.colors.success,
+  };
+};
 
 export default function PharmacyDashboard() {
   const navigation = useNavigation<any>();
-  const { width } = useWindowDimensions();
   const [dashboard, setDashboard] = useState<PharmacyAnalyticsDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,628 +80,889 @@ export default function PharmacyDashboard() {
     }, [loadDashboard])
   );
 
-  const todayLabel = useMemo(
-    () =>
-      new Date().toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-    []
-  );
+  const trendSeries = useMemo(() => {
+    const points = dashboard?.orderTrends.slice(-7) ?? [];
+    const revenueTotal = points.reduce((sum, item) => sum + (item.revenue || 0), 0);
+    const usesRevenue = revenueTotal > 0;
+    const values = points.map((item) => (usesRevenue ? item.revenue || 0 : item.orderCount || 0));
+    const labels = points.map((item) =>
+      new Date(item.date).toLocaleDateString("en-US", { weekday: "narrow" })
+    );
 
-  const chartLabels = useMemo(
-    () =>
-      dashboard?.orderTrends.slice(-7).map((item) =>
-        new Date(item.date).toLocaleDateString("en-US", { weekday: "narrow" })
-      ) ?? ["M", "T", "W", "T", "F", "S", "S"],
-    [dashboard?.orderTrends]
-  );
+    return {
+      labels,
+      values,
+      metricLabel: usesRevenue ? "Revenue" : "Orders",
+      totalLabel: usesRevenue
+        ? formatMoney(revenueTotal)
+        : `${values.reduce((sum, value) => sum + value, 0)} orders`,
+    };
+  }, [dashboard?.orderTrends]);
 
-  const chartValues = useMemo(
-    () => dashboard?.orderTrends.slice(-7).map((item) => item.revenue || item.orderCount) ?? [0, 0, 0, 0, 0, 0, 0],
-    [dashboard?.orderTrends]
-  );
-
+  const liveOrders = dashboard?.overview.pendingOrders ?? 0;
+  const successRate = dashboard?.overview.fulfillmentSuccessRate ?? 0;
+  const stockAlerts = dashboard?.lowStockMedicines.length ?? 0;
   const forecastSpotlight = dashboard?.forecastHighlights[0] ?? null;
   const lowStockSpotlight = dashboard?.lowStockMedicines[0] ?? null;
   const topMedicine = dashboard?.topMedicines[0] ?? null;
-  const chartWidth = Math.max(width - 72, 220);
+  const extraStockRisks = Math.max(stockAlerts - 1, 0);
+  const forecastPalette = getRiskPalette(forecastSpotlight?.shortageRisk ?? "low");
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={PHARMACY_PANEL_THEME.cyan} />
-          <Text style={styles.loadingText}>Loading pharmacy command center</Text>
-        </View>
-      </SafeAreaView>
+      <PharmacyScreenBackground>
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color={pharmacyTheme.colors.orange} />
+            <Text style={styles.loadingTitle}>Loading dashboard</Text>
+          </View>
+        </SafeAreaView>
+      </PharmacyScreenBackground>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadDashboard("refresh")} tintColor="#67E8F9" />}
-      >
-        <PharmacyPanelHeader
-          eyebrow="HealthLink Pharmacy"
-          title="Dashboard"
-          subtitle="Monitor fulfillment pace, revenue, forecast pressure, and inventory risk from one cleaner control surface."
-          right={
-            <View style={styles.headerActionColumn}>
-              <TouchableOpacity style={styles.headerIconButton} onPress={() => navigation.navigate("PharmacySettings")}>
-                <Ionicons name="settings-outline" size={18} color={PHARMACY_PANEL_THEME.white} />
-              </TouchableOpacity>
-              <View style={styles.dateBadge}>
-                <Text style={styles.dateBadgeText}>{todayLabel}</Text>
+    <PharmacyScreenBackground>
+      <SafeAreaView style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void loadDashboard("refresh")}
+              tintColor={pharmacyTheme.colors.orange}
+            />
+          }
+        >
+          <ImageBackground
+            source={PHARMACY_DASHBOARD_HERO_BANNER}
+            resizeMode="contain"
+            imageStyle={styles.heroBannerImage}
+            style={styles.heroBanner}
+          >
+            <View style={styles.heroBannerOverlay}>
+              <View style={styles.heroTopRow}>
+                <View style={styles.heroActions}>
+                  <TouchableOpacity
+                    accessibilityLabel="Open pharmacy settings"
+                    activeOpacity={0.9}
+                    onPress={() => navigation.navigate("PharmacySettings")}
+                    style={styles.settingsButton}
+                  >
+                    <Ionicons name="settings-outline" size={18} color={pharmacyTheme.colors.navy} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.heroStatsRow}>
+                <HeroPill icon="pulse-outline" label={`${liveOrders} live orders`} />
+                <HeroPill icon="shield-checkmark-outline" label={`${successRate}% success`} />
+                <HeroPill icon="warning-outline" label={`${stockAlerts} stock alerts`} />
               </View>
             </View>
-          }
-          footer={
-            <View style={styles.headerStatsRow}>
-              <HeaderPill icon="pulse-outline" label={`${dashboard?.overview.pendingOrders ?? 0} live orders`} />
-              <HeaderPill icon="shield-checkmark-outline" label={`${dashboard?.overview.fulfillmentSuccessRate ?? 0}% success`} />
-              <HeaderPill icon="warning-outline" label={`${dashboard?.lowStockMedicines.length ?? 0} stock alerts`} />
-            </View>
-          }
-        />
+          </ImageBackground>
 
-        <View style={styles.metricGrid}>
-          <MetricCard
-            icon="cash-outline"
-            tone="sky"
-            label="Revenue Closed"
-            value={formatMoney(dashboard?.overview.totalRevenue ?? 0)}
-            detail={`${dashboard?.overview.completedOrders ?? 0} completed orders`}
-          />
-          <MetricCard
-            icon="receipt-outline"
-            tone="violet"
-            label="Active Queue"
-            value={String(dashboard?.overview.pendingOrders ?? 0)}
-            detail={`${dashboard?.overview.totalOrders ?? 0} total orders`}
-          />
-          <MetricCard
-            icon="flask-outline"
-            tone="emerald"
-            label="Prescription Volume"
-            value={String(dashboard?.overview.prescriptionVolume ?? 0)}
-            detail={`${dashboard?.overview.cancellationRate ?? 0}% cancellation rate`}
-          />
-          <MetricCard
-            icon="alert-circle-outline"
-            tone="amber"
-            label="Low Stock Risk"
-            value={String(dashboard?.lowStockMedicines.length ?? 0)}
-            detail="Lines that need attention soon"
-          />
-        </View>
-
-        <PharmacyGlassCard style={styles.chartCard}>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionEyebrow}>Revenue Momentum</Text>
-              <Text style={styles.sectionTitle}>7-day operating trend</Text>
-            </View>
-            <View style={styles.rangeChip}>
-              <Text style={styles.rangeChipText}>7D</Text>
-            </View>
-          </View>
-          <LineChart
-            data={{ labels: chartLabels, datasets: [{ data: chartValues }] }}
-            width={chartWidth}
-            height={180}
-            withInnerLines={false}
-            withOuterLines={false}
-            withVerticalLines={false}
-            withHorizontalLabels={false}
-            chartConfig={chartConfig}
-            bezier
-            style={styles.chart}
-          />
-        </PharmacyGlassCard>
-
-        <View style={styles.dualColumnSection}>
-          <PharmacyGlassCard style={styles.primaryColumn}>
-            <Text style={styles.sectionEyebrow}>Fulfillment Shortcuts</Text>
-            <Text style={styles.sectionTitle}>Quick actions</Text>
-            <View style={styles.actionList}>
-              <ActionCard
+          <View style={styles.sectionBlock}>
+            <PharmacySectionHeader
+              eyebrow="Shortcuts"
+              title="Quick actions"
+            />
+            <View style={styles.quickActionCircleGrid}>
+              <QuickActionCircle
+                accent="yellow"
                 icon="qr-code-outline"
-                title="Scan Prescription"
-                detail="Open the scanner and pull medicine lines faster."
+                label="Scan QR"
                 onPress={() => navigation.navigate("PharmacyScanner")}
               />
-              <ActionCard
+              <QuickActionCircle
+                accent="orange"
                 icon="add-outline"
-                title="Add Medicine"
-                detail="Create a new inventory line or update available stock."
+                label="Add Medicine"
                 onPress={() => navigation.navigate("PharmacyAddMedicine")}
               />
-              <ActionCard
+              <QuickActionCircle
+                accent="indigo"
+                icon="albums-outline"
+                label="Inventory"
+                onPress={() => navigation.navigate("PharmacyInventory")}
+              />
+              <QuickActionCircle
+                accent="peach"
                 icon="receipt-outline"
-                title="Review Orders"
-                detail="Jump into pickup and delivery handoff queues."
+                label="Orders"
                 onPress={() => navigation.navigate("PharmacyReports")}
               />
             </View>
+          </View>
+
+          <View style={styles.sectionBlock}>
+            <PharmacySectionHeader
+              eyebrow="Overview"
+              title="Daily snapshot"
+            />
+            <View style={styles.metricGrid}>
+              <PharmacyMetricCard
+                accent="yellow"
+                detail={`${dashboard?.overview.completedOrders ?? 0} completed orders`}
+                icon="cash-outline"
+                label="Revenue Closed"
+                style={[styles.metricGridItem, styles.metricCardWarm]}
+                value={formatMoney(dashboard?.overview.totalRevenue ?? 0)}
+              />
+              <PharmacyMetricCard
+                accent="indigo"
+                detail={`${dashboard?.overview.totalOrders ?? 0} total orders`}
+                icon="receipt-outline"
+                label="Active Queue"
+                style={[styles.metricGridItem, styles.metricCardCool]}
+                value={String(liveOrders)}
+              />
+              <PharmacyMetricCard
+                accent="success"
+                detail={`${dashboard?.overview.cancellationRate ?? 0}% cancellation rate`}
+                icon="flask-outline"
+                label="Prescription Volume"
+                style={[styles.metricGridItem, styles.metricCardMint]}
+                value={String(dashboard?.overview.prescriptionVolume ?? 0)}
+              />
+              <PharmacyMetricCard
+                accent="orange"
+                detail="Lines needing attention soon"
+                icon="alert-circle-outline"
+                label="Low Stock Risk"
+                style={[styles.metricGridItem, styles.metricCardPeach]}
+                value={String(stockAlerts)}
+              />
+            </View>
+          </View>
+
+          <PharmacyGlassCard style={styles.chartCard}>
+            <PharmacySectionHeader
+              eyebrow="Revenue Momentum"
+              title="7-day operating trend"
+              right={
+                <View style={styles.rangeBadge}>
+                  <Text style={styles.rangeBadgeText}>7D</Text>
+                </View>
+              }
+            />
+            <TrendCard
+              labels={trendSeries.labels}
+              values={trendSeries.values}
+              metricLabel={trendSeries.metricLabel}
+              totalLabel={trendSeries.totalLabel}
+            />
           </PharmacyGlassCard>
 
-          <View style={styles.secondaryColumn}>
+          <View style={styles.signalRow}>
             <PharmacyGlassCard style={styles.signalCard}>
-              <Text style={styles.sectionEyebrow}>Forecast Watch</Text>
-              <Text style={styles.signalTitle}>
-                {forecastSpotlight ? forecastSpotlight.name : "No forecast pressure right now"}
-              </Text>
-              <Text style={styles.signalBody}>
-                {forecastSpotlight
-                  ? `Predicted demand ${forecastSpotlight.predictedDemand}. Reorder ${forecastSpotlight.recommendedReorderQuantity} units before the queue tightens.`
-                  : "Demand signals will appear here when the analytics model flags upcoming pressure."}
-              </Text>
+              <PharmacySectionHeader
+                eyebrow="Forecast Pressure"
+                title="Forecast pressure"
+              />
               {forecastSpotlight ? (
-                <View
-                  style={[
-                    styles.riskBadge,
-                    {
-                      backgroundColor: riskTone[forecastSpotlight.shortageRisk].shell,
-                      borderColor: riskTone[forecastSpotlight.shortageRisk].border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.riskBadgeText, { color: riskTone[forecastSpotlight.shortageRisk].text }]}>
-                    {forecastSpotlight.shortageRisk} risk
-                  </Text>
+                <>
+                  <View style={styles.signalMetricRow}>
+                    <Text style={styles.signalHeadline} numberOfLines={1}>
+                      {forecastSpotlight.name}
+                    </Text>
+                    <StatusChip
+                      label={`${forecastSpotlight.shortageRisk} risk`}
+                      backgroundColor={forecastPalette.shell}
+                      borderColor={forecastPalette.border}
+                      textColor={forecastPalette.text}
+                    />
+                  </View>
+                  <View style={styles.signalStatsRow}>
+                    <SignalStat label="Demand" value={String(forecastSpotlight.predictedDemand)} />
+                    <SignalStat label="Reorder" value={`${forecastSpotlight.recommendedReorderQuantity}u`} />
+                  </View>
+                </>
+              ) : (
+                <View style={styles.compactStateRow}>
+                  <StatusChip
+                    label="Stable"
+                    backgroundColor="#DCF7EB"
+                    borderColor="#B7E8D1"
+                    textColor={pharmacyTheme.colors.success}
+                  />
+                  <Text style={styles.compactStateText}>Stable forecast</Text>
                 </View>
-              ) : null}
-            </PharmacyGlassCard>
-
-            <PharmacyGlassCard style={styles.signalCard}>
-              <Text style={styles.sectionEyebrow}>Inventory Signal</Text>
-              <Text style={styles.signalTitle}>
-                {lowStockSpotlight ? lowStockSpotlight.name : "Inventory looks stable"}
-              </Text>
-              <Text style={styles.signalBody}>
-                {lowStockSpotlight
-                  ? `${lowStockSpotlight.availableStock} units available after reservations. Replenish before this affects storefront availability.`
-                  : "No urgent stock issues were detected in the current feed."}
-              </Text>
+              )}
             </PharmacyGlassCard>
           </View>
-        </View>
 
-        <PharmacyGlassCard>
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={styles.sectionEyebrow}>Performance Snapshot</Text>
-              <Text style={styles.sectionTitle}>Top medicine today</Text>
-            </View>
+          <View style={styles.sectionBlock}>
+            <PharmacySectionHeader
+              eyebrow="Stock Risk"
+              title="Low stock products"
+            />
+            <PharmacyGlassCard style={styles.stockHighlightCard}>
+              {lowStockSpotlight ? (
+                <>
+                  <View style={styles.stockRiskTopRow}>
+                    <MedicineThumb imageUrl={lowStockSpotlight.imageUrl ?? null} name={lowStockSpotlight.name} />
+                    <View style={styles.stockRiskCopy}>
+                      <View style={styles.signalMetricRow}>
+                        <Text style={styles.signalHeadline} numberOfLines={1}>
+                          {lowStockSpotlight.name}
+                        </Text>
+                        <StatusChip
+                          label="Low stock"
+                          backgroundColor="#FFF1D6"
+                          borderColor="#FFD69B"
+                          textColor={pharmacyTheme.colors.orange}
+                        />
+                      </View>
+                      <View style={styles.stockValueRow}>
+                        <Text style={styles.stockValue}>{lowStockSpotlight.availableStock}</Text>
+                        <Text style={styles.stockValueUnit}>units left</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.signalFooterRow}>
+                    <Text style={styles.signalFooterText}>
+                      Reserved {lowStockSpotlight.reservedQuantity}
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.compactStateRow}>
+                  <StatusChip
+                    label="Stable"
+                    backgroundColor="#EAF2FF"
+                    borderColor="#D6E1F5"
+                    textColor={pharmacyTheme.colors.indigo}
+                  />
+                  <Text style={styles.compactStateText}>No critical stock risk</Text>
+                </View>
+              )}
+            </PharmacyGlassCard>
+          </View>
+
+          <View style={styles.sectionBlock}>
+            <PharmacySectionHeader
+              eyebrow="Recent Activity"
+              title="Recent activity"
+            />
+
             {topMedicine ? (
-              <View style={styles.topPerformerBadge}>
-                <Ionicons name="trending-up-outline" size={14} color={PHARMACY_PANEL_THEME.cyan} />
-                <Text style={styles.topPerformerText}>Lead seller</Text>
-              </View>
-            ) : null}
+              <PharmacyGlassCard style={styles.recentHighlightCard}>
+                <View style={styles.stockRiskTopRow}>
+                  <MedicineThumb imageUrl={topMedicine.imageUrl ?? null} name={topMedicine.name || "Medicine"} />
+                  <View style={styles.stockRiskCopy}>
+                    <View style={styles.signalMetricRow}>
+                      <Text style={styles.signalHeadline} numberOfLines={1}>
+                        {topMedicine.name || "Medicine unavailable"}
+                      </Text>
+                      <StatusChip
+                        label="Top item"
+                        backgroundColor="#EAF2FF"
+                        borderColor="#D6E1F5"
+                        textColor={pharmacyTheme.colors.indigo}
+                      />
+                    </View>
+                    <View style={styles.stockValueRow}>
+                      <Text style={styles.stockValue}>{topMedicine.quantitySold ?? 0}</Text>
+                      <Text style={styles.stockValueUnit}>units sold</Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.signalFooterRow}>
+                  <Text style={styles.signalFooterText}>Today</Text>
+                  <Text style={styles.recentRevenueText}>{formatMoney(topMedicine.revenue ?? 0)}</Text>
+                </View>
+              </PharmacyGlassCard>
+            ) : (
+              <PharmacyGlassCard style={styles.recentHighlightCard}>
+                <View style={styles.emptyOrderState}>
+                  <View style={styles.emptyOrderIconWrap}>
+                    <Ionicons name="receipt-outline" size={16} color={pharmacyTheme.colors.orange} />
+                  </View>
+                  <Text style={styles.emptyOrderTitle}>No recent activity yet</Text>
+                </View>
+              </PharmacyGlassCard>
+            )}
           </View>
 
           {error ? (
-            <View style={styles.errorCard}>
-              <Ionicons name="alert-circle-outline" size={18} color="#FCA5A5" />
-              <Text style={styles.errorText}>{error}</Text>
+            <View style={styles.notice}>
+              <Ionicons name="alert-circle-outline" size={18} color={pharmacyTheme.colors.danger} />
+              <Text style={styles.noticeText}>{error}</Text>
             </View>
           ) : null}
-
-          <View style={styles.performanceRow}>
-            <View style={styles.performanceMetric}>
-              <Text style={styles.performanceValue}>{topMedicine?.name ?? "Waiting for completed orders"}</Text>
-              <Text style={styles.performanceLabel}>
-                {topMedicine ? `${topMedicine.quantitySold} units sold` : "Sales data will populate here"}
-              </Text>
-            </View>
-            <View style={styles.performanceMetricRight}>
-              <Text style={styles.performanceValue}>{topMedicine ? formatMoney(topMedicine.revenue) : "LKR 0"}</Text>
-              <Text style={styles.performanceLabel}>Revenue contribution</Text>
-            </View>
-          </View>
-        </PharmacyGlassCard>
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </PharmacyScreenBackground>
   );
 }
 
-function HeaderPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+function HeroPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
   return (
-    <View style={styles.headerPill}>
-      <Ionicons name={icon} size={14} color="#B6E6FF" />
-      <Text style={styles.headerPillText}>{label}</Text>
+    <View style={styles.heroPill}>
+      <Ionicons name={icon} size={14} color={pharmacyTheme.colors.navy} />
+      <Text style={styles.heroPillText}>{label}</Text>
     </View>
   );
 }
 
-function MetricCard({
-  detail,
+function QuickActionCircle({
+  accent,
   icon,
   label,
-  tone,
-  value,
+  onPress,
 }: {
-  detail: string;
+  accent: "yellow" | "orange" | "indigo" | "peach";
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  tone: "sky" | "violet" | "emerald" | "amber";
-  value: string;
+  onPress: () => void;
 }) {
-  const tones = {
-    sky: {
-      shell: "rgba(56, 189, 248, 0.13)",
-      border: "rgba(103, 232, 249, 0.16)",
-      icon: "#7DD3FC",
-      iconShell: "rgba(56, 189, 248, 0.14)",
-    },
-    violet: {
-      shell: "rgba(96, 165, 250, 0.12)",
-      border: "rgba(96, 165, 250, 0.16)",
-      icon: "#93C5FD",
-      iconShell: "rgba(96, 165, 250, 0.14)",
-    },
-    emerald: {
-      shell: "rgba(52, 211, 153, 0.12)",
-      border: "rgba(52, 211, 153, 0.16)",
-      icon: "#86EFAC",
-      iconShell: "rgba(52, 211, 153, 0.14)",
-    },
-    amber: {
-      shell: "rgba(251, 146, 60, 0.12)",
-      border: "rgba(251, 146, 60, 0.16)",
-      icon: "#FDBA74",
-      iconShell: "rgba(251, 146, 60, 0.14)",
-    },
+  const palette = {
+    yellow: { bg: "#FFF0CC", color: pharmacyTheme.colors.yellow },
+    orange: { bg: "#FFE1D1", color: pharmacyTheme.colors.orange },
+    indigo: { bg: "#E6E1FF", color: pharmacyTheme.colors.indigo },
+    peach: { bg: "#FFF2E6", color: "#CC7A26" },
   } as const;
 
-  const palette = tones[tone];
-
   return (
-    <View style={[styles.metricCard, { backgroundColor: palette.shell, borderColor: palette.border }]}>
-      <View style={[styles.metricIcon, { backgroundColor: palette.iconShell }]}>
-        <Ionicons name={icon} size={18} color={palette.icon} />
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      activeOpacity={0.88}
+      onPress={onPress}
+      style={styles.quickActionCircleItem}
+    >
+      <View style={[styles.quickActionCircleIconWrap, { backgroundColor: palette[accent].bg }]}>
+        <Ionicons name={icon} size={22} color={palette[accent].color} />
       </View>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricDetail}>{detail}</Text>
-    </View>
-  );
-}
-
-function ActionCard({
-  detail,
-  icon,
-  onPress,
-  title,
-}: {
-  detail: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  title: string;
-}) {
-  return (
-    <TouchableOpacity style={styles.actionCard} activeOpacity={0.88} onPress={onPress}>
-      <View style={styles.actionCardLeft}>
-        <View style={styles.actionIconWrap}>
-          <Ionicons name={icon} size={18} color={PHARMACY_PANEL_THEME.white} />
-        </View>
-        <View style={styles.actionCardText}>
-          <Text style={styles.actionTitle}>{title}</Text>
-          <Text style={styles.actionDetail}>{detail}</Text>
-        </View>
-      </View>
-      <Ionicons name="arrow-forward" size={18} color={PHARMACY_PANEL_THEME.cyan} />
+      <Text style={styles.quickActionCircleLabel}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-const chartConfig = {
-  backgroundGradientFrom: "transparent",
-  backgroundGradientTo: "transparent",
-  color: (opacity = 1) => `rgba(103, 232, 249, ${opacity})`,
-  labelColor: () => "#94A3B8",
-  propsForDots: {
-    r: "4",
-    strokeWidth: "2",
-    stroke: "#67E8F9",
-    fill: "#0F172A",
-  },
-  propsForBackgroundLines: {
-    strokeDasharray: "",
-    stroke: "rgba(148, 163, 184, 0.08)",
-  },
-  decimalPlaces: 0,
-};
+function TrendCard({
+  labels,
+  metricLabel,
+  totalLabel,
+  values,
+}: {
+  labels: string[];
+  metricLabel: string;
+  totalLabel: string;
+  values: number[];
+}) {
+  const hasData = values.length > 0 && values.some((value) => value > 0);
+
+  if (!hasData) {
+    return (
+      <View style={styles.trendFallbackRow}>
+        <Text style={styles.trendFallbackText}>No weekly trend yet</Text>
+      </View>
+    );
+  }
+
+  const width = 320;
+  const height = 148;
+  const paddingX = 18;
+  const paddingTop = 16;
+  const paddingBottom = 28;
+  const innerHeight = height - paddingTop - paddingBottom;
+  const innerWidth = width - paddingX * 2;
+  const maxValue = Math.max(...values, 1);
+
+  const points = values.map((value, index) => {
+    const x = paddingX + (values.length === 1 ? innerWidth / 2 : (innerWidth * index) / (values.length - 1));
+    const y = paddingTop + innerHeight - (value / maxValue) * innerHeight;
+    return { x, y, value };
+  });
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
+
+  return (
+    <View style={styles.trendWrap}>
+      <View style={styles.trendHeaderRow}>
+        <View>
+          <Text style={styles.trendMetricLabel}>{metricLabel}</Text>
+          <Text style={styles.trendMetricValue}>{totalLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.trendCanvas}>
+        <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+          <Defs>
+            <LinearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0%" stopColor="#FFB97A" stopOpacity="0.28" />
+              <Stop offset="100%" stopColor="#FFB97A" stopOpacity="0.02" />
+            </LinearGradient>
+          </Defs>
+
+          {[0.25, 0.5, 0.75].map((guide) => (
+            <Line
+              key={guide}
+              x1={paddingX}
+              x2={width - paddingX}
+              y1={paddingTop + innerHeight * guide}
+              y2={paddingTop + innerHeight * guide}
+              stroke="#EEF2F8"
+              strokeWidth="1"
+            />
+          ))}
+
+          <Path d={areaPath} fill="url(#trendFill)" />
+          <Path d={linePath} fill="none" stroke="#FF8A2A" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+
+          {points.map((point, index) => (
+            <Circle key={index} cx={point.x} cy={point.y} r="4.5" fill="#FFFFFF" stroke="#FF8A2A" strokeWidth="2.5" />
+          ))}
+        </Svg>
+      </View>
+
+      <View style={styles.trendLabelsRow}>
+        {labels.map((label, index) => (
+          <Text key={`${label}-${index}`} style={styles.trendLabel}>
+            {label}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function StatusChip({
+  backgroundColor,
+  borderColor,
+  label,
+  textColor,
+}: {
+  backgroundColor: string;
+  borderColor: string;
+  label: string;
+  textColor: string;
+}) {
+  return (
+    <View style={[styles.statusChip, { backgroundColor, borderColor }]}>
+      <Text style={[styles.statusChipText, { color: textColor }]}>{label}</Text>
+    </View>
+  );
+}
+
+function SignalStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.signalStat}>
+      <Text style={styles.signalStatLabel}>{label}</Text>
+      <Text style={styles.signalStatValue}>{value}</Text>
+    </View>
+  );
+}
+
+function MedicineThumb({ imageUrl, name }: { imageUrl?: string | null; name: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (imageUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: imageUrl }}
+        style={styles.medicineThumb}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <View style={styles.medicineThumbFallback}>
+      <Ionicons name="medkit-outline" size={22} color={pharmacyTheme.colors.orange} />
+      <Text style={styles.medicineThumbFallbackText} numberOfLines={2}>
+        {name
+          .split(" ")
+          .slice(0, 2)
+          .map((part) => part.charAt(0).toUpperCase())
+          .join("") || "RX"}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: PHARMACY_PANEL_THEME.background,
+    backgroundColor: "transparent",
   },
   content: {
-    padding: 16,
-    paddingBottom: 120,
-    gap: 14,
+    padding: pharmacyTheme.spacing.md,
+    paddingBottom: 136,
+    gap: 20,
+  },
+  heroBanner: {
+    width: "100%",
+    height: 210,
+    borderRadius: pharmacyTheme.radii.xlarge,
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  },
+  heroBannerImage: {
+    borderRadius: pharmacyTheme.radii.xlarge,
+  },
+  heroBannerOverlay: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    justifyContent: "space-between",
+  },
+  heroTopRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "flex-start",
+    gap: 16,
   },
   loadingWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
-    padding: 24,
+    padding: pharmacyTheme.spacing.xxl,
   },
-  loadingText: {
-    color: PHARMACY_PANEL_THEME.text,
-    fontSize: 14,
-    fontWeight: "600",
+  loadingTitle: {
+    marginTop: pharmacyTheme.spacing.md,
+    color: pharmacyTheme.colors.textPrimary,
+    fontSize: 16,
+    fontWeight: "700",
   },
-  headerActionColumn: {
+  heroActions: {
     alignItems: "flex-end",
-    gap: 10,
   },
-  headerIconButton: {
-    width: 44,
-    height: 44,
+  settingsButton: {
+    width: 46,
+    height: 46,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: pharmacyTheme.colors.card,
     alignItems: "center",
     justifyContent: "center",
   },
-  dateBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  dateBadgeText: {
-    color: PHARMACY_PANEL_THEME.text,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  headerStatsRow: {
+  heroStatsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
+    gap: pharmacyTheme.spacing.sm,
   },
-  headerPill: {
+  heroPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
+    gap: pharmacyTheme.spacing.xs,
+    backgroundColor: pharmacyTheme.colors.card,
+    borderRadius: pharmacyTheme.radii.pill,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
   },
-  headerPillText: {
-    color: "#E0F2FE",
+  heroPillText: {
+    color: pharmacyTheme.colors.navy,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   metricGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
   },
-  metricCard: {
-    width: "48.3%",
-    minHeight: 142,
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 16,
+  metricGridItem: {
+    width: "48.2%",
+    minHeight: 164,
   },
-  metricIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 14,
+  metricCardWarm: {
+    backgroundColor: "#FFF8EE",
+    borderColor: "#F6E0BF",
   },
-  metricLabel: {
-    color: PHARMACY_PANEL_THEME.textMuted,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
+  metricCardCool: {
+    backgroundColor: "#F2F6FF",
+    borderColor: "#D8E4FA",
   },
-  metricValue: {
-    marginTop: 8,
-    color: PHARMACY_PANEL_THEME.white,
-    fontSize: 22,
-    fontWeight: "800",
+  metricCardMint: {
+    backgroundColor: "#EFFAF4",
+    borderColor: "#CFEEDC",
   },
-  metricDetail: {
-    marginTop: 6,
-    color: "#C7D2E1",
-    fontSize: 12,
-    lineHeight: 17,
+  metricCardPeach: {
+    backgroundColor: "#FFF2EA",
+    borderColor: "#FFD6C1",
   },
-  chartCard: {
-    paddingBottom: 8,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  sectionEyebrow: {
-    color: "#8AA4C1",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  sectionTitle: {
-    marginTop: 6,
-    color: PHARMACY_PANEL_THEME.white,
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  rangeChip: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: PHARMACY_PANEL_THEME.border,
-  },
-  rangeChipText: {
-    color: PHARMACY_PANEL_THEME.cyan,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  chart: {
-    marginTop: 18,
-    marginLeft: -20,
-    borderRadius: 18,
-  },
-  dualColumnSection: {
-    gap: 12,
-  },
-  primaryColumn: {
+  sectionBlock: {
     gap: 14,
   },
-  secondaryColumn: {
+  quickActionCircleGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  quickActionCircleItem: {
+    flex: 1,
+    alignItems: "center",
+    gap: 10,
+    minWidth: 72,
+  },
+  quickActionCircleIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#F4E7D4",
+    ...pharmacyTheme.shadows.soft,
+  },
+  quickActionCircleLabel: {
+    color: pharmacyTheme.colors.textPrimary,
+    fontSize: 11,
+    fontWeight: "800",
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  chartCard: {
+    paddingBottom: 16,
+  },
+  rangeBadge: {
+    borderRadius: pharmacyTheme.radii.pill,
+    backgroundColor: "#FFF0CC",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  rangeBadgeText: {
+    color: pharmacyTheme.colors.orange,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  trendWrap: {
+    marginTop: 16,
     gap: 12,
   },
-  actionList: {
-    marginTop: 12,
-    gap: 12,
-  },
-  actionCard: {
+  trendHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
   },
-  actionCardLeft: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 12,
+  trendMetricLabel: {
+    color: pharmacyTheme.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  actionIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(56, 189, 248, 0.2)",
-  },
-  actionCardText: {
-    flex: 1,
-  },
-  actionTitle: {
-    color: PHARMACY_PANEL_THEME.white,
-    fontSize: 16,
+  trendMetricValue: {
+    marginTop: 4,
+    color: "#18213D",
+    fontSize: 19,
     fontWeight: "700",
   },
-  actionDetail: {
-    marginTop: 4,
-    color: "#AFC1D5",
-    fontSize: 12,
-    lineHeight: 17,
+  trendCanvas: {
+    borderRadius: 24,
+    backgroundColor: "#FCFDFF",
+    borderWidth: 1,
+    borderColor: "#E8EDF5",
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  trendLabelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+  },
+  trendLabel: {
+    color: "#6C7892",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  trendFallbackRow: {
+    marginTop: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E8EDF5",
+    backgroundColor: "#FCFDFF",
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+  },
+  trendFallbackText: {
+    color: "#6C7892",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  signalRow: {
+    gap: 12,
   },
   signalCard: {
-    minHeight: 150,
+    gap: 14,
+    paddingBottom: 18,
   },
-  signalTitle: {
-    marginTop: 10,
-    color: PHARMACY_PANEL_THEME.white,
-    fontSize: 18,
+  stockHighlightCard: {
+    gap: 14,
+    paddingTop: 18,
+    paddingBottom: 18,
+    borderRadius: 28,
+  },
+  signalMetricRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  stockRiskTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  stockRiskCopy: {
+    flex: 1,
+    gap: 10,
+  },
+  signalHeadline: {
+    flex: 1,
+    color: "#18213D",
+    fontSize: 15,
     fontWeight: "700",
-    lineHeight: 24,
   },
-  signalBody: {
-    marginTop: 8,
-    color: "#B8C6D8",
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  riskBadge: {
-    alignSelf: "flex-start",
-    marginTop: 14,
-    borderRadius: 999,
+  statusChip: {
+    borderRadius: pharmacyTheme.radii.pill,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  riskBadgeText: {
-    fontSize: 12,
+  statusChipText: {
+    fontSize: 11,
     fontWeight: "800",
     textTransform: "uppercase",
   },
-  topPerformerBadge: {
+  signalStatsRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: PHARMACY_PANEL_THEME.border,
+    gap: 12,
   },
-  topPerformerText: {
-    color: PHARMACY_PANEL_THEME.text,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  errorCard: {
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "flex-start",
-    marginTop: 16,
-    padding: 14,
+  signalStat: {
+    flex: 1,
     borderRadius: 18,
-    backgroundColor: "rgba(127, 29, 29, 0.24)",
+    backgroundColor: "#F9FBFF",
     borderWidth: 1,
-    borderColor: "rgba(248, 113, 113, 0.22)",
+    borderColor: "#E8EDF5",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  errorText: {
-    flex: 1,
-    color: "#FECACA",
-    fontSize: 13,
-    lineHeight: 18,
+  signalStatLabel: {
+    color: "#6C7892",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
   },
-  performanceRow: {
-    marginTop: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  performanceMetric: {
-    flex: 1,
-  },
-  performanceMetricRight: {
-    alignItems: "flex-end",
-  },
-  performanceValue: {
-    color: PHARMACY_PANEL_THEME.white,
-    fontSize: 18,
+  signalStatValue: {
+    marginTop: 6,
+    color: "#18213D",
+    fontSize: 17,
     fontWeight: "800",
   },
-  performanceLabel: {
-    marginTop: 6,
-    color: "#AFC1D5",
-    fontSize: 12,
+  stockValueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  medicineThumb: {
+    width: 74,
+    height: 74,
+    borderRadius: 22,
+    backgroundColor: "#FFF8EE",
+    borderWidth: 1,
+    borderColor: "#F6E0BF",
+  },
+  medicineThumbFallback: {
+    width: 74,
+    height: 74,
+    borderRadius: 22,
+    backgroundColor: "#FFF4E8",
+    borderWidth: 1,
+    borderColor: "#FFD7B8",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  medicineThumbFallbackText: {
+    color: "#C96A10",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  stockValue: {
+    color: "#18213D",
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "800",
+  },
+  stockValueUnit: {
+    paddingBottom: 5,
+    color: "#6C7892",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  signalFooterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  signalFooterText: {
+    color: "#6C7892",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  compactStateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  compactStateText: {
+    color: "#18213D",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  recentHighlightCard: {
+    gap: 14,
+    paddingTop: 18,
+    paddingBottom: 18,
+    borderRadius: 28,
+  },
+  recentRevenueText: {
+    color: pharmacyTheme.colors.navy,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  emptyOrderState: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  emptyOrderIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 14,
+    backgroundColor: "#FFF0CC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyOrderTitle: {
+    color: "#18213D",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  notice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: pharmacyTheme.spacing.sm,
+    borderRadius: pharmacyTheme.radii.medium,
+    padding: 14,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  noticeText: {
+    flex: 1,
+    color: "#991B1B",
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

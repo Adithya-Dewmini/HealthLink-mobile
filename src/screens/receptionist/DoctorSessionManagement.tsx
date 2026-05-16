@@ -14,20 +14,20 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { ReceptionistStackParamList } from "../../types/navigation";
 import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
 import ReceptionAccessNotAssigned from "../../components/ReceptionAccessNotAssigned";
 import {
   createReceptionManualSession,
-  fetchReceptionSessionAvailability,
-  fetchReceptionSessionAvailabilityState,
   fetchReceptionSessionRoutine,
   fetchReceptionSessionSchedules,
   saveReceptionSessionRoutine,
   updateReceptionSession,
 } from "../../services/receptionistSessionService";
 import { getSocket } from "../../services/socket";
+import { formatDateLabel, parseDateOnly } from "../../utils/dateUtils";
 
 type Props = NativeStackScreenProps<
   ReceptionistStackParamList,
@@ -82,42 +82,8 @@ type RoutineShift = {
 type RoutineDayState = {
   dayOfWeek: number;
   label: string;
-  doctorAvailable: boolean;
-  availabilityWindows: AvailabilityItem[];
   enabled: boolean;
   shifts: RoutineShift[];
-};
-
-type AvailabilityItem = {
-  id: number | string;
-  day?: string | null;
-  day_of_week?: number | null;
-  start_time: string;
-  end_time: string;
-  max_patients?: number | null;
-  is_active?: boolean;
-};
-
-type AvailabilityStateKey =
-  | "sunday"
-  | "monday"
-  | "tuesday"
-  | "wednesday"
-  | "thursday"
-  | "friday"
-  | "saturday";
-
-type AvailabilityStateResponse = {
-  availability?: Partial<Record<AvailabilityStateKey, Array<{ id: string; start: string; end: string }>>>;
-};
-
-type SessionSuggestion = {
-  label: string;
-  start: string;
-  end: string;
-  durationMinutes: number;
-  slotDuration: number;
-  maxPatients: number;
 };
 
 type RoutineGeneratePayload = {
@@ -144,51 +110,7 @@ const WEEK_DAYS = [
   { day: "Saturday", dayKey: 6 },
 ] as const;
 
-// UI day mapping is Sunday=0 through Saturday=6.
-const DAY_KEY_BY_AVAILABILITY_KEY: Record<AvailabilityStateKey, number> = {
-  sunday: 0,
-  monday: 1,
-  tuesday: 2,
-  wednesday: 3,
-  thursday: 4,
-  friday: 5,
-  saturday: 6,
-};
-
 const SLOT_DURATION_OPTIONS = [5, 10, 15, 20, 30, 45, 60, 90, 120];
-
-const getResponseErrorMessage = async (response: Response, fallback: string) => {
-  const raw = await response.text().catch(() => "");
-  if (raw.trim().length > 0) {
-    const normalized = raw.trim();
-    if (normalized.startsWith("<!DOCTYPE") || normalized.startsWith("<html")) {
-      return "Schedule service is not available. Please try again.";
-    }
-
-    try {
-      const parsed = JSON.parse(normalized) as {
-        message?: unknown;
-        error?: unknown;
-        details?: unknown;
-      };
-      if (Array.isArray(parsed.details) && parsed.details.length > 0) {
-        const details = parsed.details.filter(
-          (item): item is string => typeof item === "string" && item.trim().length > 0
-        );
-        if (details.length > 0) {
-          const prefix =
-            typeof parsed.message === "string" && parsed.message.trim() ? `${parsed.message}\n` : "";
-          return `${prefix}${details.join("\n")}`;
-        }
-      }
-      if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
-      if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
-    } catch {
-      return "Schedule service is not available. Please try again.";
-    }
-  }
-  return `${fallback} (HTTP ${response.status})`;
-};
 
 const formatLocalDateKey = (value: Date) => {
   const year = value.getFullYear();
@@ -198,9 +120,7 @@ const formatLocalDateKey = (value: Date) => {
 };
 
 const parseDateString = (value?: string) => {
-  if (!value) return new Date();
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return parseDateOnly(value) ?? new Date();
 };
 
 const parseTimeToDate = (value: string) => {
@@ -224,9 +144,7 @@ const formatTime = (value?: Date | string | null) => {
 const toApiTime = (value: Date) => formatTime(value);
 
 const formatReadableDate = (value: Date | string) => {
-  const parsed = typeof value === "string" ? new Date(`${value}T00:00:00`) : value;
-  if (Number.isNaN(parsed.getTime())) return typeof value === "string" ? value : formatLocalDateKey(new Date());
-  return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  return formatDateLabel(value, typeof value === "string" ? value : formatLocalDateKey(new Date()));
 };
 
 const parseTimeToMinutes = (value: string) => {
@@ -250,8 +168,6 @@ const calculateSlots = (startTime: Date, endTime: Date, slotDuration: number) =>
   return totalMinutes > 0 ? Math.floor(totalMinutes / slotDuration) : 0;
 };
 
-const getDayKeyFromDate = (value: Date) => value.getDay();
-
 const numericInput = (value: string) => value.replace(/[^0-9]/g, "");
 
 const nearestSlotDuration = (value: number) => {
@@ -263,71 +179,15 @@ const nearestSlotDuration = (value: number) => {
 
 const makeShiftId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const normalizeAvailabilityState = (payload: AvailabilityStateResponse | null | undefined) => {
-  const byDay = new Map<number, AvailabilityItem[]>();
-  (Object.entries(payload?.availability || {}) as Array<
-    [AvailabilityStateKey, Array<{ id: string; start: string; end: string }>]
-  >).forEach(([dayKeyName, slots]) => {
-    const dayKey = DAY_KEY_BY_AVAILABILITY_KEY[dayKeyName];
-    byDay.set(
-      dayKey,
-      (Array.isArray(slots) ? slots : []).map((slot) => ({
-        id: slot.id,
-        day: WEEK_DAYS[dayKey]?.day ?? null,
-        day_of_week: dayKey,
-        start_time: slot.start,
-        end_time: slot.end,
-        is_active: true,
-      }))
-    );
-  });
-  return byDay;
-};
-
-const getAvailabilityWindowsForDay = (availabilityByDay: Map<number, AvailabilityItem[]>, dayKey: number) =>
-  availabilityByDay.get(dayKey) ?? [];
-
-const isShiftInsideAvailability = (
-  dayKey: number,
-  startTime: string,
-  endTime: string,
-  availabilityByDay: Map<number, AvailabilityItem[]>
-) => {
-  const requestedStart = parseTimeToMinutes(startTime);
-  const requestedEnd = parseTimeToMinutes(endTime);
-  if (requestedStart === null || requestedEnd === null || requestedStart >= requestedEnd) return false;
-  return getAvailabilityWindowsForDay(availabilityByDay, dayKey).some((window) => {
-    const windowStart = parseTimeToMinutes(window.start_time);
-    const windowEnd = parseTimeToMinutes(window.end_time);
-    return (
-      windowStart !== null &&
-      windowEnd !== null &&
-      requestedStart >= windowStart &&
-      requestedEnd <= windowEnd
-    );
-  });
-};
-
 const getDefaultShiftForDay = (
-  dayKey: number,
-  availabilityByDay: Map<number, AvailabilityItem[]>,
   existingShifts: RoutineShift[] = []
-): RoutineShift | null => {
-  const availabilityWindows = getAvailabilityWindowsForDay(availabilityByDay, dayKey);
-  const firstWindow = availabilityWindows[0];
-  if (!firstWindow) return null;
-
+): RoutineShift => {
   const preferredDuration = (() => {
     const source = existingShifts[existingShifts.length - 1];
     if (source) {
       return Math.max(15, minutesBetween(source.startTime, source.endTime));
     }
-    const startMinutes = parseTimeToMinutes(firstWindow.start_time);
-    const endMinutes = parseTimeToMinutes(firstWindow.end_time);
-    if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
-      return 60;
-    }
-    return Math.min(60, endMinutes - startMinutes);
+    return 60;
   })();
 
   const normalizedExisting = existingShifts
@@ -341,60 +201,24 @@ const getDefaultShiftForDay = (
     )
     .sort((left, right) => left.start - right.start);
 
-  for (const window of availabilityWindows) {
-    const windowStart = parseTimeToMinutes(window.start_time);
-    const windowEnd = parseTimeToMinutes(window.end_time);
-    if (windowStart === null || windowEnd === null || windowEnd <= windowStart) {
-      continue;
-    }
-
-    let cursor = windowStart;
-    const dayShifts = normalizedExisting.filter(
-      (shift) => shift.end > windowStart && shift.start < windowEnd
-    );
-
-    for (const shift of dayShifts) {
-      if (cursor + preferredDuration <= shift.start) {
-        return {
-          localId: makeShiftId(),
-          startTime: parseTimeToDate(minutesToTime(cursor)),
-          endTime: parseTimeToDate(minutesToTime(cursor + preferredDuration)),
-        };
-      }
-      cursor = Math.max(cursor, shift.end);
-    }
-
-    if (cursor + preferredDuration <= windowEnd) {
-      return {
-        localId: makeShiftId(),
-        startTime: parseTimeToDate(minutesToTime(cursor)),
-        endTime: parseTimeToDate(minutesToTime(cursor + preferredDuration)),
-      };
-    }
-  }
+  const lastShiftEnd = normalizedExisting[normalizedExisting.length - 1]?.end;
+  const startMinutes = typeof lastShiftEnd === "number" ? lastShiftEnd : 9 * 60;
 
   return {
     localId: makeShiftId(),
-    startTime: parseTimeToDate(firstWindow.start_time),
-    endTime: parseTimeToDate(firstWindow.end_time),
+    startTime: parseTimeToDate(minutesToTime(startMinutes)),
+    endTime: parseTimeToDate(minutesToTime(startMinutes + preferredDuration)),
   };
 };
 
-const buildRoutineDaysState = (
-  payload: RoutineApiDay[],
-  availabilityByDay: Map<number, AvailabilityItem[]>
-): RoutineDayState[] => {
+const buildRoutineDaysState = (payload: RoutineApiDay[]): RoutineDayState[] => {
   const byDay = new Map(payload.map((item) => [item.dayKey, item]));
   return WEEK_DAYS.map((item) => {
     const source = byDay.get(item.dayKey);
-    const availabilityWindows = getAvailabilityWindowsForDay(availabilityByDay, item.dayKey);
-    const doctorAvailable = availabilityWindows.length > 0;
     return {
       dayOfWeek: item.dayKey,
       label: item.day,
-      doctorAvailable,
-      availabilityWindows,
-      enabled: doctorAvailable && Boolean(source?.routines.length),
+      enabled: Boolean(source?.routines.length),
       shifts:
         source?.routines.map((shift) => ({
           localId: makeShiftId(),
@@ -404,88 +228,6 @@ const buildRoutineDaysState = (
         })) ?? [],
     };
   });
-};
-
-const buildSuggestionLabel = (startMinutes: number) => {
-  if (startMinutes < 12 * 60) return "Morning Session";
-  if (startMinutes < 17 * 60) return "Afternoon Session";
-  return "Evening Session";
-};
-
-const buildSessionSuggestions = (
-  availability: AvailabilityItem[],
-  existingSessions: ScheduleItem[],
-  selectedDate: Date
-): SessionSuggestion[] => {
-  const dayKey = getDayKeyFromDate(selectedDate);
-  const matchingAvailability = availability
-    .filter((slot) => slot.is_active !== false && slot.day_of_week === dayKey)
-    .map((slot) => ({
-      start: parseTimeToMinutes(slot.start_time),
-      end: parseTimeToMinutes(slot.end_time),
-      maxPatients: typeof slot.max_patients === "number" ? slot.max_patients : null,
-    }))
-    .filter(
-      (
-        slot
-      ): slot is {
-        start: number;
-        end: number;
-        maxPatients: number | null;
-      } => typeof slot.start === "number" && typeof slot.end === "number" && slot.end > slot.start
-    );
-
-  const conflicts = existingSessions
-    .map((session) => ({
-      start: parseTimeToMinutes(session.start_time),
-      end: parseTimeToMinutes(session.end_time),
-    }))
-    .filter(
-      (slot): slot is { start: number; end: number } =>
-        typeof slot.start === "number" && typeof slot.end === "number" && slot.end > slot.start
-    );
-
-  const suggestions: SessionSuggestion[] = [];
-
-  matchingAvailability.forEach((slot) => {
-    let cursor = slot.start;
-    conflicts.forEach((conflict) => {
-      if (conflict.end <= cursor || conflict.start >= slot.end) return;
-      if (conflict.start > cursor) {
-        const durationMinutes = conflict.start - cursor;
-        if (durationMinutes >= 60) {
-          const targetMaxPatients = slot.maxPatients && slot.maxPatients > 0 ? slot.maxPatients : Math.max(1, Math.floor(durationMinutes / 15));
-          const slotDuration = nearestSlotDuration(durationMinutes / targetMaxPatients);
-          suggestions.push({
-            label: buildSuggestionLabel(cursor),
-            start: minutesToTime(cursor),
-            end: minutesToTime(conflict.start),
-            durationMinutes,
-            slotDuration,
-            maxPatients: Math.max(1, Math.floor(durationMinutes / slotDuration)),
-          });
-        }
-      }
-      cursor = Math.max(cursor, conflict.end);
-    });
-    if (cursor < slot.end) {
-      const durationMinutes = slot.end - cursor;
-      if (durationMinutes >= 60) {
-        const targetMaxPatients = slot.maxPatients && slot.maxPatients > 0 ? slot.maxPatients : Math.max(1, Math.floor(durationMinutes / 15));
-        const slotDuration = nearestSlotDuration(durationMinutes / targetMaxPatients);
-        suggestions.push({
-          label: buildSuggestionLabel(cursor),
-          start: minutesToTime(cursor),
-          end: minutesToTime(slot.end),
-          durationMinutes,
-          slotDuration,
-          maxPatients: Math.max(1, Math.floor(durationMinutes / slotDuration)),
-        });
-      }
-    }
-  });
-
-  return suggestions;
 };
 
 const hasOverlappingRoutineShifts = (shifts: RoutineShift[]) => {
@@ -519,7 +261,7 @@ const getRoutineMaxAllowedPatients = (
   if (slotDuration <= 0) return 0;
 
   const capacities = routineDays
-    .filter((day) => day.enabled && day.doctorAvailable)
+    .filter((day) => day.enabled)
     .flatMap((day) => day.shifts.map((shift) => getRoutineShiftCapacity(shift, slotDuration)))
     .filter((capacity) => capacity > 0);
 
@@ -536,24 +278,15 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     WEEK_DAYS.map((item) => ({
       dayOfWeek: item.dayKey,
       label: item.day,
-      doctorAvailable: false,
-      availabilityWindows: [],
       enabled: false,
       shifts: [],
     }))
-  );
-  const [routineAvailabilityByDay, setRoutineAvailabilityByDay] = useState<Map<number, AvailabilityItem[]>>(
-    () => new Map()
   );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingManual, setSavingManual] = useState(false);
   const [savingRoutine, setSavingRoutine] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
-  const [availabilityItems, setAvailabilityItems] = useState<AvailabilityItem[]>([]);
-  const [manualSuggestions, setManualSuggestions] = useState<SessionSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [showManualForm, setShowManualForm] = useState(false);
   const [routineSettings, setRoutineSettings] = useState({
     slotDuration: "15",
@@ -605,50 +338,14 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
       else setLoading(true);
 
       try {
-        const selectedDate = formatLocalDateKey(manualForm.date);
-        const [
-          schedulePayload,
-          routinePayload,
-          availabilityPayload,
-          manualAvailabilityPayload,
-        ] = (await Promise.all([
-          fetchReceptionSessionSchedules(route.params.doctorUserId, true),
+        const [schedulePayload, routinePayload] = (await Promise.all([
+          fetchReceptionSessionSchedules(route.params.doctorUserId, false),
           fetchReceptionSessionRoutine(route.params.doctorUserId),
-          fetchReceptionSessionAvailabilityState(route.params.doctorUserId),
-          fetchReceptionSessionAvailability(route.params.doctorUserId, selectedDate),
-        ])) as [
-          ScheduleItem[],
-          RoutineApiDay[],
-          AvailabilityStateResponse,
-          AvailabilityItem[],
-        ];
+        ])) as [ScheduleItem[], RoutineApiDay[]];
 
         const normalizedSchedules = Array.isArray(schedulePayload) ? schedulePayload : [];
         setItems(normalizedSchedules);
-        const nextAvailability = normalizeAvailabilityState(availabilityPayload);
-        setRoutineAvailabilityByDay(nextAvailability);
-        setRoutineDays(
-          buildRoutineDaysState(Array.isArray(routinePayload) ? routinePayload : [], nextAvailability)
-        );
-
-        const normalizedManualAvailability = Array.isArray(manualAvailabilityPayload)
-          ? manualAvailabilityPayload.map((slot) => ({
-              ...slot,
-              day_of_week:
-                typeof slot.day_of_week === "number" ? slot.day_of_week : getDayKeyFromDate(manualForm.date),
-            }))
-          : [];
-        setAvailabilityItems(normalizedManualAvailability);
-        setManualSuggestions(
-          buildSessionSuggestions(
-            normalizedManualAvailability,
-            normalizedSchedules.filter(
-              (session) => session.is_active !== false && String(session.date) === selectedDate
-            ),
-            manualForm.date
-          )
-        );
-        setSuggestionsError(null);
+        setRoutineDays(buildRoutineDaysState(Array.isArray(routinePayload) ? routinePayload : []));
 
         const firstShift = routinePayload.flatMap((day) => day.routines).find(Boolean);
         if (firstShift) {
@@ -664,7 +361,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
         setRefreshing(false);
       }
     },
-    [manualForm.date, route.params.doctorUserId]
+    [route.params.doctorUserId]
   );
 
   useEffect(() => {
@@ -686,41 +383,6 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     };
   }, [loadData, route.params.doctorUserId]);
 
-  const loadManualSuggestions = useCallback(async () => {
-    setSuggestionsLoading(true);
-    try {
-      const selectedDate = formatLocalDateKey(manualForm.date);
-      const availabilityPayload = (await fetchReceptionSessionAvailability(
-        route.params.doctorUserId,
-        selectedDate
-      )) as AvailabilityItem[];
-      const normalizedAvailability = Array.isArray(availabilityPayload)
-        ? availabilityPayload.map((slot) => ({
-            ...slot,
-            day_of_week:
-              typeof slot.day_of_week === "number" ? slot.day_of_week : getDayKeyFromDate(manualForm.date),
-          }))
-        : [];
-      const normalizedSessions = items.filter(
-        (session) => session.is_active !== false && String(session.date) === selectedDate
-      );
-      setAvailabilityItems(normalizedAvailability);
-      setManualSuggestions(buildSessionSuggestions(normalizedAvailability, normalizedSessions, manualForm.date));
-      setSuggestionsError(null);
-    } catch (error) {
-      setManualSuggestions([]);
-      setSuggestionsError(
-        error instanceof Error ? error.message : "Failed to generate session suggestions"
-      );
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  }, [items, manualForm.date, route.params.doctorUserId]);
-
-  useEffect(() => {
-    void loadManualSuggestions();
-  }, [loadManualSuggestions]);
-
   const routineSlotDurationValue = useMemo(() => Number(routineSettings.slotDuration) || 0, [routineSettings.slotDuration]);
   const routineMaxPatientsValue = useMemo(() => Number(routineSettings.maxPatients) || 0, [routineSettings.maxPatients]);
   const routineMaxAllowedPatients = useMemo(
@@ -731,19 +393,13 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
   const manualMaxPatientsValue = useMemo(() => Number(manualForm.max_patients) || 0, [manualForm.max_patients]);
   const manualTotalMinutes = useMemo(() => minutesBetween(manualForm.start_time, manualForm.end_time), [manualForm.end_time, manualForm.start_time]);
   const manualSlotCount = useMemo(() => calculateSlots(manualForm.start_time, manualForm.end_time, manualSlotDurationValue), [manualForm.end_time, manualForm.start_time, manualSlotDurationValue]);
-  const selectedDayAvailability = useMemo(
-    () => availabilityItems.filter((slot) => slot.is_active !== false),
-    [availabilityItems]
-  );
-
   const routineValidationMessage = useMemo(() => {
     if (routineSlotDurationValue <= 0) return "Routine slot duration must be greater than 0.";
-    const activeDays = routineDays.filter((day) => day.enabled && day.doctorAvailable);
+    const activeDays = routineDays.filter((day) => day.enabled);
     if (activeDays.length === 0) return "Turn on at least one working day.";
     if (routineMaxPatientsValue <= 0) return "Routine max patients must be greater than 0.";
 
     for (const day of activeDays) {
-      if (day.availabilityWindows.length === 0) return `${day.label} is not available in the doctor's schedule.`;
       if (day.shifts.length === 0) return `${day.label}: add at least one shift.`;
       if (hasOverlappingRoutineShifts(day.shifts)) {
         return `${day.label} has overlapping routine shifts.`;
@@ -753,9 +409,6 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
         const shiftEnd = toApiTime(shift.endTime);
         const totalMinutes = minutesBetween(shift.startTime, shift.endTime);
         if (totalMinutes <= 0) return "Routine shift end time must be later than start time.";
-        if (!isShiftInsideAvailability(day.dayOfWeek, shiftStart, shiftEnd, routineAvailabilityByDay)) {
-          return `${day.label} ${shiftStart}-${shiftEnd} is outside availability.`;
-        }
         const slotCount = calculateSlots(shift.startTime, shift.endTime, routineSlotDurationValue);
         if (slotCount <= 0) return "Routine shift is too short for the selected slot duration.";
         if (routineMaxPatientsValue > slotCount) {
@@ -765,7 +418,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     }
 
     return null;
-  }, [routineAvailabilityByDay, routineDays, routineMaxPatientsValue, routineSlotDurationValue]);
+  }, [routineDays, routineMaxPatientsValue, routineSlotDurationValue]);
 
   useEffect(() => {
     if (routineSlotDurationValue <= 0 || routineMaxAllowedPatients <= 0) {
@@ -798,7 +451,6 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
 
   const toggleRoutineDay = useCallback(
     (dayKey: number, value: boolean) => {
-      if (getAvailabilityWindowsForDay(routineAvailabilityByDay, dayKey).length === 0) return;
       setRoutineDays((current) =>
         current.map((day) =>
           day.dayOfWeek === dayKey
@@ -807,34 +459,29 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
                 enabled: value,
                 shifts:
                   value && day.shifts.length === 0
-                    ? [getDefaultShiftForDay(dayKey, routineAvailabilityByDay, day.shifts)].filter(
-                        (shift): shift is RoutineShift => Boolean(shift)
-                      )
+                    ? [getDefaultShiftForDay(day.shifts)]
                     : day.shifts,
               }
             : day
         )
       );
     },
-    [routineAvailabilityByDay]
+    []
   );
 
   const addShift = useCallback(
     (dayKey: number) => {
       setRoutineDays((current) =>
         current.map((day) => {
-          if (day.dayOfWeek !== dayKey || !day.enabled || !day.doctorAvailable) {
+          if (day.dayOfWeek !== dayKey || !day.enabled) {
             return day;
           }
-          const defaultShift = getDefaultShiftForDay(dayKey, routineAvailabilityByDay, day.shifts);
-          if (!defaultShift) {
-            return day;
-          }
+          const defaultShift = getDefaultShiftForDay(day.shifts);
           return { ...day, shifts: [...day.shifts, defaultShift] };
         })
       );
     },
-    [routineAvailabilityByDay]
+    []
   );
 
   const removeShift = useCallback((dayKey: number, shiftId: string) => {
@@ -869,7 +516,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     setSavingRoutine(true);
     try {
       const routinePayload: RoutineGeneratePayload["routine"] = routineDays
-        .filter((day) => day.enabled && day.doctorAvailable && day.shifts.length > 0)
+        .filter((day) => day.enabled && day.shifts.length > 0)
         .map((day) => ({
           day: day.label,
           dayOfWeek: day.dayOfWeek,
@@ -880,13 +527,13 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
         }));
 
       await saveReceptionSessionRoutine(route.params.doctorUserId, {
-        weeks: 4,
+        weeks: 12,
         routine: routinePayload,
         slotDuration: routineSlotDurationValue,
         maxPatients: routineMaxPatientsValue,
       } satisfies RoutineGeneratePayload);
       await loadData("refresh");
-      Alert.alert("Routine Saved", "Routine saved successfully.");
+      Alert.alert("Weekly Schedule Saved", "Weekly session saved successfully.");
     } catch (error) {
       Alert.alert("Routine Save Failed", error instanceof Error ? error.message : "Failed to save routine");
     } finally {
@@ -927,12 +574,11 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
       }
 
       await loadData("refresh");
-      await loadManualSuggestions();
       Alert.alert(
         typeof route.params.editScheduleId === "number" ? "Session Updated" : "Session Created",
         typeof route.params.editScheduleId === "number"
-          ? "Custom session updated successfully."
-          : "Custom session added successfully."
+          ? "Extra session updated successfully."
+          : "Extra session added successfully."
       );
     } catch (error) {
       Alert.alert("Create Failed", error instanceof Error ? error.message : "Failed to create custom session");
@@ -941,7 +587,6 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     }
   }, [
     loadData,
-    loadManualSuggestions,
     manualForm.date,
     manualForm.end_time,
     manualForm.start_time,
@@ -952,17 +597,6 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
     savingManual,
     showManualForm,
   ]);
-
-  const applySuggestion = useCallback((suggestion: SessionSuggestion) => {
-    setManualForm((current) => ({
-      ...current,
-      start_time: parseTimeToDate(suggestion.start),
-      end_time: parseTimeToDate(suggestion.end),
-      slot_duration: String(suggestion.slotDuration),
-      max_patients: String(suggestion.maxPatients),
-    }));
-    setShowManualForm(true);
-  }, []);
 
   const handleManualMaxPatientsChange = useCallback(
     (value: string) => {
@@ -1063,7 +697,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
           <Text style={styles.backButtonText}>{"\u2190"}</Text>
         </TouchableOpacity>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>Manage Sessions</Text>
+          <Text style={styles.headerTitle}>Doctor Schedule</Text>
           <Text style={styles.headerSubtitle}>{route.params.doctorName || "Doctor"}</Text>
         </View>
         <View style={styles.clinicBadge}>
@@ -1113,7 +747,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
               onPress={() => setActiveTab(tab)}
             >
               <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                {tab === "routine" ? "Routine Session" : "Manual Session"}
+                {tab === "routine" ? "Weekly Schedule" : "Extra Session"}
               </Text>
             </TouchableOpacity>
           ))}
@@ -1121,7 +755,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
 
         {activeTab === "routine" ? (
           <View>
-            <InfoCard text="Generates schedule for the next 4 weeks." />
+            <InfoCard text="Weekly sessions are saved as routine templates and generate upcoming doctor sessions like the web panel." />
 
             <View style={styles.settingsRow}>
               <View style={styles.inputGroup}>
@@ -1154,124 +788,94 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
               </Text>
             ) : null}
 
-            {routineDays.map((day) => {
-              return (
-                <View
-                  key={day.dayOfWeek}
-                  style={[
-                    styles.dayCard,
-                    !day.doctorAvailable && styles.dayCardDisabled,
-                    day.enabled && day.doctorAvailable && styles.dayCardActive,
-                  ]}
-                >
-                  <View style={styles.dayHeader}>
-                    <View style={styles.dayTitleRow}>
-                      <Text style={[styles.dayName, !day.doctorAvailable && styles.mutedText]}>
-                        {day.label}
-                      </Text>
-                      {!day.doctorAvailable ? (
-                        <View style={styles.offDutyChip}>
-                          <Text style={styles.offDutyText}>Off Duty</Text>
-                        </View>
-                      ) : null}
+            <Text style={styles.sectionLabel}>Weekly days</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weeklyDateList}>
+              {routineDays.map((day) => {
+                const dayShort = day.label.slice(0, 3);
+                return (
+                  <TouchableOpacity
+                    key={day.dayOfWeek}
+                    style={[styles.weeklyDateCard, day.enabled && styles.weeklyDateCardActive]}
+                    onPress={() => toggleRoutineDay(day.dayOfWeek, !day.enabled)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={[styles.weeklyDateTop, day.enabled && styles.weeklyDateTextActive]}>
+                      Weekly
+                    </Text>
+                    <Text style={[styles.weeklyDateMain, day.enabled && styles.weeklyDateTextActive]}>
+                      {dayShort}
+                    </Text>
+                    <Text style={[styles.weeklyDateBottom, day.enabled && styles.weeklyDateTextActive]}>
+                      {day.enabled ? "On" : "Off"}
+                    </Text>
+                    {day.enabled ? <View style={styles.weeklyActiveDot} /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {routineDays
+              .filter((day) => day.enabled)
+              .map((day) => (
+                <View key={day.dayOfWeek} style={styles.weeklySessionCard}>
+                  <View style={styles.weeklySessionHeader}>
+                    <View>
+                      <Text style={styles.weeklySessionTitle}>{day.label}</Text>
+                      <Text style={styles.weeklySessionMeta}>Weekly recurring session</Text>
                     </View>
-                    <Switch
-                      value={day.enabled}
-                      onValueChange={(value) => toggleRoutineDay(day.dayOfWeek, value)}
-                      disabled={!day.doctorAvailable}
-                      trackColor={{ false: "#E2E8F0", true: "#90E0EF" }}
-                      thumbColor={day.enabled ? "#0077B6" : "#94A3B8"}
-                    />
+                    <TouchableOpacity
+                      style={styles.clearDayButton}
+                      onPress={() => toggleRoutineDay(day.dayOfWeek, false)}
+                    >
+                      <Text style={styles.clearDayText}>Clear</Text>
+                    </TouchableOpacity>
                   </View>
+                  <View style={styles.shiftContentCompact}>
+                    <View style={styles.shiftSummary}>
+                      <Text style={styles.shiftCountText}>{day.shifts.length} shift configured</Text>
+                      <TouchableOpacity onPress={() => addShift(day.dayOfWeek)}>
+                        <Text style={styles.addShiftText}>+ Add Shift</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {day.shifts.map((shift) => {
+                      const shiftStart = formatTime(shift.startTime);
+                      const shiftEnd = formatTime(shift.endTime);
 
-                  {!day.doctorAvailable ? (
-                    <Text style={styles.mutedText}>No doctor availability</Text>
-                  ) : (
-                    <>
-                      <Text style={styles.availabilityText}>
-                        Availability:{" "}
-                        {day.availabilityWindows
-                          .map((window) => `${formatTime(window.start_time)} - ${formatTime(window.end_time)}`)
-                          .join("  •  ")}
-                      </Text>
-                      <View style={styles.timelineTrack}>
-                        {day.availabilityWindows.map((window) => (
-                          <View key={`${day.dayOfWeek}-${window.id}`} style={styles.timelineBlock}>
-                            <Text style={styles.timelineText}>
-                              {formatTime(window.start_time)}-{formatTime(window.end_time)}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-
-                      {day.enabled ? (
-                        <View style={styles.shiftContent}>
-                          <View style={styles.shiftSummary}>
-                            <Text style={styles.shiftCountText}>
-                              {day.shifts.length} shift configured
-                            </Text>
-                            <TouchableOpacity onPress={() => addShift(day.dayOfWeek)}>
-                              <Text style={styles.addShiftText}>+ Add Shift</Text>
-                            </TouchableOpacity>
-                          </View>
-                          {day.shifts.map((shift) => {
-                            const shiftStart = formatTime(shift.startTime);
-                            const shiftEnd = formatTime(shift.endTime);
-                            const shiftError = isShiftInsideAvailability(
-                              day.dayOfWeek,
-                              shiftStart,
-                              shiftEnd,
-                              routineAvailabilityByDay
-                            )
-                              ? null
-                              : `${shiftStart}-${shiftEnd} is outside availability.`;
-
-                            return (
-                              <View key={shift.localId}>
-                                <View style={styles.shiftRow}>
-                                  <TouchableOpacity
-                                    style={styles.shiftRowMain}
-                                    onPress={() =>
-                                      setPickerTarget({
-                                        type: "routine-start",
-                                        dayKey: day.dayOfWeek,
-                                        shiftId: shift.localId,
-                                        openEndAfterConfirm: true,
-                                      })
-                                    }
-                                  >
-                                    <Text style={styles.shiftTime}>
-                                      {shiftStart} - {shiftEnd}
-                                    </Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    style={styles.shiftRemoveButton}
-                                    onPress={() => removeShift(day.dayOfWeek, shift.localId)}
-                                  >
-                                    <Text style={styles.shiftRemoveText}>×</Text>
-                                  </TouchableOpacity>
-                                </View>
-                                {shiftError ? <Text style={styles.validationText}>{shiftError}</Text> : null}
-                              </View>
-                            );
-                          })}
+                      return (
+                        <View key={shift.localId} style={styles.shiftRow}>
+                          <TouchableOpacity
+                            style={styles.shiftRowMain}
+                            onPress={() =>
+                              setPickerTarget({
+                                type: "routine-start",
+                                dayKey: day.dayOfWeek,
+                                shiftId: shift.localId,
+                                openEndAfterConfirm: true,
+                              })
+                            }
+                          >
+                            <Text style={styles.shiftTime}>{shiftStart} - {shiftEnd}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.shiftRemoveButton}
+                            onPress={() => removeShift(day.dayOfWeek, shift.localId)}
+                          >
+                            <Text style={styles.shiftRemoveText}>×</Text>
+                          </TouchableOpacity>
                         </View>
-                      ) : (
-                        <Text style={styles.mutedText}>No clinic session assigned</Text>
-                      )}
-                    </>
-                  )}
+                      );
+                    })}
+                  </View>
                 </View>
-              );
-            })}
+              ))}
 
             {routineValidationMessage ? <Text style={styles.validationText}>{routineValidationMessage}</Text> : null}
           </View>
         ) : (
           <View>
             <View style={styles.manualCard}>
-              <Text style={styles.cardTitle}>Add Custom Session</Text>
-              <Text style={styles.helperText}>Use manual sessions for one-off overrides or exceptions.</Text>
+              <Text style={styles.cardTitle}>Add Extra Session</Text>
+              <Text style={styles.helperText}>Use this for one-time clinic hours outside the weekly schedule.</Text>
 
               <View style={styles.field}>
                 <Text style={styles.inputLabel}>Session Date</Text>
@@ -1282,60 +886,32 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
             </View>
 
             <View style={styles.manualCard}>
-              <Text style={styles.subTitle}>Doctor Availability</Text>
-              <View style={styles.availabilityRow}>
-                {selectedDayAvailability.length === 0 ? (
-                  <Text style={styles.mutedText}>No doctor availability</Text>
-                ) : (
-                  selectedDayAvailability.map((slot) => (
-                    <AvailabilityChip
-                      key={String(slot.id)}
-                      time={`${formatTime(slot.start_time)} - ${formatTime(slot.end_time)}`}
-                    />
+              <Text style={styles.subTitle}>Current extra sessions</Text>
+              {items.filter((item) => item.source === "manual" && item.is_active !== false).length === 0 ? (
+                <Text style={styles.mutedText}>No extra sessions added for this doctor.</Text>
+              ) : (
+                items
+                  .filter((item) => item.source === "manual" && item.is_active !== false)
+                  .slice(0, 5)
+                  .map((item) => (
+                    <View key={item.id} style={styles.extraSessionRow}>
+                      <View>
+                        <Text style={styles.shiftTime}>{formatReadableDate(item.date)}</Text>
+                        <Text style={styles.mutedText}>
+                          {formatTime(item.start_time)} - {formatTime(item.end_time)} · Max {item.max_patients}
+                        </Text>
+                      </View>
+                      <View style={styles.extraChip}>
+                        <Text style={styles.extraChipText}>Extra</Text>
+                      </View>
+                    </View>
                   ))
-                )}
-              </View>
+              )}
             </View>
-
-            <Text style={styles.sectionHeader}>Suggested Sessions</Text>
-            {suggestionsError ? <Text style={styles.validationText}>{suggestionsError}</Text> : null}
-            {suggestionsLoading ? (
-              <View style={styles.suggestedCard}>
-                <ActivityIndicator color="#0077B6" />
-              </View>
-            ) : manualSuggestions.length === 0 ? (
-              <View style={styles.suggestedCard}>
-                <View>
-                  <Text style={styles.dayName}>No suggestions</Text>
-                  <Text style={styles.mutedText}>Choose custom times below</Text>
-                </View>
-              </View>
-            ) : (
-              manualSuggestions.map((suggestion, index) => (
-                <TouchableOpacity
-                  key={`${suggestion.start}-${suggestion.end}-${index}`}
-                  style={styles.suggestedCard}
-                  onPress={() => applySuggestion(suggestion)}
-                >
-                  <View>
-                    <Text style={styles.dayName}>{suggestion.label}</Text>
-                    <Text style={styles.shiftTime}>
-                      {suggestion.start} - {suggestion.end}
-                    </Text>
-                    <Text style={styles.mutedText}>
-                      {suggestion.durationMinutes} min · {suggestion.slotDuration} min slots · {suggestion.maxPatients} patients
-                    </Text>
-                  </View>
-                  <View style={styles.addButtonCircle}>
-                    <Text style={styles.whitePlus}>+</Text>
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
 
             <View style={styles.manualCard}>
               <TouchableOpacity style={styles.customButton} onPress={() => setShowManualForm((current) => !current)}>
-                <Text style={styles.addShiftText}>{showManualForm ? "Hide Custom Session" : "Custom Session"}</Text>
+                <Text style={styles.addShiftText}>{showManualForm ? "Hide Extra Session Form" : "Open Extra Session Form"}</Text>
               </TouchableOpacity>
 
               {showManualForm ? (
@@ -1402,7 +978,7 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.saveButtonText}>
-          {activeTab === "routine" ? "Generate Routine Schedules" : "Save Custom Session"}
+          {activeTab === "routine" ? "Save Weekly Schedule" : "Add Extra Session"}
             </Text>
           )}
         </TouchableOpacity>
@@ -1427,14 +1003,6 @@ function InfoCard({ text }: { text: string }) {
         <Text style={styles.infoIconText}>i</Text>
       </View>
       <Text style={styles.infoText}>{text}</Text>
-    </View>
-  );
-}
-
-function AvailabilityChip({ time }: { time: string }) {
-  return (
-    <View style={styles.chip}>
-      <Text style={styles.chipText}>{time}</Text>
     </View>
   );
 }
@@ -1589,6 +1157,12 @@ const styles = StyleSheet.create({
     color: "#64748B",
     fontWeight: "600",
   },
+  sectionLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 15,
+  },
   input: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
@@ -1601,28 +1175,127 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   inputDisplayText: { color: "#0F172A", fontSize: 16 },
+  weeklyDateList: { gap: 12, paddingBottom: 16 },
+  weeklyDateCard: {
+    width: 65,
+    height: 90,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#D8E7F3",
+  },
+  weeklyDateCardActive: {
+    backgroundColor: "#061A2E",
+    borderColor: "#38BDF8",
+    shadowColor: "#0EA5E9",
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  weeklyDateTop: {
+    fontSize: 10,
+    color: "#64748B",
+    textTransform: "uppercase",
+    fontWeight: "700",
+  },
+  weeklyDateMain: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginVertical: 3,
+  },
+  weeklyDateBottom: { fontSize: 11, color: "#64748B", fontWeight: "600" },
+  weeklyDateTextActive: { color: "#FFFFFF" },
+  weeklyActiveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#38BDF8",
+    marginTop: 5,
+  },
+  weeklySessionCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#D8E7F3",
+  },
+  weeklySessionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  weeklySessionTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A" },
+  weeklySessionMeta: { marginTop: 3, fontSize: 13, color: "#64748B" },
+  clearDayButton: {
+    borderRadius: 999,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  clearDayText: { fontSize: 12, fontWeight: "800", color: "#B91C1C" },
+  shiftContentCompact: { borderTopWidth: 1, borderTopColor: "#EEF5FB", paddingTop: 12 },
   dayCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 24,
+    borderRadius: 28,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "#D8E7F3",
+    overflow: "hidden",
     ...Platform.select({
       ios: {
-        shadowColor: "#3B82F6",
+        shadowColor: "#0B3558",
         shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.06,
-        shadowRadius: 20,
+        shadowOpacity: 0.1,
+        shadowRadius: 22,
       },
       android: { elevation: 3 },
     }),
   },
-  dayCardActive: { borderColor: "#90E0EF", borderWidth: 2 },
+  dayCardActive: {
+    borderColor: "rgba(56,189,248,0.7)",
+    borderWidth: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#0EA5E9",
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.2,
+        shadowRadius: 28,
+      },
+      android: { elevation: 6 },
+    }),
+  },
   dayCardDisabled: { backgroundColor: "#F1F5F9", opacity: 0.65 },
-  dayHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  dayTitleRow: { flexDirection: "row", alignItems: "center" },
+  dayHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
+  dayTitleRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
   dayName: { fontSize: 16, fontWeight: "800", color: "#0F172A", marginRight: 10 },
+  dayNameActive: { color: "#FFFFFF" },
+  dayHint: { marginTop: 3, fontSize: 12, color: "#64748B", fontWeight: "600" },
+  dayHintActive: { color: "rgba(255,255,255,0.72)" },
+  dayShortBadge: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: "#EFF8FF",
+    borderWidth: 1,
+    borderColor: "#D8E7F3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayShortBadgeActive: {
+    backgroundColor: "rgba(56,189,248,0.18)",
+    borderColor: "rgba(125,211,252,0.55)",
+  },
+  dayShortText: { color: "#0EA5E9", fontSize: 12, fontWeight: "900", letterSpacing: 1.4 },
+  dayShortTextActive: { color: "#A5F3FC" },
   mutedText: { color: "#94A3B8", fontSize: 14 },
   offDutyChip: {
     alignSelf: "flex-start",
@@ -1632,6 +1305,36 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   offDutyText: { fontSize: 12, fontWeight: "700", color: "#94A3B8" },
+  weeklyChip: {
+    alignSelf: "flex-start",
+    backgroundColor: "#DDFBFF",
+    borderWidth: 1,
+    borderColor: "#38BDF8",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  weeklyChipText: { fontSize: 12, fontWeight: "800", color: "#0B3558" },
+  weeklyChipActiveWrap: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(56,189,248,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(125,211,252,0.55)",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  weeklyChipTextActive: { fontSize: 12, fontWeight: "900", color: "#CFFAFE" },
+  noSessionChip: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#D8E7F3",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  noSessionChipText: { fontSize: 12, fontWeight: "800", color: "#64748B" },
   availabilityRow: { flexDirection: "row", alignItems: "center", marginTop: 8, flexWrap: "wrap" },
   availabilityText: { fontSize: 13, color: "#64748B", marginBottom: 14 },
   timelineTrack: {
@@ -1649,10 +1352,12 @@ const styles = StyleSheet.create({
   timelineText: { fontSize: 12, fontWeight: "700", color: "#1D4ED8" },
   chip: { backgroundColor: "#CAF0F8", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 15, marginLeft: 5, marginBottom: 6 },
   chipText: { fontSize: 12, color: "#0077B6", fontWeight: "600" },
-  shiftContent: { marginTop: 15, borderTopWidth: 1, borderTopColor: "#F1F5F9", paddingTop: 15 },
+  shiftContent: { marginTop: 15, borderTopWidth: 1, borderTopColor: "rgba(216,231,243,0.8)", paddingTop: 15 },
   shiftSummary: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
   shiftCountText: { fontWeight: "600", color: "#0F172A" },
+  shiftCountTextActive: { color: "rgba(255,255,255,0.84)" },
   addShiftText: { color: "#0077B6", fontWeight: "bold" },
+  addShiftTextActive: { color: "#67E8F9", fontWeight: "900" },
   shiftRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1663,12 +1368,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
   },
+  shiftRowActive: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    padding: 0,
+    borderRadius: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(125,211,252,0.25)",
+  },
   shiftRowMain: {
     flex: 1,
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
   shiftTime: { fontSize: 15, fontWeight: "700", color: "#03045E" },
+  shiftTimeActive: { fontSize: 16, fontWeight: "900", color: "#FFFFFF" },
   shiftRemoveButton: {
     width: 48,
     alignSelf: "stretch",
@@ -1677,7 +1393,16 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: "#E2E8F0",
   },
+  shiftRemoveButtonActive: {
+    width: 48,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeftWidth: 1,
+    borderLeftColor: "rgba(125,211,252,0.25)",
+  },
   shiftRemoveText: { fontSize: 22, lineHeight: 22, color: "#94A3B8" },
+  shiftRemoveTextActive: { fontSize: 22, lineHeight: 22, color: "rgba(255,255,255,0.72)" },
   manualCard: {
     backgroundColor: "#FFFFFF",
     padding: 18,
@@ -1701,6 +1426,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
   },
+  extraSessionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#D8E7F3",
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 10,
+  },
+  extraChip: {
+    backgroundColor: "#ECFEFF",
+    borderWidth: 1,
+    borderColor: "#67E8F9",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  extraChipText: { color: "#0E7490", fontWeight: "800", fontSize: 12 },
   addButtonCircle: {
     width: 36,
     height: 36,

@@ -3,10 +3,14 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
+  ImageBackground,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,59 +22,84 @@ import {
   BottomSheetModal,
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
+import { useNavigation } from "@react-navigation/native";
 import {
   createDoctorExternalSession,
   deleteDoctorExternalSession,
   fetchDoctorExternalSessions,
-  fetchDoctorSessionsRange,
+  fetchDoctorRoutine,
 } from "../../services/doctorScheduleService";
 import { getSocket } from "../../services/socket";
-import type { DoctorExternalSession, ScheduleSession } from "./scheduleTypes";
+import type {
+  DoctorExternalSession,
+  DoctorRoutineDay,
+  ScheduleDayGroup,
+  ScheduleSession,
+} from "./scheduleTypes";
 import {
   doctorColors,
+  doctorRadius,
+  doctorShadows,
+  doctorSpacing,
   getDoctorStatusPalette,
   type DoctorStatusTone,
 } from "../../constants/doctorTheme";
 import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
+import {
+  formatLongDateLabel,
+  formatTimeRangeLabel,
+} from "../../utils/dateUtils";
+import { getDisplayInitials, resolveDoctorImage } from "../../utils/imageUtils";
 
 type RoutineTabProps = {
-  onPreview?: () => void;
+  schedule: ScheduleDayGroup[];
+  isLoadingSchedule?: boolean;
 };
 
-type WeeklyPatternItem = {
+type WeeklyRoutineCard = {
   id: string;
-  day: string;
-  dayOrder: number;
+  clinicId?: string;
+  clinicName: string;
+  dayKey: number;
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  maxPatients?: number;
+  location?: string | null;
+  imageUrl?: string | null;
+  nextSession?: ScheduleSession | null;
+  todaySession?: ScheduleSession | null;
+  liveSession?: ScheduleSession | null;
+};
+
+type ExternalRoutineCard = {
+  id: string;
+  dayLabel: string;
+  dayKey: number;
   startTime: string;
   endTime: string;
   clinicName: string;
   note?: string | null;
-  source: "internal" | "external";
   hasConflict?: boolean;
   conflictReason?: string | null;
-  bookingCount?: number | null;
-  sessionStatus?: string | null;
 };
 
-const WEEKDAY_ORDER: Record<string, number> = {
-  Monday: 1,
-  Tuesday: 2,
-  Wednesday: 3,
-  Thursday: 4,
-  Friday: 5,
-  Saturday: 6,
-  Sunday: 7,
-};
-
-const SHORT_DAY_OPTIONS = [
-  { key: 1, label: "Mon" },
-  { key: 2, label: "Tue" },
-  { key: 3, label: "Wed" },
-  { key: 4, label: "Thu" },
-  { key: 5, label: "Fri" },
-  { key: 6, label: "Sat" },
-  { key: 0, label: "Sun" },
+const DAY_OPTIONS = [
+  { key: 1, shortLabel: "Mon", fullLabel: "Monday" },
+  { key: 2, shortLabel: "Tue", fullLabel: "Tuesday" },
+  { key: 3, shortLabel: "Wed", fullLabel: "Wednesday" },
+  { key: 4, shortLabel: "Thu", fullLabel: "Thursday" },
+  { key: 5, shortLabel: "Fri", fullLabel: "Friday" },
+  { key: 6, shortLabel: "Sat", fullLabel: "Saturday" },
+  { key: 0, shortLabel: "Sun", fullLabel: "Sunday" },
 ] as const;
+
+const DAY_NAME_BY_KEY = DAY_OPTIONS.reduce<Record<number, string>>((acc, item) => {
+  acc[item.key] = item.fullLabel;
+  return acc;
+}, {});
+
+const NO_SESSIONS_DAY_BANNER = require("../../../assets/images/no-sessions-day-banner.png");
 
 const formatLocalDateKey = (value: Date) => {
   const year = value.getFullYear();
@@ -104,135 +133,241 @@ const formatClock = (value: string) => {
   return `${normalizedHour}:${String(minute).padStart(2, "0")} ${suffix}`;
 };
 
-const getWeekdayLabel = (value: string) => {
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return "Unknown";
-  }
+const getSessionSortKey = (session: ScheduleSession) =>
+  new Date(`${session.date}T${session.startTime || "00:00"}:00`).getTime();
 
-  return parsed.toLocaleDateString("en-US", { weekday: "long" });
+const getDurationMinutes = (startTime: string, endTime: string) => {
+  const [startHour = "0", startMinute = "0"] = String(startTime || "").split(":");
+  const [endHour = "0", endMinute = "0"] = String(endTime || "").split(":");
+  const start = Number(startHour) * 60 + Number(startMinute);
+  const end = Number(endHour) * 60 + Number(endMinute);
+  return Math.max(end - start, 0);
 };
 
-const normalizeStatusTone = (status?: string | null, hasConflict?: boolean): DoctorStatusTone => {
-  if (hasConflict) {
-    return "conflict";
-  }
-  const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "active" || normalized === "live") {
-    return "live";
-  }
-  if (normalized === "completed") {
-    return "completed";
-  }
-  if (normalized === "cancelled" || normalized === "missed") {
-    return "cancelled";
-  }
+const formatDurationLabel = (totalMinutes: number) => {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
+};
+
+const getRoutineStatusTone = (routine: WeeklyRoutineCard): DoctorStatusTone => {
+  if (routine.liveSession) return "live";
+  if (routine.todaySession) return "upcoming";
   return "upcoming";
 };
 
-const normalizeSessionLabel = (status?: string | null, hasConflict?: boolean) => {
-  if (hasConflict) {
-    return "Conflict";
-  }
-  const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "active" || normalized === "live") {
-    return "Live";
-  }
-  if (normalized === "completed") {
-    return "Completed";
-  }
-  if (normalized === "cancelled" || normalized === "missed") {
-    return "Cancelled";
-  }
-  return "Upcoming";
+const getRoutineStatusLabel = (routine: WeeklyRoutineCard) => {
+  if (routine.liveSession) return "Live";
+  if (routine.todaySession) return "Active Today";
+  if (routine.nextSession) return "Upcoming";
+  return "Assigned";
 };
 
-const groupSessions = (sessions: ScheduleSession[]): WeeklyPatternItem[] => {
-  const grouped = new Map<string, WeeklyPatternItem>();
-
-  sessions.forEach((session) => {
-    const day = getWeekdayLabel(session.date);
-    const clinicKey = String(session.clinicId || session.clinicName || "").trim().toLowerCase();
-    const key = `${day}_${session.startTime}_${session.endTime}_${clinicKey}`;
-    const existing = grouped.get(key);
-
-    if (!existing) {
-      grouped.set(key, {
-        id: key,
-        day,
-        dayOrder: WEEKDAY_ORDER[day] ?? 99,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        clinicName: session.clinicName,
-        note: session.note ?? null,
-        source: "internal",
-        hasConflict: false,
-        bookingCount: session.patientCount ?? 0,
-        sessionStatus: session.status,
-      });
-      return;
-    }
-
-    grouped.set(key, {
-      ...existing,
-      bookingCount: (existing.bookingCount ?? 0) + (session.patientCount ?? 0),
-      sessionStatus:
-        normalizeStatusTone(session.status) === "live"
-          ? session.status
-          : existing.sessionStatus ?? session.status,
-    });
-  });
-
-  return [...grouped.values()].sort((left, right) => {
-    if (left.dayOrder !== right.dayOrder) return left.dayOrder - right.dayOrder;
-    if (left.startTime !== right.startTime) return left.startTime.localeCompare(right.startTime);
-    if (left.endTime !== right.endTime) return left.endTime.localeCompare(right.endTime);
-    return left.clinicName.localeCompare(right.clinicName);
-  });
+const getTodayOption = () => {
+  const todayKey = new Date().getDay();
+  return DAY_OPTIONS.find((item) => item.key === todayKey) ?? DAY_OPTIONS[0];
 };
 
-const groupExternalSessions = (sessions: DoctorExternalSession[]): WeeklyPatternItem[] =>
+const groupExternalSessions = (sessions: DoctorExternalSession[]): ExternalRoutineCard[] =>
   [...sessions]
     .map((session) => ({
       id: session.id,
-      day: session.day,
-      dayOrder: WEEKDAY_ORDER[session.day] ?? 99,
+      dayLabel: session.day,
+      dayKey: session.dayKey,
       startTime: session.startTime,
       endTime: session.endTime,
       clinicName: session.clinicName,
       note: session.note ?? null,
-      source: "external" as const,
       hasConflict: Boolean(session.hasConflict),
       conflictReason: session.conflictReason ?? null,
-      bookingCount: null,
-      sessionStatus: session.hasConflict ? "Conflict" : "Upcoming",
     }))
     .sort((left, right) => {
-      if (left.dayOrder !== right.dayOrder) return left.dayOrder - right.dayOrder;
+      if (left.dayKey !== right.dayKey) return left.dayKey - right.dayKey;
       if (left.startTime !== right.startTime) return left.startTime.localeCompare(right.startTime);
-      if (left.endTime !== right.endTime) return left.endTime.localeCompare(right.endTime);
-      return left.clinicName.localeCompare(right.clinicName);
+      return left.endTime.localeCompare(right.endTime);
     });
 
-const DayPill = ({
-  day,
+const buildRoutineCardsFromSessions = (sessions: ScheduleSession[]) => {
+  const todayDateKey = formatLocalDateKey(new Date());
+  const map = new Map<string, WeeklyRoutineCard>();
+
+  sessions
+    .filter((session) => session.source !== "external")
+    .forEach((session) => {
+      const parsedDay = new Date(`${session.date}T00:00:00`);
+      if (Number.isNaN(parsedDay.getTime())) return;
+
+      const dayKey = parsedDay.getDay();
+      const dayLabel =
+        DAY_NAME_BY_KEY[dayKey] || parsedDay.toLocaleDateString("en-US", { weekday: "long" });
+      const clinicKey = String(session.clinicId || session.clinicName || "clinic").trim().toLowerCase();
+      const id = `${dayKey}_${clinicKey}_${session.startTime}_${session.endTime}`;
+      const nextImage = resolveDoctorImage(session.coverImageUrl ?? null, session.logoUrl ?? null);
+      const existing = map.get(id);
+
+      const nextSessionDateTime = new Date(`${session.date}T${session.startTime}`);
+      const existingNextDateTime =
+        existing?.nextSession
+          ? new Date(`${existing.nextSession.date}T${existing.nextSession.startTime}`)
+          : null;
+
+      const isToday = session.date === todayDateKey;
+      const normalizedStatus = String(session.status || "").toLowerCase();
+      const isLive = normalizedStatus === "active" || normalizedStatus === "live";
+      const isCompleted =
+        normalizedStatus === "completed" ||
+        normalizedStatus === "cancelled" ||
+        normalizedStatus === "missed";
+
+      const candidateNextSession =
+        !isCompleted &&
+        !Number.isNaN(nextSessionDateTime.getTime()) &&
+        (!existingNextDateTime || nextSessionDateTime.getTime() < existingNextDateTime.getTime())
+          ? session
+          : existing?.nextSession ?? null;
+
+      map.set(id, {
+        id,
+        clinicId: session.clinicId,
+        clinicName: session.clinicName,
+        dayKey,
+        dayLabel,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        maxPatients: session.maxPatients,
+        location: session.location ?? existing?.location ?? null,
+        imageUrl: nextImage ?? existing?.imageUrl ?? null,
+        nextSession: candidateNextSession,
+        todaySession: isToday ? session : existing?.todaySession ?? null,
+        liveSession: isLive ? session : existing?.liveSession ?? null,
+      });
+    });
+
+  return [...map.values()].sort((left, right) => {
+    if (left.dayKey !== right.dayKey) return left.dayKey - right.dayKey;
+    if (left.startTime !== right.startTime) return left.startTime.localeCompare(right.startTime);
+    return left.clinicName.localeCompare(right.clinicName);
+  });
+};
+
+const buildRoutineCardsFromRoutineDays = (
+  routineDays: DoctorRoutineDay[],
+  sessions: ScheduleSession[]
+) => {
+  const todayDateKey = formatLocalDateKey(new Date());
+
+  return routineDays
+    .flatMap((day) =>
+      day.routines.map<WeeklyRoutineCard>((routine) => {
+        const matchedSessions = sessions
+          .filter((session) => {
+            if (session.source === "external") return false;
+            const sessionDate = new Date(`${session.date}T00:00:00`);
+            if (Number.isNaN(sessionDate.getTime())) return false;
+
+            const sameDay = sessionDate.getDay() === day.dayKey;
+            const sameClinic =
+              (routine.clinicId && session.clinicId && routine.clinicId === session.clinicId) ||
+              routine.clinicName.trim().toLowerCase() === session.clinicName.trim().toLowerCase();
+            const sameTime =
+              routine.startTime === session.startTime && routine.endTime === session.endTime;
+
+            return sameDay && sameClinic && sameTime;
+          })
+          .sort((left, right) =>
+            `${left.date}${left.startTime}`.localeCompare(`${right.date}${right.startTime}`)
+          );
+
+        const liveSession =
+          matchedSessions.find((session) => {
+            const normalizedStatus = String(session.status || "").toLowerCase();
+            return normalizedStatus === "active" || normalizedStatus === "live";
+          }) ?? null;
+
+        const todaySession =
+          matchedSessions.find((session) => session.date === todayDateKey) ?? null;
+
+        const nextSession = matchedSessions[0] ?? null;
+        const imageUrl = resolveDoctorImage(routine.coverImageUrl, routine.logoUrl);
+
+        return {
+          id: routine.id,
+          clinicId: routine.clinicId,
+          clinicName: routine.clinicName,
+          dayKey: day.dayKey,
+          dayLabel: day.day || DAY_NAME_BY_KEY[day.dayKey] || "Assigned Day",
+          startTime: routine.startTime,
+          endTime: routine.endTime,
+          maxPatients: routine.maxPatients,
+          location: routine.location ?? null,
+          imageUrl: imageUrl ?? null,
+          nextSession,
+          todaySession,
+          liveSession,
+        };
+      })
+    )
+    .sort((left, right) => {
+      if (left.dayKey !== right.dayKey) return left.dayKey - right.dayKey;
+      if (left.startTime !== right.startTime) return left.startTime.localeCompare(right.startTime);
+      return left.clinicName.localeCompare(right.clinicName);
+    });
+};
+
+const DayChip = ({
+  label,
   isSelected,
+  isToday,
   onPress,
 }: {
-  day: string;
+  label: string;
   isSelected: boolean;
+  isToday: boolean;
   onPress: () => void;
 }) => (
   <TouchableOpacity
-    style={[styles.sheetDayPill, isSelected && styles.sheetDayPillSelected]}
+    style={[styles.dayChip, isSelected && styles.dayChipSelected, isToday && styles.dayChipToday]}
     onPress={onPress}
     activeOpacity={0.85}
-    accessibilityRole="button"
-    accessibilityLabel={`Select ${day}`}
   >
-    <Text style={[styles.sheetDayPillText, isSelected && styles.sheetDayPillTextSelected]}>{day}</Text>
+    <Text style={[styles.dayChipText, isSelected && styles.dayChipTextSelected]}>{label}</Text>
+    {isToday ? <Text style={[styles.dayChipTodayText, isSelected && styles.dayChipTodayTextSelected]}>Today</Text> : null}
   </TouchableOpacity>
 );
+
+const ClinicThumbnail = ({
+  imageUrl,
+  clinicName,
+}: {
+  imageUrl?: string | null;
+  clinicName: string;
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [imageUrl]);
+
+  if (imageUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: imageUrl }}
+        style={styles.clinicImage}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <View style={styles.clinicImageFallback}>
+      <Ionicons name="business-outline" size={20} color={doctorColors.primary} />
+      <Text style={styles.clinicImageFallbackText}>{getDisplayInitials(clinicName, "CL")}</Text>
+    </View>
+  );
+};
 
 const TimeInput = ({
   label,
@@ -252,12 +387,15 @@ const TimeInput = ({
   </TouchableOpacity>
 );
 
-export default function RoutineTab(_: RoutineTabProps) {
+export default function RoutineTab({ schedule, isLoadingSchedule }: RoutineTabProps) {
+  const navigation = useNavigation<any>();
+  const { width, height } = useWindowDimensions();
+  const scrollViewRef = useRef<ScrollView>(null);
   const externalSheetRef = useRef<BottomSheetModal>(null);
-  const [sessions, setSessions] = useState<ScheduleSession[]>([]);
+  const [routineDays, setRoutineDays] = useState<DoctorRoutineDay[]>([]);
+  const [routineRequestFailed, setRoutineRequestFailed] = useState(false);
   const [externalSessions, setExternalSessions] = useState<DoctorExternalSession[]>([]);
   const [supportsExternalSessions, setSupportsExternalSessions] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showExternalModal, setShowExternalModal] = useState(false);
   const [savingExternal, setSavingExternal] = useState(false);
@@ -265,6 +403,11 @@ export default function RoutineTab(_: RoutineTabProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [timePickerTarget, setTimePickerTarget] = useState<"startTime" | "endTime" | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [selectedDayKey, setSelectedDayKey] = useState<number>(getTodayOption().key);
+  const [scrollY, setScrollY] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(height);
+  const [externalSectionY, setExternalSectionY] = useState(0);
+  const [externalSectionHeight, setExternalSectionHeight] = useState(0);
   const [externalForm, setExternalForm] = useState({
     dayOfWeek: 1,
     startTime: "",
@@ -272,6 +415,7 @@ export default function RoutineTab(_: RoutineTabProps) {
     clinicName: "",
     note: "",
   });
+
   const externalSheetSnapPoints = useMemo(() => ["78%"], []);
 
   const resetExternalForm = useCallback(() => {
@@ -285,54 +429,54 @@ export default function RoutineTab(_: RoutineTabProps) {
     setFormError(null);
   }, []);
 
-  const loadSessions = useCallback(async () => {
+  const loadRoutineDays = useCallback(async () => {
     try {
-      setLoading(true);
+      const next = await fetchDoctorRoutine();
+      setRoutineDays(next);
+      setRoutineRequestFailed(false);
+    } catch {
+      setRoutineDays([]);
+      setRoutineRequestFailed(true);
+    }
+  }, []);
+
+  const loadExternalSessions = useCallback(async () => {
+    try {
       setError(null);
 
-      const start = formatLocalDateKey(new Date());
-      const end = formatLocalDateKey(addDays(new Date(), 90));
-      const data = await fetchDoctorSessionsRange(start, end);
-
-      let external: DoctorExternalSession[] = [];
-      try {
-        external = await fetchDoctorExternalSessions();
+      const external = await fetchDoctorExternalSessions();
+      if (Array.isArray(external)) {
         setSupportsExternalSessions(true);
-      } catch {
-        setSupportsExternalSessions(false);
       }
-
-      const sorted = [...data].sort((left, right) =>
-        `${left.date}${left.startTime}`.localeCompare(`${right.date}${right.startTime}`)
-      );
-
-      setSessions(sorted);
       setExternalSessions(external);
-    } catch (err) {
-      setSessions([]);
+    } catch {
       setExternalSessions([]);
       setSupportsExternalSessions(false);
-      setError(err instanceof Error ? err.message : "Could not load your routine.");
-    } finally {
-      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions]);
+    void loadExternalSessions();
+  }, [loadExternalSessions]);
+
+  useEffect(() => {
+    void loadRoutineDays();
+  }, [loadRoutineDays]);
 
   useEffect(() => {
     const socket = getSocket();
     const handleScheduleUpdate = () => {
-      void loadSessions();
+      void loadRoutineDays();
+      void loadExternalSessions();
     };
 
     socket.on("schedule:update", handleScheduleUpdate);
+    socket.on("queue:update", handleScheduleUpdate);
     return () => {
       socket.off("schedule:update", handleScheduleUpdate);
+      socket.off("queue:update", handleScheduleUpdate);
     };
-  }, [loadSessions]);
+  }, [loadExternalSessions, loadRoutineDays]);
 
   useEffect(() => {
     if (showExternalModal) {
@@ -342,30 +486,102 @@ export default function RoutineTab(_: RoutineTabProps) {
     }
   }, [showExternalModal]);
 
-  const groupedSessions = useMemo(() => {
-    const internal = groupSessions(sessions);
-    const external = groupExternalSessions(externalSessions);
-    return [...internal, ...external].sort((left, right) => {
-      if (left.dayOrder !== right.dayOrder) return left.dayOrder - right.dayOrder;
-      if (left.startTime !== right.startTime) return left.startTime.localeCompare(right.startTime);
-      if (left.endTime !== right.endTime) return left.endTime.localeCompare(right.endTime);
-      if (left.clinicName !== right.clinicName) return left.clinicName.localeCompare(right.clinicName);
-      return left.source.localeCompare(right.source);
-    });
-  }, [externalSessions, sessions]);
-
-  const internalItems = useMemo(
-    () => groupedSessions.filter((item) => item.source === "internal"),
-    [groupedSessions]
+  const sessions = useMemo(
+    () => schedule.flatMap((group) => group.sessions || []),
+    [schedule]
   );
-  const externalItems = useMemo(
-    () => groupedSessions.filter((item) => item.source === "external"),
-    [groupedSessions]
+  const fallbackRoutineCards = useMemo(() => buildRoutineCardsFromSessions(sessions), [sessions]);
+  const routineCards = useMemo(() => {
+    if (routineDays.length > 0) {
+      return buildRoutineCardsFromRoutineDays(routineDays, sessions);
+    }
+    return fallbackRoutineCards;
+  }, [fallbackRoutineCards, routineDays, sessions]);
+  const externalItems = useMemo(() => groupExternalSessions(externalSessions), [externalSessions]);
+  const todayOption = useMemo(() => getTodayOption(), []);
+  const isExternalSectionVisible = useMemo(() => {
+    if (!supportsExternalSessions || externalSectionY <= 0 || externalSectionHeight <= 0) {
+      return false;
+    }
+
+    const viewportTop = scrollY + 100;
+    const viewportBottom = scrollY + viewportHeight - 120;
+    const sectionTop = externalSectionY;
+    const sectionBottom = externalSectionY + externalSectionHeight;
+
+    return sectionTop < viewportBottom && sectionBottom > viewportTop;
+  }, [externalSectionHeight, externalSectionY, scrollY, supportsExternalSessions, viewportHeight]);
+
+  const shouldShowFloatingAdd = supportsExternalSessions && !isExternalSectionVisible;
+
+  const selectedDayLabel =
+    DAY_OPTIONS.find((item) => item.key === selectedDayKey)?.fullLabel ?? "Selected Day";
+
+  const routinesForSelectedDay = useMemo(
+    () => routineCards.filter((item) => item.dayKey === selectedDayKey),
+    [routineCards, selectedDayKey]
+  );
+
+  const weeklySummary = useMemo(() => {
+    const clinicDays = new Set(routineCards.map((item) => item.dayKey)).size;
+    const now = Date.now();
+    const nextSession = [...sessions]
+      .filter((item) => item.source !== "external")
+      .filter((item) => {
+        const startAt = getSessionSortKey(item);
+        if (Number.isNaN(startAt)) return false;
+        return startAt >= now || String(item.status || "").toLowerCase() === "active";
+      })
+      .sort((left, right) => getSessionSortKey(left) - getSessionSortKey(right))[0];
+    const totalWorkingMinutes = routineCards.reduce(
+      (sum, item) => sum + getDurationMinutes(item.startTime, item.endTime),
+      0
+    );
+
+    return {
+      clinicDays,
+      weeklySessions: routineCards.length,
+      totalWorkingHoursLabel: formatDurationLabel(totalWorkingMinutes),
+      nextLabel: nextSession
+        ? `${formatLongDateLabel(nextSession.date)}, ${formatTimeRangeLabel(nextSession.startTime, nextSession.endTime)}`
+        : null,
+      nextSession: nextSession ?? null,
+    };
+  }, [routineCards, sessions]);
+
+  const upcomingSessions = useMemo(
+    () => {
+      const now = Date.now();
+      return [...sessions]
+        .filter((item) => item.source !== "external")
+        .filter((item) => {
+          const startAt = getSessionSortKey(item);
+          if (Number.isNaN(startAt)) return false;
+          return startAt >= now || String(item.status || "").toLowerCase() === "active";
+        })
+        .sort((left, right) => getSessionSortKey(left) - getSessionSortKey(right))
+        .slice(0, 3);
+    },
+    [sessions]
   );
 
   const closeExternalSheet = useCallback(() => {
     setShowExternalModal(false);
   }, []);
+
+  const scrollToExternalSection = useCallback(() => {
+    if (externalSectionY > 0) {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(externalSectionY - 92, 0),
+        animated: true,
+      });
+      return;
+    }
+
+    resetExternalForm();
+    setSaveSuccess(null);
+    setShowExternalModal(true);
+  }, [externalSectionY, resetExternalForm, setSaveSuccess]);
 
   const renderExternalSheetBackdrop = useCallback(
     (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
@@ -418,9 +634,7 @@ export default function RoutineTab(_: RoutineTabProps) {
         setFormError(result.conflictReason);
       }
     } catch (err) {
-      setFormError(
-        err instanceof Error ? err.message : "Could not save your external session right now."
-      );
+      setFormError(err instanceof Error ? err.message : "Could not save your external session right now.");
     } finally {
       setSavingExternal(false);
     }
@@ -440,9 +654,7 @@ export default function RoutineTab(_: RoutineTabProps) {
               disabled={isDisabled}
               onPress={() => void handleSaveExternalSession()}
             >
-              <Text style={styles.sheetSaveText}>
-                {savingExternal ? "Saving..." : "Save External Session"}
-              </Text>
+              <Text style={styles.sheetSaveText}>{savingExternal ? "Saving..." : "Save External Session"}</Text>
             </TouchableOpacity>
           </View>
         </BottomSheetFooter>
@@ -451,7 +663,7 @@ export default function RoutineTab(_: RoutineTabProps) {
     [closeExternalSheet, handleSaveExternalSession, savingExternal, validateExternalForm]
   );
 
-  const handleDeleteExternal = useCallback((item: WeeklyPatternItem) => {
+  const handleDeleteExternal = useCallback((item: ExternalRoutineCard) => {
     Alert.alert("Delete External Session", "Remove this outside commitment from your routine?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -475,81 +687,198 @@ export default function RoutineTab(_: RoutineTabProps) {
     ]);
   }, []);
 
+  const openRoutineQueue = useCallback(
+    (routine: WeeklyRoutineCard) => {
+      const targetSession = routine.liveSession || routine.todaySession || routine.nextSession;
+      if (!targetSession?.id) return;
+
+      navigation.navigate("DoctorTabs", {
+        screen: "DoctorQueueControl",
+        params: {
+          scheduleId: targetSession.id,
+          sessionId: targetSession.id,
+          clinicId: targetSession.clinicId,
+          medicalCenterId: targetSession.clinicId,
+          clinicName: targetSession.clinicName,
+          date: targetSession.date,
+          startTime: targetSession.startTime,
+          endTime: targetSession.endTime,
+        },
+      });
+    },
+    [navigation]
+  );
+
+  const openRoutineDetails = useCallback(
+    (routine: WeeklyRoutineCard) => {
+      navigation.navigate("DoctorSchedulePreview", {
+        shifts: [
+          {
+            id: routine.nextSession?.id || routine.id,
+            clinicId: routine.clinicId,
+            clinicName: routine.clinicName,
+            date: routine.nextSession?.date || routine.dayLabel,
+            location: routine.location,
+            day: routine.dayLabel,
+            start_time: routine.startTime,
+            end_time: routine.endTime,
+            max_patients: routine.maxPatients ?? null,
+          },
+        ],
+      });
+    },
+    [navigation]
+  );
+
   const renderRoutineCard = useCallback(
-    ({ item }: { item: WeeklyPatternItem }) => {
-      const statusLabel = normalizeSessionLabel(item.sessionStatus, item.hasConflict);
-      const statusTone = normalizeStatusTone(item.sessionStatus, item.hasConflict);
-      const statusPalette = getDoctorStatusPalette(statusTone);
-      const isExternal = item.source === "external";
+    ({ item }: { item: WeeklyRoutineCard }) => {
+      const statusLabel = getRoutineStatusLabel(item);
+      const statusTone = getRoutineStatusTone(item);
+      const canOpenQueue = Boolean(item.liveSession || item.todaySession);
 
       return (
-        <View style={[styles.card, isExternal ? styles.externalCard : styles.internalCard]}>
-          <View style={styles.cardTopRow}>
-            <View style={styles.cardDayBlock}>
-              <Text style={styles.cardDay}>{item.day}</Text>
-              <Text style={styles.cardTime}>
-                {formatClock(item.startTime)} - {formatClock(item.endTime)}
-              </Text>
+        <View style={[styles.routineCard, { width: Math.max(width - 56, 280) }]}>
+          <View style={styles.routineTopRow}>
+            <ClinicThumbnail imageUrl={item.imageUrl} clinicName={item.clinicName} />
+            <View style={styles.routineCopy}>
+              <Text style={styles.routineClinicName}>{item.clinicName}</Text>
+              <Text style={styles.routineLocation}>{item.location || "Location will appear once available"}</Text>
             </View>
-
-            <View style={styles.cardActions}>
-              <ScheduleStatusBadge label={statusLabel} tone={statusTone} />
-              {isExternal ? (
-                <TouchableOpacity
-                  style={styles.deleteExternalButton}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete external session at ${item.clinicName}`}
-                  activeOpacity={0.88}
-                  disabled={deletingId === item.id}
-                  onPress={() => handleDeleteExternal(item)}
-                >
-                  <Ionicons name="trash-outline" size={16} color={doctorColors.primary} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
+            <ScheduleStatusBadge label={statusLabel} tone={statusTone} />
           </View>
 
-          <View style={styles.locationRow}>
-            <Ionicons
-              name={isExternal ? "navigate-outline" : "business-outline"}
-              size={16}
-              color={doctorColors.primary}
-            />
-            <Text style={styles.locationName} numberOfLines={2}>
-              {item.clinicName}
-            </Text>
-          </View>
-
-          <View style={styles.metaRow}>
-            <View style={[styles.sourcePill, isExternal ? styles.externalPill : styles.internalPill]}>
-              <Text style={[styles.sourcePillText, isExternal ? styles.externalPillText : styles.internalPillText]}>
-                {isExternal ? "External Session" : "Clinic Routine"}
-              </Text>
+          <View style={styles.routineMetaRow}>
+            <View style={styles.metaPill}>
+              <Ionicons name="calendar-outline" size={14} color={doctorColors.primary} />
+              <Text style={styles.metaPillText}>{item.dayLabel}</Text>
             </View>
-            {!isExternal && typeof item.bookingCount === "number" ? (
-              <View style={styles.bookingPill}>
+            <View style={styles.metaPill}>
+              <Ionicons name="time-outline" size={14} color={doctorColors.primary} />
+              <Text style={styles.metaPillText}>{formatTimeRangeLabel(item.startTime, item.endTime)}</Text>
+            </View>
+            {typeof item.maxPatients === "number" && item.maxPatients > 0 ? (
+              <View style={styles.metaPill}>
                 <Ionicons name="people-outline" size={14} color={doctorColors.primary} />
-                <Text style={styles.bookingPillText}>
-                  {item.bookingCount} booking{item.bookingCount === 1 ? "" : "s"}
-                </Text>
+                <Text style={styles.metaPillText}>Max {item.maxPatients}</Text>
               </View>
             ) : null}
           </View>
 
-          {item.note ? <Text style={styles.noteText}>{item.note}</Text> : null}
+          <TouchableOpacity
+            style={[styles.routineActionButton, canOpenQueue ? styles.primaryActionButton : styles.secondaryActionButton]}
+            activeOpacity={0.9}
+            onPress={() => (canOpenQueue ? openRoutineQueue(item) : openRoutineDetails(item))}
+          >
+            <Text style={[styles.routineActionText, canOpenQueue ? styles.primaryActionText : styles.secondaryActionText]}>
+              {canOpenQueue ? "Open Queue" : "View Details"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    },
+    [openRoutineDetails, openRoutineQueue, width]
+  );
 
-          {item.hasConflict ? (
-            <View style={[styles.conflictBox, { backgroundColor: statusPalette.backgroundColor }]}>
-              <View style={styles.conflictHeader}>
-                <Ionicons name="warning-outline" size={16} color={statusPalette.textColor} />
-                <Text style={[styles.conflictTitle, { color: statusPalette.textColor }]}>
-                  Schedule conflict
-                </Text>
-              </View>
-              <Text style={styles.conflictText}>
-                {item.conflictReason || "This overlaps with another session in your routine."}
+  const renderUpcomingCard = useCallback(
+    ({ item }: { item: ScheduleSession }) => {
+      const normalizedStatus = String(item.status || "").toLowerCase();
+      const canOpenQueue = normalizedStatus === "active" || normalizedStatus === "live" || item.date === formatLocalDateKey(new Date());
+      const tone: DoctorStatusTone =
+        normalizedStatus === "active" || normalizedStatus === "live" ? "live" : "upcoming";
+
+      return (
+        <View style={[styles.upcomingCard, { width: Math.max(width - 56, 280) }]}>
+          <View style={styles.upcomingTopRow}>
+            <View style={styles.upcomingCopy}>
+              <Text style={styles.upcomingDate}>{formatLongDateLabel(item.date)}</Text>
+              <Text style={styles.upcomingClinic}>{item.clinicName}</Text>
+              <Text style={styles.upcomingMeta}>{formatTimeRangeLabel(item.startTime, item.endTime)}</Text>
+              {item.location ? <Text style={styles.upcomingLocation}>{item.location}</Text> : null}
+            </View>
+            <ScheduleStatusBadge label={canOpenQueue ? "Startable" : "Upcoming"} tone={tone} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.inlineAction, !canOpenQueue && styles.inlineActionSecondary]}
+            activeOpacity={0.88}
+            onPress={() => {
+              if (canOpenQueue) {
+                navigation.navigate("DoctorTabs", {
+                  screen: "DoctorQueueControl",
+                  params: {
+                    scheduleId: item.id,
+                    sessionId: item.id,
+                    clinicId: item.clinicId,
+                    medicalCenterId: item.clinicId,
+                    clinicName: item.clinicName,
+                    date: item.date,
+                    startTime: item.startTime,
+                    endTime: item.endTime,
+                  },
+                });
+                return;
+              }
+
+              navigation.navigate("DoctorSchedulePreview", {
+                shifts: [
+                  {
+                    id: item.id,
+                    clinicId: item.clinicId,
+                    clinicName: item.clinicName,
+                    date: item.date,
+                    location: item.location,
+                    day: item.date,
+                    start_time: item.startTime,
+                    end_time: item.endTime,
+                    max_patients: item.maxPatients ?? null,
+                  },
+                ],
+              });
+            }}
+          >
+            <Text style={[styles.inlineActionText, !canOpenQueue && styles.inlineActionTextSecondary]}>
+              {canOpenQueue ? "Open Queue" : "View Details"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    },
+    [navigation, width]
+  );
+
+  const renderExternalCard = useCallback(
+    ({ item }: { item: ExternalRoutineCard }) => {
+      const palette = getDoctorStatusPalette(item.hasConflict ? "conflict" : "upcoming");
+      return (
+        <View style={styles.externalCard}>
+          <View style={styles.externalTopRow}>
+            <View style={styles.externalCopy}>
+              <Text style={styles.externalClinicName}>{item.clinicName}</Text>
+              <Text style={styles.externalMeta}>
+                {item.dayLabel} • {formatTimeRangeLabel(item.startTime, item.endTime)}
               </Text>
             </View>
+            <TouchableOpacity
+              style={styles.deleteExternalButton}
+              activeOpacity={0.88}
+              disabled={deletingId === item.id}
+              onPress={() => handleDeleteExternal(item)}
+            >
+              <Ionicons name="trash-outline" size={16} color={doctorColors.primary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.externalBadge, { backgroundColor: palette.backgroundColor }]}>
+            <Text style={[styles.externalBadgeText, { color: palette.textColor }]}>
+              {item.hasConflict ? "Conflict" : "Weekly"}
+            </Text>
+          </View>
+
+          {item.note ? <Text style={styles.externalNote}>{item.note}</Text> : null}
+          {item.hasConflict ? (
+            <Text style={styles.externalConflictText}>
+              {item.conflictReason || "This overlaps with another clinic session in your routine."}
+            </Text>
           ) : null}
         </View>
       );
@@ -557,89 +886,165 @@ export default function RoutineTab(_: RoutineTabProps) {
     [deletingId, handleDeleteExternal]
   );
 
-  if (loading) {
+  if (isLoadingSchedule) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safeArea}>
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={doctorColors.primary} />
-          <Text style={styles.centerStateText}>Loading your routine...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.centerEmptyState}>
-          <View style={styles.errorIconWrap}>
-            <Ionicons name="alert-circle-outline" size={38} color={doctorColors.warningText} />
-          </View>
-          <Text style={styles.emptyTitle}>Could not load your routine</Text>
-          <Text style={styles.emptyDescription}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} activeOpacity={0.88} onPress={() => void loadSessions()}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
+          <Text style={styles.centerStateText}>Loading your weekly sessions...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <FlatList
-        data={[{ key: "content" }]}
-        keyExtractor={(item) => item.key}
-        renderItem={() => (
-          <View style={styles.content}>
-            <View style={styles.helperBanner}>
-              <Ionicons name="information-circle-outline" size={18} color={doctorColors.deep} />
-              <Text style={styles.helperBannerText}>
-                Clinic routines are assigned by medical centers. External sessions are your outside commitments and help prevent booking conflicts.
-              </Text>
-            </View>
+    <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safeArea}>
+      <ScrollView
+        ref={scrollViewRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        stickyHeaderIndices={[1]}
+        onScroll={(event) => setScrollY(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+        onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+      >
+        <View style={styles.content}>
+          <View style={styles.sectionBlock}>
+            <Text style={styles.sectionTitle}>Weekly Sessions</Text>
 
-            <View style={styles.sectionBlock}>
-              <View style={styles.sectionHeaderRow}>
-                <View>
-                  <Text style={styles.sectionTitle}>Clinic Routines</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Your medical centers will appear here once they assign your schedule.
-                  </Text>
+            {routineCards.length > 0 ? (
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{weeklySummary.clinicDays}</Text>
+                  <Text style={styles.summaryLabel}>clinic days</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{weeklySummary.weeklySessions}</Text>
+                  <Text style={styles.summaryLabel}>weekly sessions</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{weeklySummary.totalWorkingHoursLabel}</Text>
+                  <Text style={styles.summaryLabel}>working hours</Text>
                 </View>
               </View>
-              {internalItems.length === 0 ? (
+            ) : (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyCardTitle}>No weekly sessions assigned yet</Text>
+                <Text style={styles.emptyCardText}>
+                  {routineRequestFailed
+                    ? "We could not load your assigned weekly sessions right now."
+                    : "Clinic sessions will appear here once they are scheduled for you."}
+                </Text>
+              </View>
+            )}
+
+            {weeklySummary.nextSession ? (
+              <View style={styles.nextAppointmentCard}>
+                <Text style={styles.nextAppointmentLabel}>Next Session</Text>
+                <Text style={styles.nextAppointmentClinic}>
+                  {weeklySummary.nextSession.clinicName}
+                </Text>
+                <Text style={styles.nextAppointmentMeta}>
+                  {weeklySummary.nextLabel}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.stickyDaysSection}>
+          <FlatList
+            horizontal
+            data={DAY_OPTIONS}
+            keyExtractor={(item) => String(item.key)}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.daysRow}
+            renderItem={({ item }) => (
+              <DayChip
+                label={item.shortLabel}
+                isSelected={selectedDayKey === item.key}
+                isToday={item.key === todayOption.key}
+                onPress={() => setSelectedDayKey(item.key)}
+              />
+            )}
+          />
+        </View>
+
+        <View style={styles.content}>
+          <View style={styles.sectionBlock}>
+            {routineCards.length === 0 ? null : routinesForSelectedDay.length === 0 ? (
+              <View style={styles.noSessionBannerCard}>
+                <ImageBackground
+                  source={NO_SESSIONS_DAY_BANNER}
+                  style={styles.noSessionBannerImage}
+                  imageStyle={styles.noSessionBannerImageRadius}
+                  resizeMode="cover"
+                >
+                  <View style={styles.noSessionTextOverlay}>
+                    <Text style={styles.noSessionBannerTitle}>No sessions on {selectedDayLabel}</Text>
+                    <Text style={styles.noSessionBannerText}>
+                      No sessions are assigned for {selectedDayLabel}.
+                    </Text>
+                  </View>
+                </ImageBackground>
+              </View>
+            ) : (
+              <FlatList
+                horizontal
+                data={routinesForSelectedDay}
+                keyExtractor={(item) => item.id}
+                renderItem={renderRoutineCard}
+                scrollEnabled
+                showsHorizontalScrollIndicator={false}
+                snapToAlignment="start"
+                decelerationRate="fast"
+                contentContainerStyle={styles.horizontalCardsRow}
+                ItemSeparatorComponent={() => <View style={styles.horizontalCardGap} />}
+              />
+            )}
+          </View>
+
+          <View style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>Upcoming Sessions</Text>
+
+              {upcomingSessions.length === 0 ? (
                 <View style={styles.emptyCard}>
-                  <Text style={styles.emptyCardTitle}>No clinic sessions assigned for this day.</Text>
+                  <Text style={styles.emptyCardTitle}>No upcoming sessions yet</Text>
                   <Text style={styles.emptyCardText}>
-                    Your medical centers will appear here once they assign your schedule.
+                    Upcoming clinic sessions will appear here once they are generated.
                   </Text>
                 </View>
               ) : (
                 <FlatList
-                  data={internalItems}
+                  horizontal
+                  data={upcomingSessions}
                   keyExtractor={(item) => item.id}
-                  renderItem={renderRoutineCard}
-                  scrollEnabled={false}
-                  ItemSeparatorComponent={() => <View style={styles.cardGap} />}
+                  renderItem={renderUpcomingCard}
+                  showsHorizontalScrollIndicator={false}
+                  decelerationRate="fast"
+                  contentContainerStyle={styles.horizontalCardsRow}
+                  ItemSeparatorComponent={() => <View style={styles.horizontalCardGap} />}
                 />
               )}
-            </View>
+          </View>
 
-            <View style={styles.sectionBlock}>
+          <View
+            style={styles.sectionBlock}
+            onLayout={(event) => {
+              setExternalSectionY(event.nativeEvent.layout.y);
+              setExternalSectionHeight(event.nativeEvent.layout.height);
+            }}
+          >
               <View style={styles.sectionHeaderRow}>
                 <View style={styles.sectionHeaderCopy}>
-                  <Text style={styles.sectionTitle}>External Sessions</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Add outside clinic hours to avoid booking conflicts.
-                  </Text>
+                  <Text style={styles.sectionTitle}>External Commitments</Text>
                 </View>
                 {supportsExternalSessions ? (
                   <TouchableOpacity
                     style={styles.addExternalButton}
                     activeOpacity={0.88}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add external session"
                     onPress={() => {
                       resetExternalForm();
                       setSaveSuccess(null);
@@ -654,7 +1059,7 @@ export default function RoutineTab(_: RoutineTabProps) {
 
               {!supportsExternalSessions ? (
                 <View style={styles.emptyCard}>
-                  <Text style={styles.emptyCardTitle}>External sessions are unavailable right now.</Text>
+                  <Text style={styles.emptyCardTitle}>External commitments are unavailable right now</Text>
                   <Text style={styles.emptyCardText}>
                     Try again shortly. Your clinic routines will continue to work normally.
                   </Text>
@@ -670,16 +1075,25 @@ export default function RoutineTab(_: RoutineTabProps) {
                 <FlatList
                   data={externalItems}
                   keyExtractor={(item) => item.id}
-                  renderItem={renderRoutineCard}
+                  renderItem={renderExternalCard}
                   scrollEnabled={false}
                   ItemSeparatorComponent={() => <View style={styles.cardGap} />}
                 />
               )}
-            </View>
           </View>
-        )}
-        showsVerticalScrollIndicator={false}
-      />
+        </View>
+      </ScrollView>
+
+      {shouldShowFloatingAdd ? (
+        <TouchableOpacity
+          style={[styles.addExternalButton, styles.floatingAddButton]}
+          activeOpacity={0.9}
+          onPress={scrollToExternalSection}
+        >
+          <Ionicons name="add" size={18} color={doctorColors.surface} />
+          <Text style={styles.addExternalButtonText}>Add</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {supportsExternalSessions ? (
         <>
@@ -699,16 +1113,12 @@ export default function RoutineTab(_: RoutineTabProps) {
             <BottomSheetView style={styles.sheetContentContainer}>
               <View style={styles.sheetHeader}>
                 <View style={styles.sheetHeaderCopy}>
-                  <Text style={styles.sheetTitle}>Add External Session</Text>
+                  <Text style={styles.sheetTitle}>Add External Commitment</Text>
                   <Text style={styles.sheetSubtitle}>
                     Add sessions outside your medical-center routine.
                   </Text>
                 </View>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Close external session form"
-                  onPress={closeExternalSheet}
-                >
+                <TouchableOpacity onPress={closeExternalSheet}>
                   <Ionicons name="close" size={24} color={doctorColors.textPrimary} />
                 </TouchableOpacity>
               </View>
@@ -723,20 +1133,31 @@ export default function RoutineTab(_: RoutineTabProps) {
               <View style={styles.sheetHelperCard}>
                 <Text style={styles.sheetHelperTitle}>Avoid conflicts</Text>
                 <Text style={styles.sheetHelperText}>
-                  External sessions block off time when you are working outside your assigned medical centers.
+                  External commitments block time when you are working outside your assigned medical centers.
                 </Text>
               </View>
 
               <View style={styles.sheetSection}>
                 <Text style={styles.sheetSectionLabel}>Day</Text>
                 <View style={styles.sheetDaysRow}>
-                  {SHORT_DAY_OPTIONS.map((option) => (
-                    <DayPill
+                  {DAY_OPTIONS.map((option) => (
+                    <TouchableOpacity
                       key={option.key}
-                      day={option.label}
-                      isSelected={externalForm.dayOfWeek === option.key}
+                      style={[
+                        styles.sheetDayPill,
+                        externalForm.dayOfWeek === option.key && styles.sheetDayPillSelected,
+                      ]}
                       onPress={() => setExternalForm((prev) => ({ ...prev, dayOfWeek: option.key }))}
-                    />
+                    >
+                      <Text
+                        style={[
+                          styles.sheetDayPillText,
+                          externalForm.dayOfWeek === option.key && styles.sheetDayPillTextSelected,
+                        ]}
+                      >
+                        {option.shortLabel}
+                      </Text>
+                    </TouchableOpacity>
                   ))}
                 </View>
               </View>
@@ -824,46 +1245,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: doctorColors.background,
   },
+  scrollContent: {
+    paddingBottom: 110,
+  },
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 32,
+    paddingHorizontal: 0,
+    paddingTop: 4,
     gap: 18,
   },
-  helperBanner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#E8F6F6",
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: doctorColors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  helperBannerText: {
-    flex: 1,
-    color: doctorColors.deep,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "500",
-  },
   sectionBlock: {
-    gap: 12,
+    gap: 8,
   },
   sectionHeaderRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "center",
     gap: 12,
   },
   sectionHeaderCopy: {
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: "700",
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "800",
     color: doctorColors.textPrimary,
   },
   sectionSubtitle: {
@@ -872,29 +1277,156 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: doctorColors.textSecondary,
   },
-  addExternalButton: {
-    minHeight: 44,
-    borderRadius: 16,
-    backgroundColor: doctorColors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+  summaryCard: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    backgroundColor: doctorColors.card,
+    borderRadius: doctorRadius.xl,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
+    padding: doctorSpacing.md,
+    ...doctorShadows.card,
+  },
+  nextAppointmentCard: {
+    marginTop: 12,
+    backgroundColor: doctorColors.card,
+    borderRadius: doctorRadius.xl,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
+    padding: 16,
+    ...doctorShadows.card,
+  },
+  nextAppointmentLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    color: doctorColors.primary,
+  },
+  nextAppointmentClinic: {
+    marginTop: 8,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    color: doctorColors.textPrimary,
+  },
+  nextAppointmentMeta: {
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
+    color: doctorColors.textSecondary,
+  },
+  summaryItem: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
   },
-  addExternalButtonText: {
-    color: doctorColors.surface,
-    fontSize: 13,
+  summaryDivider: {
+    width: 1,
+    backgroundColor: doctorColors.border,
+    marginHorizontal: 12,
+  },
+  summaryValue: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: doctorColors.deep,
+  },
+  summaryLabel: {
+    marginTop: 4,
+    fontSize: 12,
+    color: doctorColors.textSecondary,
+  },
+  stickyDaysSection: {
+    backgroundColor: doctorColors.background,
+    paddingTop: 18,
+    paddingBottom: 6,
+    paddingHorizontal: 0,
+    zIndex: 2,
+  },
+  daysRow: {
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+    gap: 10,
+  },
+  dayChip: {
+    minWidth: 68,
+    borderRadius: doctorRadius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: doctorColors.surface,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayChipSelected: {
+    backgroundColor: doctorColors.primary,
+    borderColor: doctorColors.primary,
+  },
+  dayChipToday: {
+    borderColor: doctorColors.primary,
+  },
+  dayChipText: {
+    fontSize: 14,
     fontWeight: "700",
+    color: doctorColors.textPrimary,
+  },
+  dayChipTextSelected: {
+    color: doctorColors.surface,
+  },
+  dayChipTodayText: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    color: doctorColors.primary,
+  },
+  dayChipTodayTextSelected: {
+    color: "rgba(255,255,255,0.82)",
   },
   emptyCard: {
     backgroundColor: doctorColors.card,
-    borderRadius: 24,
+    borderRadius: doctorRadius.xl,
     borderWidth: 1,
     borderColor: doctorColors.border,
     paddingHorizontal: 18,
     paddingVertical: 18,
+  },
+  noSessionBannerCard: {
+    width: "100%",
+    padding: 0,
+    marginHorizontal: 0,
+    overflow: "hidden",
+    borderRadius: doctorRadius.xl,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+  },
+  noSessionBannerImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    justifyContent: "center",
+  },
+  noSessionBannerImageRadius: {
+    borderRadius: doctorRadius.xl,
+  },
+  noSessionTextOverlay: {
+    width: "50%",
+    minHeight: "100%",
+    justifyContent: "center",
+    paddingLeft: 24,
+    paddingRight: 12,
+    paddingVertical: 18,
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  noSessionBannerTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: "800",
+    color: doctorColors.textPrimary,
+  },
+  noSessionBannerText: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: doctorColors.textSecondary,
   },
   emptyCardTitle: {
     fontSize: 16,
@@ -911,153 +1443,246 @@ const styles = StyleSheet.create({
   cardGap: {
     height: 12,
   },
-  card: {
-    borderRadius: 24,
-    padding: 18,
-    shadowColor: doctorColors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 3,
+  horizontalCardsRow: {
+    paddingRight: 24,
   },
-  internalCard: {
+  horizontalCardGap: {
+    width: 12,
+  },
+  floatingAddButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 102,
+    zIndex: 12,
+    ...doctorShadows.card,
+  },
+  routineCard: {
     backgroundColor: doctorColors.card,
+    borderRadius: doctorRadius.xl,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
+    padding: 16,
+    ...doctorShadows.card,
+  },
+  routineTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  clinicImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+  },
+  clinicImageFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "#EAF7F7",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  clinicImageFallbackText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: doctorColors.primary,
+  },
+  routineCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  routineClinicName: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: doctorColors.textPrimary,
+  },
+  routineLocation: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: doctorColors.textSecondary,
+  },
+  routineMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: doctorRadius.pill,
+    backgroundColor: "#F2FBFB",
+  },
+  metaPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: doctorColors.primary,
+  },
+  routineActionButton: {
+    marginTop: 16,
+    minHeight: 46,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryActionButton: {
+    backgroundColor: doctorColors.primary,
+  },
+  secondaryActionButton: {
+    backgroundColor: "#EAF6F5",
     borderWidth: 1,
     borderColor: doctorColors.border,
   },
-  externalCard: {
-    backgroundColor: "#FCFFFF",
-    borderWidth: 1.5,
-    borderColor: "#BDDCDD",
-    borderStyle: "dashed",
+  routineActionText: {
+    fontSize: 14,
+    fontWeight: "800",
   },
-  cardTopRow: {
+  primaryActionText: {
+    color: doctorColors.surface,
+  },
+  secondaryActionText: {
+    color: doctorColors.primary,
+  },
+  upcomingCard: {
+    backgroundColor: doctorColors.card,
+    borderRadius: doctorRadius.xl,
+    borderWidth: 1,
+    borderColor: doctorColors.border,
+    padding: 16,
+    ...doctorShadows.card,
+  },
+  upcomingTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: 12,
   },
-  cardDayBlock: {
+  upcomingCopy: {
     flex: 1,
-    gap: 4,
   },
-  cardDay: {
-    fontSize: 17,
-    lineHeight: 22,
+  upcomingDate: {
+    fontSize: 13,
     fontWeight: "700",
+    color: doctorColors.primary,
+  },
+  upcomingClinic: {
+    marginTop: 4,
+    fontSize: 17,
+    fontWeight: "800",
     color: doctorColors.textPrimary,
   },
-  cardTime: {
+  upcomingMeta: {
+    marginTop: 4,
     fontSize: 14,
-    lineHeight: 19,
     color: doctorColors.textSecondary,
-    fontWeight: "600",
   },
-  cardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+  upcomingLocation: {
+    marginTop: 4,
+    fontSize: 13,
+    color: doctorColors.textSecondary,
   },
-  deleteExternalButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: "#EFF8F8",
+  inlineAction: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    backgroundColor: doctorColors.primary,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inlineActionSecondary: {
+    backgroundColor: "#EAF6F5",
     borderWidth: 1,
     borderColor: doctorColors.border,
-    justifyContent: "center",
-    alignItems: "center",
   },
-  locationRow: {
-    marginTop: 14,
+  inlineActionText: {
+    color: doctorColors.surface,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  inlineActionTextSecondary: {
+    color: doctorColors.primary,
+  },
+  externalCard: {
+    backgroundColor: "#FCFFFF",
+    borderRadius: doctorRadius.xl,
+    borderWidth: 1.5,
+    borderColor: "#BDDCDD",
+    borderStyle: "dashed",
+    padding: 16,
+  },
+  externalTopRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
   },
-  locationName: {
+  externalCopy: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 21,
+  },
+  externalClinicName: {
+    fontSize: 16,
+    fontWeight: "800",
     color: doctorColors.textPrimary,
-    fontWeight: "600",
   },
-  metaRow: {
-    marginTop: 14,
-    flexDirection: "row",
+  externalMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    color: doctorColors.textSecondary,
+  },
+  deleteExternalButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#EFF8F8",
     alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  sourcePill: {
-    minHeight: 34,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     justifyContent: "center",
-    alignItems: "center",
-  },
-  internalPill: {
-    backgroundColor: "#E8F6F6",
-  },
-  externalPill: {
-    backgroundColor: "#F1FAFB",
     borderWidth: 1,
-    borderColor: "#B8DBDE",
+    borderColor: doctorColors.border,
   },
-  sourcePillText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "700",
-  },
-  internalPillText: {
-    color: doctorColors.deep,
-  },
-  externalPillText: {
-    color: doctorColors.primary,
-  },
-  bookingPill: {
-    minHeight: 34,
-    borderRadius: 999,
+  externalBadge: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    borderRadius: doctorRadius.pill,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: "#F2FBFB",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
   },
-  bookingPillText: {
+  externalBadgeText: {
     fontSize: 12,
-    lineHeight: 16,
     fontWeight: "700",
-    color: doctorColors.primary,
   },
-  noteText: {
-    marginTop: 14,
+  externalNote: {
+    marginTop: 12,
     fontSize: 13,
     lineHeight: 19,
     color: doctorColors.textSecondary,
   },
-  conflictBox: {
-    marginTop: 14,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  conflictHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  conflictTitle: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  conflictText: {
-    marginTop: 6,
-    color: doctorColors.textPrimary,
+  externalConflictText: {
+    marginTop: 10,
     fontSize: 13,
     lineHeight: 19,
+    color: doctorColors.warningText,
+  },
+  addExternalButton: {
+    minHeight: 44,
+    borderRadius: 16,
+    backgroundColor: doctorColors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  addExternalButtonText: {
+    color: doctorColors.surface,
+    fontSize: 13,
+    fontWeight: "700",
   },
   centerState: {
     flex: 1,
@@ -1148,6 +1773,21 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: doctorColors.textSecondary,
   },
+  successBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: doctorColors.successBg,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  successBannerText: {
+    flex: 1,
+    color: doctorColors.successText,
+    fontSize: 13,
+    fontWeight: "700",
+  },
   sheetHelperCard: {
     borderRadius: 20,
     backgroundColor: "#ECF8F7",
@@ -1161,33 +1801,16 @@ const styles = StyleSheet.create({
     color: doctorColors.deep,
   },
   sheetHelperText: {
-    marginTop: 4,
+    marginTop: 6,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 19,
     color: doctorColors.textSecondary,
-  },
-  successBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 18,
-    backgroundColor: doctorColors.successBg,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  successBannerText: {
-    flex: 1,
-    color: doctorColors.successText,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
   },
   sheetSection: {
     gap: 10,
   },
   sheetSectionLabel: {
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 13,
     fontWeight: "700",
     color: doctorColors.textPrimary,
   },
@@ -1197,25 +1820,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sheetDayPill: {
-    minHeight: 44,
-    borderRadius: 16,
+    minWidth: 54,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: doctorColors.border,
-    backgroundColor: doctorColors.card,
-    paddingHorizontal: 14,
+    backgroundColor: "#F7FBFB",
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    justifyContent: "center",
-    alignItems: "center",
   },
   sheetDayPillSelected: {
-    backgroundColor: doctorColors.deep,
-    borderColor: doctorColors.deep,
+    backgroundColor: doctorColors.primary,
+    borderColor: doctorColors.primary,
   },
   sheetDayPillText: {
-    color: doctorColors.textPrimary,
     fontSize: 13,
-    lineHeight: 18,
     fontWeight: "700",
+    color: doctorColors.textPrimary,
   },
   sheetDayPillTextSelected: {
     color: doctorColors.surface,
@@ -1229,97 +1851,93 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sheetInputLabel: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    fontWeight: "700",
     color: doctorColors.textSecondary,
-    fontWeight: "600",
   },
   sheetInputBox: {
     minHeight: 52,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: doctorColors.border,
-    backgroundColor: doctorColors.card,
-    paddingHorizontal: 14,
+    backgroundColor: doctorColors.surface,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    paddingHorizontal: 14,
   },
   sheetInputText: {
-    color: doctorColors.textPrimary,
     fontSize: 14,
     fontWeight: "600",
+    color: doctorColors.textPrimary,
   },
   sheetTextInput: {
     minHeight: 52,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: doctorColors.border,
-    backgroundColor: doctorColors.card,
+    backgroundColor: doctorColors.surface,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    color: doctorColors.textPrimary,
     fontSize: 14,
+    color: doctorColors.textPrimary,
   },
   sheetMultilineInput: {
-    minHeight: 108,
+    minHeight: 96,
     textAlignVertical: "top",
   },
   formErrorBox: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 8,
-    borderRadius: 18,
+    borderRadius: 16,
     backgroundColor: doctorColors.warningBg,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   formErrorText: {
     flex: 1,
-    color: doctorColors.warningText,
     fontSize: 13,
     lineHeight: 18,
-    fontWeight: "600",
+    color: doctorColors.warningText,
   },
   sheetFooterContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: doctorColors.surface,
-    borderTopWidth: 1,
-    borderTopColor: doctorColors.border,
     flexDirection: "row",
     gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 28,
+    backgroundColor: doctorColors.surface,
   },
   sheetCancelButton: {
     flex: 1,
     minHeight: 48,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: doctorColors.border,
-    backgroundColor: doctorColors.card,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7FBFB",
   },
   sheetCancelText: {
-    color: doctorColors.textPrimary,
     fontSize: 14,
     fontWeight: "700",
+    color: doctorColors.textPrimary,
   },
   sheetSaveButton: {
-    flex: 1.3,
+    flex: 1.2,
     minHeight: 48,
-    borderRadius: 18,
-    backgroundColor: doctorColors.primary,
-    justifyContent: "center",
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: doctorColors.primary,
   },
   sheetSaveButtonDisabled: {
     opacity: 0.45,
   },
   sheetSaveText: {
-    color: doctorColors.surface,
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
+    color: doctorColors.surface,
   },
 });

@@ -17,10 +17,12 @@ import { patientTheme } from "../../constants/patientTheme";
 import {
   buildPrescriptionCart,
   createPrescriptionOrder,
+  type PrescriptionDeliveryAddress,
   type PrescriptionFulfillmentMatch,
   type PrescriptionFulfillmentResponse,
 } from "../../services/patientPrescriptionService";
 import { PatientEmptyState, PatientErrorState } from "../../components/patient/PatientFeedback";
+import { startOrderPaymentCheckout, type PaymentMethod } from "../../services/commerceService";
 
 const THEME = patientTheme.colors;
 
@@ -41,6 +43,14 @@ export default function PrescriptionFulfillmentScreen() {
   const [notes, setNotes] = useState("");
   const [selectedPharmacyId, setSelectedPharmacyId] = useState<number | null>(null);
   const [acceptPartial, setAcceptPartial] = useState(false);
+  const [fulfillmentMethod, setFulfillmentMethod] = useState<"pickup" | "delivery">("pickup");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [deliveryLine1, setDeliveryLine1] = useState("");
+  const [deliveryCity, setDeliveryCity] = useState("");
+  const [deliveryDistrict, setDeliveryDistrict] = useState("");
+  const [deliveryContactName, setDeliveryContactName] = useState("");
+  const [deliveryContactPhone, setDeliveryContactPhone] = useState("");
+  const [deliveryNotes, setDeliveryNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -67,14 +77,58 @@ export default function PrescriptionFulfillmentScreen() {
   );
 
   const handleCreateOrder = async (match: PrescriptionFulfillmentMatch) => {
+    if (fulfillmentMethod === "delivery") {
+      if (!deliveryLine1.trim()) {
+        setError("Delivery address is required");
+        return;
+      }
+      if (!deliveryContactName.trim()) {
+        setError("Delivery contact name is required");
+        return;
+      }
+      if (!deliveryContactPhone.trim()) {
+        setError("Delivery contact phone is required");
+        return;
+      }
+    }
+
     try {
       setSubmitting(true);
       setError(null);
-      await createPrescriptionOrder(prescriptionId, {
+      const deliveryAddress: PrescriptionDeliveryAddress | null =
+        fulfillmentMethod === "delivery"
+          ? {
+              line1: deliveryLine1.trim(),
+              city: deliveryCity.trim() || null,
+              district: deliveryDistrict.trim() || null,
+            }
+          : null;
+
+      const payload = await createPrescriptionOrder(prescriptionId, {
         pharmacyId: match.pharmacy.id,
         acceptPartial,
+        fulfillmentMethod,
+        paymentMethod,
         notes,
+        deliveryAddress,
+        deliveryNotes: fulfillmentMethod === "delivery" ? deliveryNotes : null,
+        deliveryContactName: fulfillmentMethod === "delivery" ? deliveryContactName : null,
+        deliveryContactPhone: fulfillmentMethod === "delivery" ? deliveryContactPhone : null,
       });
+      const orderId = Number(payload?.order?.id ?? payload?.id ?? 0);
+      if (orderId > 0) {
+        if (paymentMethod === "online") {
+          const session = await startOrderPaymentCheckout(orderId);
+          navigation.replace("PaymentStatus", {
+            orderId,
+            checkoutUrl: session.hosted_url,
+            autoOpenCheckout: true,
+          });
+          return;
+        }
+        navigation.replace("OrderDetails", { orderId });
+        return;
+      }
       navigation.replace("Orders");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to create prescription order");
@@ -212,6 +266,55 @@ export default function PrescriptionFulfillmentScreen() {
                 <Text style={styles.checkoutTitle}>Selected pharmacy</Text>
                 <Text style={styles.checkoutSub}>{selectedMatch.pharmacy.name}</Text>
 
+                <View style={styles.fulfillmentCard}>
+                  <Text style={styles.fulfillmentTitle}>Fulfillment</Text>
+                  <Text style={styles.fulfillmentText}>
+                    Choose pickup at the pharmacy or request direct delivery for this prescription order.
+                  </Text>
+                  <View style={styles.fulfillmentToggleRow}>
+                    {(["pickup", "delivery"] as const).map((option) => {
+                      const active = fulfillmentMethod === option;
+                      return (
+                        <TouchableOpacity
+                          key={option}
+                          style={[styles.fulfillmentToggle, active && styles.fulfillmentToggleActive]}
+                          onPress={() => setFulfillmentMethod(option)}
+                        >
+                          <Text style={[styles.fulfillmentToggleText, active && styles.fulfillmentToggleTextActive]}>
+                            {option === "pickup" ? "Pickup" : "Delivery"}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.fulfillmentCard}>
+                  <Text style={styles.fulfillmentTitle}>Payment method</Text>
+                  <Text style={styles.fulfillmentText}>
+                    Choose pay-at-pharmacy for the current offline flow, or continue to secure online checkout.
+                  </Text>
+                  <View style={styles.fulfillmentToggleRow}>
+                    {([
+                      { key: "cash", label: "Cash / Pay at pharmacy" },
+                      { key: "online", label: "Online payment" },
+                    ] as const).map((option) => {
+                      const active = paymentMethod === option.key;
+                      return (
+                        <TouchableOpacity
+                          key={option.key}
+                          style={[styles.fulfillmentToggle, active && styles.fulfillmentToggleActive]}
+                          onPress={() => setPaymentMethod(option.key)}
+                        >
+                          <Text style={[styles.fulfillmentToggleText, active && styles.fulfillmentToggleTextActive]}>
+                            {option.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
                 {!selectedMatch.fullyAvailable ? (
                   <TouchableOpacity
                     style={styles.toggleRow}
@@ -230,10 +333,64 @@ export default function PrescriptionFulfillmentScreen() {
                   </TouchableOpacity>
                 ) : null}
 
+                {fulfillmentMethod === "delivery" ? (
+                  <View style={styles.deliveryCard}>
+                    <Text style={styles.deliveryTitle}>Delivery details</Text>
+                    <TextInput
+                      value={deliveryLine1}
+                      onChangeText={setDeliveryLine1}
+                      placeholder="Address line 1"
+                      placeholderTextColor={THEME.textMuted}
+                      style={styles.inlineInput}
+                    />
+                    <TextInput
+                      value={deliveryCity}
+                      onChangeText={setDeliveryCity}
+                      placeholder="City"
+                      placeholderTextColor={THEME.textMuted}
+                      style={styles.inlineInput}
+                    />
+                    <TextInput
+                      value={deliveryDistrict}
+                      onChangeText={setDeliveryDistrict}
+                      placeholder="District"
+                      placeholderTextColor={THEME.textMuted}
+                      style={styles.inlineInput}
+                    />
+                    <TextInput
+                      value={deliveryContactName}
+                      onChangeText={setDeliveryContactName}
+                      placeholder="Contact name"
+                      placeholderTextColor={THEME.textMuted}
+                      style={styles.inlineInput}
+                    />
+                    <TextInput
+                      value={deliveryContactPhone}
+                      onChangeText={setDeliveryContactPhone}
+                      placeholder="Contact phone"
+                      placeholderTextColor={THEME.textMuted}
+                      keyboardType="phone-pad"
+                      style={styles.inlineInput}
+                    />
+                    <TextInput
+                      value={deliveryNotes}
+                      onChangeText={setDeliveryNotes}
+                      placeholder="Gate, landmark, or apartment note"
+                      placeholderTextColor={THEME.textMuted}
+                      multiline
+                      style={styles.notesInput}
+                    />
+                  </View>
+                ) : null}
+
                 <TextInput
                   value={notes}
                   onChangeText={setNotes}
-                  placeholder="Add a note for pickup or fulfillment"
+                  placeholder={
+                    fulfillmentMethod === "delivery"
+                      ? "Add a note for the pharmacy"
+                      : "Add pickup instructions or a note for the pharmacy"
+                  }
                   placeholderTextColor={THEME.textMuted}
                   multiline
                   style={styles.notesInput}
@@ -250,10 +407,18 @@ export default function PrescriptionFulfillmentScreen() {
                 >
                   <Text style={styles.primaryButtonText}>
                     {submitting
-                      ? "Creating order..."
-                      : selectedMatch.fullyAvailable
-                        ? "Create Prescription Order"
-                        : "Create Partial Order"}
+                      ? paymentMethod === "online"
+                        ? "Starting checkout..."
+                        : "Creating order..."
+                      : paymentMethod === "online"
+                        ? "Continue to Online Payment"
+                        : fulfillmentMethod === "delivery"
+                          ? selectedMatch.fullyAvailable
+                            ? "Create Delivery Order"
+                            : "Create Partial Delivery Order"
+                          : selectedMatch.fullyAvailable
+                            ? "Create Prescription Order"
+                            : "Create Partial Order"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -383,6 +548,33 @@ const styles = StyleSheet.create({
   },
   checkoutTitle: { fontSize: 15, fontWeight: "800", color: THEME.textMuted, textTransform: "uppercase" },
   checkoutSub: { marginTop: 6, fontSize: 20, fontWeight: "800", color: THEME.navy },
+  fulfillmentCard: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: "#F8FAFC",
+  },
+  fulfillmentTitle: { fontSize: 14, fontWeight: "800", color: THEME.navy },
+  fulfillmentText: { marginTop: 6, fontSize: 13, lineHeight: 19, color: THEME.textSecondary },
+  fulfillmentToggleRow: { flexDirection: "row", gap: 10, marginTop: 14 },
+  fulfillmentToggle: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fulfillmentToggleActive: {
+    backgroundColor: THEME.modernAccentDark,
+    borderColor: THEME.modernAccentDark,
+  },
+  fulfillmentToggleText: { fontSize: 14, fontWeight: "800", color: THEME.navy },
+  fulfillmentToggleTextActive: { color: "#FFFFFF" },
   toggleRow: {
     flexDirection: "row",
     gap: 12,
@@ -391,6 +583,19 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: "#FFF7ED",
     alignItems: "center",
+  },
+  deliveryCard: { marginTop: 16 },
+  deliveryTitle: { fontSize: 14, fontWeight: "800", color: THEME.navy, marginBottom: 10 },
+  inlineInput: {
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 14,
+    color: THEME.navy,
+    backgroundColor: "#FFFFFF",
   },
   toggleTextWrap: { flex: 1 },
   toggleTitle: { fontSize: 14, fontWeight: "800", color: "#9A3412" },

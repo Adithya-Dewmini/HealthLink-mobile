@@ -13,10 +13,13 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useReceptionActiveTask } from "../../hooks/useReceptionActiveTask";
 import { fetchReceptionPatients } from "../../services/receptionService";
 import { useAuth } from "../../utils/AuthContext";
 import ReceptionAccessNotAssigned from "../../components/ReceptionAccessNotAssigned";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import type { ReceptionistTabParamList } from "../../types/navigation";
 
 const THEME = {
   primary: "#2196F3",
@@ -37,7 +40,7 @@ type PatientItem = {
 
 export default function PatientsScreen() {
   useReceptionActiveTask("patients");
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<BottomTabNavigationProp<ReceptionistTabParamList>>();
   const { receptionistPermissions } = useAuth();
   const canViewPatients =
     receptionistPermissions.check_in || receptionistPermissions.appointments;
@@ -59,7 +62,7 @@ export default function PatientsScreen() {
       setPatients(Array.isArray(data) ? (data as PatientItem[]) : []);
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load patients");
+      setError(getFriendlyError(loadError, "Could not load patients."));
     } finally {
       setLoading(false);
       setRefreshing(false);

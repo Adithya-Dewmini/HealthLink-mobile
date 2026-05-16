@@ -12,11 +12,12 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LinearGradient } from "expo-linear-gradient";
+import Toast from "react-native-toast-message";
 import FilterBottomSheet from "../../components/FilterBottomSheet";
 import { apiFetch } from "../../config/api";
 import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../services/favoritesApi";
@@ -70,7 +71,7 @@ type DoctorSection = {
 
 export default function DoctorSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
-  const route = useRoute<any>();
+  const route = useRoute<RouteProp<PatientStackParamList, "DoctorSearchScreen">>();
   const insets = useSafeAreaInsets();
   const bottomSpacing = Math.max(insets.bottom, 16);
   const [activeTab, setActiveTab] = useState("All");
@@ -88,6 +89,8 @@ export default function DoctorSearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [favoriteDoctorIds, setFavoriteDoctorIds] = useState<string[]>([]);
   const [favoriteBusyIds, setFavoriteBusyIds] = useState<string[]>([]);
+  const suggestedReason =
+    typeof route?.params?.reason === "string" && route.params.reason.trim() ? route.params.reason.trim() : null;
 
   const locations = useMemo(
     () => [
@@ -138,65 +141,92 @@ export default function DoctorSearchScreen() {
   }, [route?.params?.specialty]);
 
   useEffect(() => {
-    const loadDoctors = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await apiFetch("/api/patients/doctors");
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || "Failed to load doctors");
-        }
-        const data = await res.json();
-        const mapped = (Array.isArray(data) ? data : []).map((doc: any) => ({
-          id: Number(doc.doctor_id),
-          name: doc.name ?? "Doctor",
-          specialty: doc.specialization ?? "General Physician",
-          city: typeof doc.city === "string" && doc.city.trim() ? doc.city.trim() : null,
-          clinicId: doc.clinic_id ?? null,
-          clinicName: doc.clinic_name ?? null,
-          rating: doc.rating ?? null,
-          reviews: doc.review_count ?? null,
-          experience:
-            doc.experience_years != null && !Number.isNaN(Number(doc.experience_years))
-              ? `${Number(doc.experience_years)} years`
-              : null,
-          queueLength:
-            doc.queue_length == null || Number.isNaN(Number(doc.queue_length))
-              ? null
-              : Number(doc.queue_length),
-          isAvailableToday:
-            typeof doc.is_available_today === "boolean" ? doc.is_available_today : null,
-          assignedMedicalCentersCount:
-            doc.assigned_medical_centers_count == null ||
-            Number.isNaN(Number(doc.assigned_medical_centers_count))
-              ? null
-              : Number(doc.assigned_medical_centers_count),
-          nextAvailableSession:
-            typeof doc.next_session_date === "string" && typeof doc.next_session_start_time === "string"
-              ? {
-                  date: doc.next_session_date,
-                  startTime: String(doc.next_session_start_time).slice(0, 5),
-                  medicalCenterName:
-                    typeof doc.next_session_clinic_name === "string"
-                      ? doc.next_session_clinic_name
-                      : null,
-                }
-              : null,
-          profileImage: resolveImageUrl(doc.profile_image ?? null),
-        }));
-        setDoctors(mapped);
-      } catch (err) {
-        console.error("Load doctors error:", err);
-        setDoctors([]);
-        setError(err instanceof Error ? err.message : "Could not load doctors");
-      } finally {
-        setLoading(false);
-      }
-    };
+    const initialQuery = route?.params?.initialQuery;
+    if (typeof initialQuery === "string" && initialQuery.trim()) {
+      setSearch(initialQuery.trim());
+    }
+  }, [route?.params?.initialQuery]);
 
-    loadDoctors();
+  useEffect(() => {
+    const specialtyParam = route?.params?.specialty;
+    const preferredDate = route?.params?.preferredDate;
+    const preferredTime = route?.params?.preferredTime;
+
+    if (typeof specialtyParam === "string" && specialtyParam.trim()) {
+      setFilters((prev) => ({
+        ...prev,
+        specialty: prev.specialty || specialtyParam.trim(),
+      }));
+    }
+
+    if ((preferredDate || preferredTime) && process.env.NODE_ENV !== "production") {
+      console.log("DoctorSearch assistant preferences", {
+        preferredDate: preferredDate ?? null,
+        preferredTime: preferredTime ?? null,
+      });
+    }
+  }, [route?.params?.preferredDate, route?.params?.preferredTime, route?.params?.specialty]);
+
+  const loadDoctors = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await apiFetch("/api/patients/doctors");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to load doctors");
+      }
+      const data = await res.json();
+      const mapped = (Array.isArray(data) ? data : []).map((doc: any) => ({
+        id: Number(doc.doctor_id),
+        name: doc.name ?? "Doctor",
+        specialty: doc.specialization ?? "General Physician",
+        city: typeof doc.city === "string" && doc.city.trim() ? doc.city.trim() : null,
+        clinicId: doc.clinic_id ?? null,
+        clinicName: doc.clinic_name ?? null,
+        rating: doc.rating ?? null,
+        reviews: doc.review_count ?? null,
+        experience:
+          doc.experience_years != null && !Number.isNaN(Number(doc.experience_years))
+            ? `${Number(doc.experience_years)} years`
+            : null,
+        queueLength:
+          doc.queue_length == null || Number.isNaN(Number(doc.queue_length))
+            ? null
+            : Number(doc.queue_length),
+        isAvailableToday:
+          typeof doc.is_available_today === "boolean" ? doc.is_available_today : null,
+        assignedMedicalCentersCount:
+          doc.assigned_medical_centers_count == null ||
+          Number.isNaN(Number(doc.assigned_medical_centers_count))
+            ? null
+            : Number(doc.assigned_medical_centers_count),
+        nextAvailableSession:
+          typeof doc.next_session_date === "string" && typeof doc.next_session_start_time === "string"
+            ? {
+                date: doc.next_session_date,
+                startTime: String(doc.next_session_start_time).slice(0, 5),
+                medicalCenterName:
+                  typeof doc.next_session_clinic_name === "string"
+                    ? doc.next_session_clinic_name
+                    : null,
+              }
+            : null,
+        profileImage: resolveImageUrl(doc.profile_image ?? null),
+      }));
+      setDoctors(mapped);
+    } catch (err) {
+      console.error("Load doctors error:", err);
+      setDoctors([]);
+      setError(err instanceof Error ? err.message : "Could not load doctors");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadDoctors();
+  }, [loadDoctors]);
 
   useFocusEffect(
     useCallback(() => {
@@ -327,15 +357,32 @@ export default function DoctorSearchScreen() {
 
     try {
       await toggleFavoriteRequest("doctor", favoriteKey, isFavorite);
+      Toast.show({
+        type: "success",
+        text1: isFavorite ? "Removed from favorites" : "Saved to favorites",
+      });
     } catch (err) {
       setFavoriteDoctorIds((current) =>
         isFavorite ? [...current, favoriteKey] : current.filter((id) => id !== favoriteKey)
       );
       console.error("Toggle doctor favorite error:", err);
+      Toast.show({ type: "error", text1: "Could not update favorites" });
     } finally {
       setFavoriteBusyIds((current) => current.filter((id) => id !== favoriteKey));
     }
   };
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setActiveTab("All");
+    setFilters({
+      location: "",
+      specialty: "",
+      rating: null,
+      queue: null,
+      availableToday: false,
+    });
+  }, []);
 
   const applyFilters = (nextFilters = filters) => {
     setFilters(nextFilters);
@@ -388,6 +435,11 @@ export default function DoctorSearchScreen() {
           </View>
 
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            {suggestedReason ? (
+              <View style={styles.assistantReasonChip}>
+                <Text style={styles.assistantReasonText}>{`Suggested for: ${suggestedReason}`}</Text>
+              </View>
+            ) : null}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -428,6 +480,9 @@ export default function DoctorSearchScreen() {
                   </View>
                   <Text style={styles.emptyTitle}>Could not load doctors</Text>
                   <Text style={styles.emptyText}>{error}</Text>
+                  <TouchableOpacity style={styles.stateButton} onPress={() => void loadDoctors()}>
+                    <Text style={styles.stateButtonText}>Try Again</Text>
+                  </TouchableOpacity>
                 </View>
               ) : filteredDoctors.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -436,8 +491,15 @@ export default function DoctorSearchScreen() {
                   </View>
                   <Text style={styles.emptyTitle}>No doctors found</Text>
                   <Text style={styles.emptyText}>
-                    Try another specialty, city, or search keyword.
+                    {hasActiveFilters
+                      ? "Try another specialty, city, or search keyword."
+                      : "Doctor availability will appear here once providers are available."}
                   </Text>
+                  {hasActiveFilters ? (
+                    <TouchableOpacity style={styles.stateButtonSecondary} onPress={clearFilters}>
+                      <Text style={styles.stateButtonSecondaryText}>Clear Filters</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               ) : !hasActiveFilters ? (
                 doctorSections.map((section) => (
@@ -686,6 +748,20 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   scroll: { flex: 1, backgroundColor: THEME.background },
+  assistantReasonChip: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    marginHorizontal: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#E8F7FB",
+  },
+  assistantReasonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.textDark,
+  },
   storefrontHeader: {
     paddingHorizontal: 20,
     paddingTop: 8,
@@ -882,6 +958,36 @@ const styles = StyleSheet.create({
     color: THEME.textGray,
     textAlign: "center",
     lineHeight: 20,
+  },
+  stateButton: {
+    marginTop: 14,
+    minHeight: 44,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: MODERN_THEME.primary,
+  },
+  stateButtonText: {
+    color: THEME.white,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  stateButtonSecondary: {
+    marginTop: 14,
+    minHeight: 44,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.white,
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  stateButtonSecondaryText: {
+    color: THEME.textDark,
+    fontSize: 14,
+    fontWeight: "700",
   },
   doctorGrid: {
     flexDirection: "row",

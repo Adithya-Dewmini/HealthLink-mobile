@@ -14,7 +14,13 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { patientTheme } from "../../constants/patientTheme";
 import type { PatientStackParamList } from "../../types/navigation";
-import { checkoutCart, getCart, type CartSummary } from "../../services/commerceService";
+import {
+  checkoutCart,
+  getCart,
+  startOrderPaymentCheckout,
+  type CartSummary,
+  type PaymentMethod,
+} from "../../services/commerceService";
 import {
   PatientEmptyState,
   PatientErrorState,
@@ -33,6 +39,7 @@ export default function CheckoutScreen() {
   const [cart, setCart] = useState<CartSummary | null>(null);
   const [notes, setNotes] = useState("");
   const [fulfillmentType, setFulfillmentType] = useState<"pickup" | "delivery">("pickup");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [deliveryLine1, setDeliveryLine1] = useState("");
   const [deliveryCity, setDeliveryCity] = useState("");
   const [deliveryDistrict, setDeliveryDistrict] = useState("");
@@ -84,6 +91,7 @@ export default function CheckoutScreen() {
       setError(null);
       const order = await checkoutCart({
         fulfillmentType,
+        paymentMethod,
         notes,
         deliveryAddress:
           fulfillmentType === "delivery"
@@ -97,6 +105,15 @@ export default function CheckoutScreen() {
         deliveryContactPhone: fulfillmentType === "delivery" ? deliveryContactPhone : null,
         deliveryNotes: fulfillmentType === "delivery" ? deliveryNotes : null,
       });
+      if (paymentMethod === "online") {
+        const session = await startOrderPaymentCheckout(order.id);
+        navigation.replace("PaymentStatus", {
+          orderId: order.id,
+          checkoutUrl: session.hosted_url,
+          autoOpenCheckout: true,
+        });
+        return;
+      }
       navigation.replace("OrderDetails", { orderId: order.id });
     } catch (checkoutError) {
       setError(checkoutError instanceof Error ? checkoutError.message : "Unable to place order");
@@ -170,6 +187,71 @@ export default function CheckoutScreen() {
                   <Text style={styles.itemTotal}>{formatPrice(item.totalPrice)}</Text>
                 </View>
               ))}
+            </View>
+
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Payment method</Text>
+              <Text style={styles.helperCopy}>
+                Pay at the pharmacy, or continue to the hosted online checkout after the order is created.
+              </Text>
+              <View style={styles.paymentOptionRow}>
+                <TouchableOpacity
+                  style={[styles.paymentOption, paymentMethod === "cash" && styles.paymentOptionActive]}
+                  onPress={() => setPaymentMethod("cash")}
+                >
+                  <Ionicons
+                    name="cash-outline"
+                    size={18}
+                    color={paymentMethod === "cash" ? "#FFFFFF" : THEME.navy}
+                  />
+                  <View style={styles.paymentTextWrap}>
+                    <Text
+                      style={[
+                        styles.paymentOptionTitle,
+                        paymentMethod === "cash" && styles.paymentOptionTitleActive,
+                      ]}
+                    >
+                      Cash / Pay at pharmacy
+                    </Text>
+                    <Text
+                      style={[
+                        styles.paymentOptionText,
+                        paymentMethod === "cash" && styles.paymentOptionTextActive,
+                      ]}
+                    >
+                      Keep the existing offline handoff.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.paymentOption, paymentMethod === "online" && styles.paymentOptionActive]}
+                  onPress={() => setPaymentMethod("online")}
+                >
+                  <Ionicons
+                    name="card-outline"
+                    size={18}
+                    color={paymentMethod === "online" ? "#FFFFFF" : THEME.navy}
+                  />
+                  <View style={styles.paymentTextWrap}>
+                    <Text
+                      style={[
+                        styles.paymentOptionTitle,
+                        paymentMethod === "online" && styles.paymentOptionTitleActive,
+                      ]}
+                    >
+                      Online payment
+                    </Text>
+                    <Text
+                      style={[
+                        styles.paymentOptionText,
+                        paymentMethod === "online" && styles.paymentOptionTextActive,
+                      ]}
+                    >
+                      Open the PayHere-style checkout and wait for backend confirmation.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {fulfillmentType === "delivery" ? (
@@ -268,10 +350,14 @@ export default function CheckoutScreen() {
             >
               <Text style={styles.placeOrderBtnText}>
                 {submitting
-                  ? "Placing order..."
-                  : fulfillmentType === "delivery"
-                    ? "Place Delivery Order"
-                    : "Place Pickup Order"}
+                  ? paymentMethod === "online"
+                    ? "Starting checkout..."
+                    : "Placing order..."
+                  : paymentMethod === "online"
+                    ? "Continue to Online Payment"
+                    : fulfillmentType === "delivery"
+                      ? "Place Delivery Order"
+                      : "Place Pickup Order"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -349,6 +435,7 @@ const styles = StyleSheet.create({
     borderColor: THEME.border,
   },
   sectionTitle: { fontSize: 17, fontWeight: "800", color: THEME.navy, marginBottom: 12 },
+  helperCopy: { fontSize: 13, lineHeight: 19, color: THEME.textSecondary, marginBottom: 12 },
   summaryItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -360,6 +447,26 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 15, fontWeight: "700", color: THEME.navy },
   itemMeta: { marginTop: 4, fontSize: 13, color: THEME.textSecondary },
   itemTotal: { fontSize: 15, fontWeight: "800", color: THEME.navy },
+  paymentOptionRow: { gap: 10 },
+  paymentOption: {
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    padding: 14,
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+    backgroundColor: "#F8FAFC",
+  },
+  paymentOptionActive: {
+    backgroundColor: THEME.modernAccentDark,
+    borderColor: THEME.modernAccentDark,
+  },
+  paymentTextWrap: { flex: 1 },
+  paymentOptionTitle: { fontSize: 14, fontWeight: "800", color: THEME.navy },
+  paymentOptionTitleActive: { color: "#FFFFFF" },
+  paymentOptionText: { marginTop: 4, fontSize: 12, lineHeight: 18, color: THEME.textSecondary },
+  paymentOptionTextActive: { color: "#D1FAE5" },
   inlineInput: {
     height: 52,
     borderRadius: 16,

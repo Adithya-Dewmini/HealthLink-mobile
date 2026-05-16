@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -12,7 +13,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
 import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
+import DoctorAvatar from "../../components/common/DoctorAvatar";
 import { useAuth } from "../../utils/AuthContext";
 import { doctorColors } from "../../constants/doctorTheme";
 import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
@@ -20,6 +23,8 @@ import {
   fetchDoctorPrescriptions,
   type DoctorPrescriptionListItem,
 } from "../../services/doctorPrescriptionService";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import { getDisplayInitials, resolveDoctorImage } from "../../utils/imageUtils";
 
 const THEME = {
   background: doctorColors.background,
@@ -70,8 +75,9 @@ export default function DoctorPrescriptionsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
+  const [refreshing, setRefreshing] = useState(false);
 
-  const loadPrescriptions = React.useCallback(async () => {
+  const loadPrescriptions = React.useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (!isVerifiedDoctor) {
       setPrescriptions([]);
       setError(null);
@@ -79,7 +85,8 @@ export default function DoctorPrescriptionsScreen() {
       return;
     }
     try {
-      setLoading(true);
+      if (mode === "refresh") setRefreshing(true);
+      else setLoading(true);
       setError(null);
       const response = await fetchDoctorPrescriptions({
         search,
@@ -88,16 +95,17 @@ export default function DoctorPrescriptionsScreen() {
       });
       setPrescriptions(response);
     } catch (loadError: any) {
-      setError(loadError?.message || "Failed to load prescriptions");
+      setError(getFriendlyError(loadError, "Failed to load prescriptions"));
       setPrescriptions([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [isVerifiedDoctor, search, statusFilter]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      void loadPrescriptions();
+      void loadPrescriptions("initial");
     }, 250);
     return () => clearTimeout(timeout);
   }, [loadPrescriptions]);
@@ -111,25 +119,20 @@ export default function DoctorPrescriptionsScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
+      <DoctorPanelHeader
+        showBack
+        eyebrow="Patient Care"
+        title="Prescription Hub"
+        subtitle="Review and track issued prescriptions"
+        rightAvatarUrl={resolveDoctorImage(user?.profile_image ?? null)}
+        onAvatarPress={() => navigation.navigate("ProfileEdit")}
+      />
 
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={22} color={THEME.textDark} />
-          </TouchableOpacity>
-          <View>
-            <Text style={styles.headerSub}>Patient Care</Text>
-            <Text style={styles.headerTitle}>Prescription Hub</Text>
-          </View>
-        </View>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPrescriptions("refresh")} />}
+      >
         {!isVerifiedDoctor ? <PendingApprovalBanner /> : null}
 
         {!isVerifiedDoctor ? (
@@ -200,14 +203,14 @@ export default function DoctorPrescriptionsScreen() {
             <Ionicons name="alert-circle-outline" size={28} color={doctorColors.dangerText} />
             <Text style={styles.stateTitle}>Could not load prescriptions</Text>
             <Text style={styles.stateText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={() => void loadPrescriptions()}>
+            <TouchableOpacity style={styles.retryButton} onPress={() => void loadPrescriptions("initial")}>
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
         ) : prescriptions.length === 0 ? (
           <View style={styles.stateCard}>
             <Ionicons name="document-text-outline" size={28} color={THEME.textGray} />
-            <Text style={styles.stateTitle}>No prescriptions found</Text>
+            <Text style={styles.stateTitle}>No prescriptions created yet</Text>
             <Text style={styles.stateText}>
               Prescriptions you issue from completed consultations will appear here.
             </Text>
@@ -227,6 +230,12 @@ export default function DoctorPrescriptionsScreen() {
               accessibilityLabel={`Open prescription for ${item.patient.name}`}
             >
               <View style={styles.cardTopRow}>
+                <DoctorAvatar
+                  name={item.patient.name}
+                  imageUrl={resolveDoctorImage(item.patient.profile_image ?? null)}
+                  size={46}
+                  fallbackLabel={getDisplayInitials(item.patient.name, "PT")}
+                />
                 <View style={styles.cardIdentity}>
                   <Text style={styles.patientName} numberOfLines={1}>
                     {item.patient.name}
@@ -246,6 +255,9 @@ export default function DoctorPrescriptionsScreen() {
               <Text style={styles.issuedText}>{formatDateTime(item.issuedAt)}</Text>
               <Text style={styles.centerText} numberOfLines={1}>
                 {item.medicalCenter?.name ?? "Medical Center not linked"}
+              </Text>
+              <Text style={styles.linkedText} numberOfLines={1}>
+                {item.consultationId ? `Consultation #${item.consultationId}` : "Consultation not linked"}
               </Text>
 
               <View style={styles.cardFooterRow}>
@@ -272,37 +284,6 @@ export default function DoctorPrescriptionsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.background },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: THEME.white,
-  },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: THEME.badgeBg,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerSub: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: THEME.textGray,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: THEME.textDark,
-    marginTop: 2,
-  },
   container: {
     padding: 20,
     gap: 16,
@@ -471,6 +452,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: THEME.textGray,
+  },
+  linkedText: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: THEME.textGray,
+    fontWeight: "600",
   },
   cardFooterRow: {
     flexDirection: "row",

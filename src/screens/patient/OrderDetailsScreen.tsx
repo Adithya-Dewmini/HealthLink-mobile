@@ -17,6 +17,7 @@ import type { PatientStackParamList } from "../../types/navigation";
 import {
   getOrderDetails,
   getOrderTimeline,
+  startOrderPaymentCheckout,
   type OrderSummary,
 } from "../../services/commerceService";
 import type { ActivityItem } from "../../services/activityService";
@@ -32,6 +33,11 @@ const formatPrice = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+const formatPaymentStatus = (status: string | null | undefined) =>
+  String(status || "pending")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (value) => value.toUpperCase());
 
 export default function OrderDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
@@ -82,6 +88,21 @@ export default function OrderDetailsScreen() {
     () => (order ? ORDER_STATUS_META[order.status] : null),
     [order]
   );
+
+  const handleResumePayment = useCallback(async () => {
+    if (!order) return;
+    try {
+      setError(null);
+      const session = await startOrderPaymentCheckout(order.id);
+      navigation.navigate("PaymentStatus", {
+        orderId: order.id,
+        checkoutUrl: session.hosted_url,
+        autoOpenCheckout: true,
+      });
+    } catch (paymentError) {
+      setError(paymentError instanceof Error ? paymentError.message : "Unable to continue payment");
+    }
+  }, [navigation, order]);
 
   if (loading) {
     return (
@@ -192,6 +213,56 @@ export default function OrderDetailsScreen() {
               <Text style={styles.blockLabel}>Delivery note</Text>
               <Text style={styles.blockText}>{order.deliveryNotes}</Text>
             </View>
+          ) : null}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Payment</Text>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Method</Text>
+            <Text style={styles.summaryValue}>
+              {order.paymentMethod === "online" ? "Online payment" : "Cash / Pay at pharmacy"}
+            </Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Status</Text>
+            <Text
+              style={[
+                styles.summaryValue,
+                order.paymentStatus === "paid"
+                  ? styles.paymentSuccess
+                  : order.paymentStatus === "failed" || order.paymentStatus === "cancelled"
+                    ? styles.paymentDanger
+                    : styles.paymentPending,
+              ]}
+            >
+              {formatPaymentStatus(order.paymentStatus)}
+            </Text>
+          </View>
+          {order.paidAt ? (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Paid at</Text>
+              <Text style={styles.summaryValue}>{new Date(order.paidAt).toLocaleString("en-LK")}</Text>
+            </View>
+          ) : null}
+          {order.invoice ? (
+            <View style={styles.detailBlock}>
+              <Text style={styles.blockLabel}>Invoice</Text>
+              <Text style={styles.blockText}>{order.invoice.invoiceNo}</Text>
+              <TouchableOpacity
+                style={styles.inlineActionButton}
+                onPress={() => navigation.navigate("InvoiceScreen", { orderId: order.id })}
+              >
+                <Ionicons name="document-text-outline" size={16} color={THEME.modernAccentDark} />
+                <Text style={styles.inlineActionText}>View invoice</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {order.paymentMethod === "online" && order.paymentStatus !== "paid" ? (
+            <TouchableOpacity style={styles.inlinePrimaryButton} onPress={() => void handleResumePayment()}>
+              <Ionicons name="card-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.inlinePrimaryButtonText}>Continue payment</Text>
+            </TouchableOpacity>
           ) : null}
         </View>
 
@@ -362,8 +433,35 @@ const styles = StyleSheet.create({
   },
   summaryLabel: { fontSize: 14, color: THEME.textSecondary },
   summaryValue: { fontSize: 14, fontWeight: "700", color: THEME.navy },
+  paymentPending: { color: "#0369A1" },
+  paymentSuccess: { color: "#166534" },
+  paymentDanger: { color: "#B91C1C" },
   totalLabel: { fontSize: 15, fontWeight: "800", color: THEME.navy },
   totalValue: { fontSize: 17, fontWeight: "800", color: THEME.modernAccentDark },
+  inlineActionButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: "#ECFDF5",
+  },
+  inlineActionText: { fontSize: 13, fontWeight: "800", color: THEME.modernAccentDark },
+  inlinePrimaryButton: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: THEME.modernAccentDark,
+  },
+  inlinePrimaryButtonText: { fontSize: 13, fontWeight: "800", color: "#FFFFFF" },
   timelineRow: { flexDirection: "row", gap: 12, paddingBottom: 16 },
   timelineRowLast: { paddingBottom: 0 },
   timelineRail: { alignItems: "center", width: 18 },

@@ -190,11 +190,13 @@ export default function ScannerScreen() {
         <View style={styles.panelHeaderRow}>
           <Text style={styles.panelTitle}>Scan prescription QR</Text>
           <View style={styles.statusBadge}>
-            <Text style={styles.statusBadgeText}>{loading ? "Loading" : "Ready"}</Text>
+            <Text style={styles.statusBadgeText}>{loading ? "Checking" : error ? "Paused" : "Ready"}</Text>
           </View>
         </View>
         <Text style={styles.panelSubtitle}>
-          Hold the camera steady and align the QR code inside the frame.
+          {error
+            ? "Reset the scanner and try the QR again."
+            : "Hold the camera steady and align the QR code inside the frame."}
         </Text>
         {loading && (
           <View style={styles.loadingRow}>
@@ -202,7 +204,14 @@ export default function ScannerScreen() {
             <Text style={styles.loadingText}>Fetching prescription...</Text>
           </View>
         )}
-        {error && <Text style={styles.errorText}>{error}</Text>}
+        {error ? (
+          <View style={styles.errorWrap}>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.resetButton} onPress={resetScanner}>
+              <Text style={styles.resetButtonText}>Scan Again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
 
       <PrescriptionModal
@@ -361,5 +370,23 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 13,
     lineHeight: 18,
+  },
+  errorWrap: {
+    marginTop: 2,
+  },
+  resetButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  resetButtonText: {
+    color: THEME.white,
+    fontWeight: "700",
+    fontSize: 12,
   },
 });

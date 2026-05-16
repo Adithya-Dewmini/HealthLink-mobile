@@ -23,16 +23,16 @@ export default function DoctorTabs() {
         freezeOnBlur: true,
         tabBarActiveTintColor: doctorColors.primary,
         tabBarInactiveTintColor: doctorColors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, marginBottom: 3 },
-        tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
+        tabBarLabelStyle: { fontSize: 10, marginBottom: 3 },
+        tabBarItemStyle: { paddingVertical: 1, paddingHorizontal: 0 },
         tabBarStyle: {
           position: "absolute",
-          bottom: 20,
+          bottom: 0,
           left: 10,
           right: 10,
-          height: 70,
+          height: 64,
           backgroundColor: doctorColors.surface,
-          borderRadius: 25,
+          borderRadius: 999,
           elevation: 10,
           shadowColor: doctorColors.shadow,
           shadowOpacity: 0.12,
@@ -45,7 +45,7 @@ export default function DoctorTabs() {
             style={{
               ...StyleSheet.absoluteFillObject,
               backgroundColor: doctorColors.surface,
-              borderRadius: 25,
+              borderRadius: 999,
               bottom: -20,
             }}
           />
@@ -119,12 +119,12 @@ const styles = StyleSheet.create({
   centerTabWrap: {
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -8,
+    marginTop: -4,
   },
   centerTabCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: doctorColors.surface,
     alignItems: "center",
     justifyContent: "center",

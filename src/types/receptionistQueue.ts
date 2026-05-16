@@ -5,6 +5,8 @@ export type QueuePatient = {
   name: string;
   queueNo: string;
   status: QueuePatientStatus;
+  type?: "Booked" | "Walk-in";
+  isWalkIn?: boolean;
 };
 
 export type ReceptionQueueData = {

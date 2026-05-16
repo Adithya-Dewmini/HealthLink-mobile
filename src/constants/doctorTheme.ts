@@ -1,25 +1,60 @@
 export const doctorColors = {
-  deep: "#0D5C63",
-  primary: "#247B7B",
-  teal: "#44A1A0",
-  aqua: "#78CDD7",
-  surface: "#FFFFFA",
-  background: "#F6FBFB",
+  deep: "#172338",
+  primary: "#2C8C89",
+  teal: "#2C8C89",
+  aqua: "#8FD7D2",
+  surface: "#FFFFFF",
+  background: "#F4F7FA",
   card: "#FFFFFF",
-  border: "#D9ECEB",
-  textPrimary: "#15323A",
-  textSecondary: "#5D767B",
-  textMuted: "#7D9598",
-  successBg: "#DDF5EC",
-  successText: "#166A4A",
-  liveBg: "#DDF4F7",
-  liveText: "#176C79",
-  warningBg: "#FFF1D6",
-  warningText: "#A25A00",
-  dangerBg: "#FDE4E2",
-  dangerText: "#B53A2C",
-  badgeBg: "#EAF6F5",
-  shadow: "#0D5C63",
+  border: "#E2E8F0",
+  textPrimary: "#172338",
+  textSecondary: "#667085",
+  textMuted: "#98A2B3",
+  successBg: "#DFF7EA",
+  successText: "#12B76A",
+  liveBg: "#E8F8F3",
+  liveText: "#2C8C89",
+  warningBg: "#FFF3D6",
+  warningText: "#F79009",
+  dangerBg: "#FEE4E2",
+  dangerText: "#F04438",
+  badgeBg: "#E8F8F3",
+  shadow: "#172338",
+};
+
+export const doctorSpacing = {
+  xs: 6,
+  sm: 10,
+  md: 16,
+  lg: 20,
+  xl: 24,
+};
+
+export const doctorRadius = {
+  sm: 12,
+  md: 16,
+  lg: 20,
+  xl: 24,
+  pill: 999,
+};
+
+export const doctorTypography = {
+  eyebrow: 12,
+  title: 20,
+  heroTitle: 30,
+  subtitle: 13,
+  body: 14,
+  caption: 12,
+};
+
+export const doctorShadows = {
+  card: {
+    shadowColor: doctorColors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
 };
 
 export type DoctorStatusTone = "upcoming" | "live" | "completed" | "cancelled" | "conflict";
@@ -54,5 +89,23 @@ export const getDoctorStatusPalette = (tone: DoctorStatusTone) => {
     case "upcoming":
     default:
       return { backgroundColor: doctorColors.badgeBg, textColor: doctorColors.primary };
+  }
+};
+
+export type DoctorHeaderStatusVariant = "idle" | "live" | "pending" | "approved" | "error";
+
+export const getDoctorHeaderStatusPalette = (variant: DoctorHeaderStatusVariant) => {
+  switch (variant) {
+    case "live":
+      return { backgroundColor: doctorColors.liveBg, textColor: doctorColors.liveText };
+    case "approved":
+      return { backgroundColor: doctorColors.successBg, textColor: doctorColors.successText };
+    case "pending":
+      return { backgroundColor: doctorColors.warningBg, textColor: doctorColors.warningText };
+    case "error":
+      return { backgroundColor: doctorColors.dangerBg, textColor: doctorColors.dangerText };
+    case "idle":
+    default:
+      return { backgroundColor: "#EEF6F5", textColor: doctorColors.textSecondary };
   }
 };

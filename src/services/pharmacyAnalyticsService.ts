@@ -1,4 +1,5 @@
 import { apiFetch } from "../config/api";
+import { resolveImageUrl } from "../utils/imageUrl";
 
 export type PharmacyAnalyticsDashboard = {
   overview: {
@@ -14,12 +15,14 @@ export type PharmacyAnalyticsDashboard = {
   topMedicines: Array<{
     medicineId: number;
     name: string;
+    imageUrl?: string | null;
     quantitySold: number;
     revenue: number;
   }>;
   lowStockMedicines: Array<{
     medicineId: number;
     name: string;
+    imageUrl?: string | null;
     quantity: number;
     reservedQuantity: number;
     availableStock: number;
@@ -48,5 +51,33 @@ export const getPharmacyAnalyticsDashboard = async (): Promise<PharmacyAnalytics
   if (!response.ok) {
     throw new Error(await parseError(response, "Failed to load pharmacy analytics"));
   }
-  return response.json();
+  const payload = await response.json();
+
+  return {
+    ...payload,
+    topMedicines: Array.isArray(payload?.topMedicines)
+      ? payload.topMedicines.map((item: any) => ({
+          ...item,
+          imageUrl: resolveImageUrl(
+            typeof item?.imageUrl === "string"
+              ? item.imageUrl
+              : typeof item?.image_url === "string"
+                ? item.image_url
+                : null
+          ),
+        }))
+      : [],
+    lowStockMedicines: Array.isArray(payload?.lowStockMedicines)
+      ? payload.lowStockMedicines.map((item: any) => ({
+          ...item,
+          imageUrl: resolveImageUrl(
+            typeof item?.imageUrl === "string"
+              ? item.imageUrl
+              : typeof item?.image_url === "string"
+                ? item.image_url
+                : null
+          ),
+        }))
+      : [],
+  };
 };

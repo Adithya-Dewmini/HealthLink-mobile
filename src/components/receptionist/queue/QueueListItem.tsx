@@ -22,6 +22,7 @@ type Props = {
 
 function QueueListItemComponent({ item, isActive }: Props) {
   const statusStyle = getStatusStyle(item.status);
+  const isWalkIn = item.isWalkIn === true || item.type === "Walk-in";
 
   return (
     <View style={[styles.itemCard, isActive && styles.activeItemCard]}>
@@ -29,9 +30,16 @@ function QueueListItemComponent({ item, isActive }: Props) {
         <Text style={styles.queueNo}>#{item.queueNo}</Text>
         <View style={styles.itemText}>
           <Text style={styles.patientName}>{item.name}</Text>
-          <Text style={[styles.subLabel, isActive && styles.activeLabel]}>
-            {isActive ? "Currently in room" : item.status}
-          </Text>
+          <View style={styles.metaRow}>
+            <Text style={[styles.subLabel, isActive && styles.activeLabel]}>
+              {isActive ? "Currently in room" : item.status}
+            </Text>
+            <View style={[styles.sourcePill, isWalkIn ? styles.sourcePillWalkIn : styles.sourcePillBooked]}>
+              <Text style={[styles.sourcePillText, isWalkIn ? styles.sourcePillWalkInText : styles.sourcePillBookedText]}>
+                {isWalkIn ? "Walk-in" : "Booked"}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
       <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
@@ -113,6 +121,37 @@ const styles = StyleSheet.create({
   activeLabel: {
     color: THEME.primary,
     fontWeight: "700",
+  },
+  metaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  sourcePill: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
+  sourcePillBooked: {
+    backgroundColor: THEME.softBlue,
+    borderColor: "#BFDBFE",
+  },
+  sourcePillWalkIn: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
+  sourcePillText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  sourcePillBookedText: {
+    color: THEME.primary,
+  },
+  sourcePillWalkInText: {
+    color: "#B45309",
   },
   statusBadge: {
     paddingHorizontal: 10,

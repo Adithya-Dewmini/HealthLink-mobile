@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { API_BASE_URL } from "../../config/api";
+import { apiFetch } from "../../config/api";
 import { patientTheme } from "../../constants/patientTheme";
 
 const THEME = patientTheme.colors;
@@ -109,7 +109,7 @@ export default function UploadPrescriptionScreen() {
         type: "image/jpeg",
       } as any);
 
-      const res = await fetch(`${API_BASE_URL}/api/upload/prescription`, {
+      const res = await apiFetch("/api/upload/prescription", {
         method: "POST",
         body: formData,
       });

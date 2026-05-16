@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { PatientEmptyState, PatientErrorState, PatientLoadingState } from "../../components/patient/PatientFeedback";
 import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../services/favoritesApi";
@@ -23,12 +23,14 @@ import {
   type PatientPharmacy,
 } from "../../services/patientPharmacyService";
 import { patientTheme } from "../../constants/patientTheme";
+import type { PatientStackParamList } from "../../types/navigation";
 
 const { width } = Dimensions.get("window");
 
 const THEME = patientTheme.colors;
 
 export default function PharmacyMarketplace() {
+  const route = useRoute<RouteProp<PatientStackParamList, "PharmacyMarketplace">>();
   const [activeFilter, setActiveFilter] = useState("All");
   const [isOpen, setIsOpen] = useState(false);
   const [favoritePharmacyIds, setFavoritePharmacyIds] = useState<string[]>([]);
@@ -39,6 +41,12 @@ export default function PharmacyMarketplace() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigation = useNavigation<any>();
+
+  React.useEffect(() => {
+    if (route.params?.initialQuery && !searchText.trim()) {
+      setSearchText(route.params.initialQuery);
+    }
+  }, [route.params?.initialQuery, searchText]);
 
   const loadPharmacies = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") {

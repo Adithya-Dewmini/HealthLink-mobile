@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ReceptionistStackParamList } from "../../types/navigation";
 import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
 import { useAuth } from "../../utils/AuthContext";
@@ -33,6 +34,8 @@ import {
   StatusBadge,
   SurfaceCard,
 } from "../../components/receptionist/PanelUI";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import { getSocket } from "../../services/socket";
 
 type VisitStatus =
   | "booked"
@@ -104,7 +107,7 @@ const statusLabel = (status: VisitStatus) =>
   })[status];
 
 export default function VisitDetails() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<NativeStackNavigationProp<ReceptionistStackParamList>>();
   const route = useRoute<RouteProp<ReceptionistStackParamList, "ReceptionistVisitDetails">>();
   const hasAccess = useReceptionPermissionGuard("appointments", "appointments");
   const { receptionistPermissions } = useAuth();
@@ -124,7 +127,7 @@ export default function VisitDetails() {
       setDetail(data);
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load visit");
+      setError(getFriendlyError(loadError, "Could not load the visit."));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -136,6 +139,47 @@ export default function VisitDetails() {
       void loadDetail("initial");
     }, [loadDetail])
   );
+
+  useEffect(() => {
+    const socket = getSocket();
+
+    const refresh = (payload?: { queueId?: number | string | null; sessionId?: number | string | null }) => {
+      const currentVisit = detail?.visit;
+      if (!currentVisit) {
+        void loadDetail("refresh");
+        return;
+      }
+
+      const payloadQueueId = payload?.queueId == null ? null : Number(payload.queueId);
+      const payloadSessionId = payload?.sessionId == null ? null : Number(payload.sessionId);
+      const visitQueueId = currentVisit.queueId == null ? null : Number(currentVisit.queueId);
+      const visitSessionId = currentVisit.sessionId == null ? null : Number(currentVisit.sessionId);
+
+      if (
+        (payloadQueueId !== null && visitQueueId !== null && payloadQueueId === visitQueueId) ||
+        (payloadSessionId !== null && visitSessionId !== null && payloadSessionId === visitSessionId) ||
+        (payloadQueueId === null && payloadSessionId === null)
+      ) {
+        void loadDetail("refresh");
+      }
+    };
+
+    const handleReconnect = () => {
+      void loadDetail("refresh");
+    };
+
+    socket.on("queue:update", refresh);
+    socket.on("queue:next", refresh);
+    socket.on("session:start", refresh);
+    socket.on("connect", handleReconnect);
+
+    return () => {
+      socket.off("queue:update", refresh);
+      socket.off("queue:next", refresh);
+      socket.off("session:start", refresh);
+      socket.off("connect", handleReconnect);
+    };
+  }, [detail?.visit, loadDetail]);
 
   const runAction = useCallback(
     async (action: "check-in" | "send-to-queue" | "complete" | "missed" | "cancel") => {
@@ -152,7 +196,7 @@ export default function VisitDetails() {
                 ? () => markReceptionVisitMissed(detail.visit.bookingId)
                 : () => cancelReceptionVisit(detail.visit.bookingId);
 
-      Alert.alert("Update visit", `Do you want to ${action.replaceAll("-", " ")}?`, [
+      Alert.alert("Update visit", `Do you want to ${action.split("-").join(" ")}?`, [
         { text: "Cancel", style: "cancel" },
         {
           text: "Continue",
@@ -167,9 +211,7 @@ export default function VisitDetails() {
                 return loadDetail("refresh");
               })
               .catch((actionError) => {
-                setNotice(
-                  actionError instanceof Error ? actionError.message : "Unable to update visit."
-                );
+                setNotice(getFriendlyError(actionError, "Unable to update visit."));
               })
               .finally(() => {
                 setBusy(null);

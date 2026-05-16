@@ -57,7 +57,6 @@ type InventoryMedicine = {
 type ActionType = "delete" | "restock" | null;
 
 const formatMoney = (value: number | null | undefined) => {
-  console.log("PRICE:", value, typeof value);
   const numericValue = Number(value);
 
   if (value === undefined || value === null || Number.isNaN(numericValue)) {
@@ -337,8 +336,8 @@ export default function InventoryScreen() {
                 onChangeText={setSearch}
               />
             </View>
-            <TouchableOpacity style={styles.filterBtn} onPress={onRefresh}>
-              <Ionicons name="filter-outline" size={20} color={THEME.textPrimary} />
+            <TouchableOpacity style={styles.filterBtn} onPress={onRefresh} accessibilityLabel="Refresh inventory">
+              <Ionicons name="refresh-outline" size={20} color={THEME.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -364,8 +363,19 @@ export default function InventoryScreen() {
           ) : (
             <View style={styles.emptyCard}>
               <Ionicons name="cube-outline" size={28} color={THEME.textMuted} />
-              <Text style={styles.emptyTitle}>No medicines found</Text>
-              <Text style={styles.emptyText}>Try another search or add a new medicine.</Text>
+              <Text style={styles.emptyTitle}>
+                {search.trim() ? "No medicines match this search" : "No medicines found"}
+              </Text>
+              <Text style={styles.emptyText}>
+                {search.trim()
+                  ? "Clear the search term or refresh the inventory list."
+                  : "Add your first medicine to start tracking stock."}
+              </Text>
+              {search.trim() ? (
+                <TouchableOpacity style={styles.emptyActionButton} onPress={() => setSearch("")}>
+                  <Text style={styles.emptyActionText}>Clear Search</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </ScrollView>
@@ -691,6 +701,22 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     textAlign: "center",
     lineHeight: 20,
+  },
+  emptyActionButton: {
+    marginTop: 14,
+    minHeight: 42,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: THEME.white,
+  },
+  emptyActionText: {
+    color: THEME.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
   },
   modalOverlay: {
     flex: 1,

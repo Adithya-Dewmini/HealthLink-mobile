@@ -3,7 +3,8 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
 import DoctorAvailabilityScreen from "./DoctorAvailabilityScreen";
 import DoctorCalendarScreen from "./DoctorCalendarScreen";
 import RoutineTab from "./RoutineTab";
@@ -21,7 +22,7 @@ type ScheduleTabKey = "availability" | "calendar" | "routine";
 const SEGMENTS: Array<{ key: ScheduleTabKey; label: string }> = [
   { key: "availability", label: "Availability" },
   { key: "calendar", label: "Calendar" },
-  { key: "routine", label: "Routine" },
+  { key: "routine", label: "Sessions" },
 ];
 
 const INITIAL_AVAILABILITY: AvailabilityMap = {
@@ -41,7 +42,13 @@ const getLocalMonthKey = (value: Date) =>
 
 export default function DoctorScheduleScreen() {
   const navigation = useNavigation<any>();
-  const [activeTab, setActiveTab] = useState<ScheduleTabKey>("availability");
+  const route = useRoute<any>();
+  const requestedInitialTab = route.params?.initialTab as ScheduleTabKey | undefined;
+  const [activeTab, setActiveTab] = useState<ScheduleTabKey>(
+    requestedInitialTab && SEGMENTS.some((segment) => segment.key === requestedInitialTab)
+      ? requestedInitialTab
+      : "availability"
+  );
   const [availability, setAvailability] = useState<AvailabilityMap>(INITIAL_AVAILABILITY);
   const [enabledDays, setEnabledDays] = useState<Record<DayKey, boolean>>({
     monday: false,
@@ -129,6 +136,12 @@ export default function DoctorScheduleScreen() {
   useEffect(() => {
     void loadAvailability();
   }, [loadAvailability]);
+
+  useEffect(() => {
+    if (requestedInitialTab && SEGMENTS.some((segment) => segment.key === requestedInitialTab)) {
+      setActiveTab(requestedInitialTab);
+    }
+  }, [requestedInitialTab]);
 
   useEffect(() => {
     void loadSchedule(currentMonth);
@@ -264,7 +277,17 @@ export default function DoctorScheduleScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <View style={styles.headerShell}>
+        <DoctorPanelHeader
+          title="My Schedule"
+          subtitle="Availability, calendar, and weekly sessions"
+          variant="hero"
+          showAvatar={false}
+        />
+      </View>
+
       <View style={styles.screen}>
+
         <View style={styles.segmentedControl}>
           {SEGMENTS.map((segment) => {
             const isActive = segment.key === activeTab;
@@ -275,7 +298,10 @@ export default function DoctorScheduleScreen() {
                 activeOpacity={0.9}
                 onPress={() => setActiveTab(segment.key)}
               >
-                <Text style={[styles.segmentLabel, isActive && styles.segmentLabelActive]}>
+                <Text
+                  style={[styles.segmentLabel, isActive && styles.segmentLabelActive]}
+                  numberOfLines={1}
+                >
                   {segment.label}
                 </Text>
               </TouchableOpacity>
@@ -314,7 +340,7 @@ export default function DoctorScheduleScreen() {
                 onGoToAvailability={handleGoToAvailability}
               />
             ) : (
-              <RoutineTab onPreview={handleOpenPreview} />
+              <RoutineTab schedule={schedule} isLoadingSchedule={isLoadingSchedule} />
             )
           )}
         </View>
@@ -326,10 +352,14 @@ export default function DoctorScheduleScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: doctorColors.background,
+    backgroundColor: "#318B88",
+  },
+  headerShell: {
+    backgroundColor: "#318B88",
   },
   screen: {
     flex: 1,
+    backgroundColor: doctorColors.background,
     padding: 16,
   },
   availabilityIntro: {
@@ -374,6 +404,7 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: "#E0F0EF",
     borderRadius: 18,
+    marginTop: 8,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: doctorColors.border,
@@ -383,7 +414,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 14,
-    paddingVertical: 12,
+    minHeight: 58,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
   },
   segmentButtonActive: {
     backgroundColor: doctorColors.surface,
@@ -394,9 +427,10 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   segmentLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
     color: doctorColors.textSecondary,
+    textAlign: "center",
   },
   segmentLabelActive: {
     color: doctorColors.deep,

@@ -1,5 +1,7 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -196,6 +198,8 @@ const InlineMessage = ({
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<PatientNavigation>();
+  const fabFloat = useRef(new Animated.Value(0)).current;
+  const fabPulse = useRef(new Animated.Value(0)).current;
   const [profileName, setProfileName] = useState("Patient");
   const [activeQueue, setActiveQueue] = useState<ActiveQueueState | null>(null);
   const [banners, setBanners] = useState<DashboardBanner[]>([]);
@@ -215,6 +219,73 @@ export default function Dashboard() {
     if (hour < 17) return "Good Afternoon";
     return "Good Evening";
   }, []);
+
+  useEffect(() => {
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fabFloat, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fabFloat, {
+          toValue: 0,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fabPulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fabPulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    floatLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      floatLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [fabFloat, fabPulse]);
+
+  const fabAnimatedStyle = {
+    transform: [
+      { translateY: fabFloat.interpolate({ inputRange: [0, 1], outputRange: [0, -10] }) },
+      { scale: fabFloat.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
+    ],
+  };
+
+  const fabPulseStyle = {
+    opacity: fabPulse.interpolate({ inputRange: [0, 1], outputRange: [0.24, 0.8] }),
+    transform: [{ scale: fabPulse.interpolate({ inputRange: [0, 1], outputRange: [0.84, 1.38] }) }],
+  };
+
+  const fabPulseStyleSecondary = {
+    opacity: fabPulse.interpolate({ inputRange: [0, 1], outputRange: [0.1, 0.38] }),
+    transform: [{ scale: fabPulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.62] }) }],
+  };
+
+  const fabIconAnimatedStyle = {
+    transform: [
+      { scale: fabPulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.16] }) },
+      { rotate: fabPulse.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "14deg"] }) },
+    ],
+  };
 
   const loadDashboard = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "initial") {
@@ -501,7 +572,13 @@ export default function Dashboard() {
               colors={[THEME.primary, "#1E293B"]}
               style={styles.scrollHeroBackdrop}
             />
-            {bannersError && banners.length === 0 ? null : (
+            {bannersError && banners.length === 0 ? (
+              <InlineMessage
+                message="Promotional banners are unavailable right now."
+                actionLabel="Retry"
+                onPress={() => void loadDashboard("refresh")}
+              />
+            ) : (
               <DashboardBannerCarousel banners={banners} onPressBanner={handleBannerPress} />
             )}
           </View>
@@ -513,8 +590,14 @@ export default function Dashboard() {
               <UpcomingAppointmentCard appointment={activeQueue} onPress={handleUpcomingPress} />
             ) : null}
 
-            {dashboardError ? <InlineMessage message={dashboardError} /> : null}
-            <Text style={styles.sectionLabel}>Easy Action</Text>
+            {dashboardError ? (
+              <InlineMessage
+                message={dashboardError}
+                actionLabel="Retry"
+                onPress={() => void loadDashboard("refresh")}
+              />
+            ) : null}
+            <Text style={styles.sectionLabel}>Quick Actions</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -679,6 +762,36 @@ export default function Dashboard() {
         </ScrollView>
 
         {showFloatingQueue && activeQueue ? <ActiveQueueFloatingCard queue={activeQueue} onPress={handleQueuePress} /> : null}
+        <Animated.View
+          pointerEvents="box-none"
+          style={[
+            styles.medimateFab,
+            fabAnimatedStyle,
+            {
+              bottom: showFloatingQueue ? 196 : Math.max(insets.bottom, 20) + 88,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={() => navigation.navigate("PatientAssistant")}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Open MediMate assistant"
+          >
+            <LinearGradient
+              colors={[patientTheme.colors.primaryBlue, patientTheme.colors.aqua]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.medimateFabGradient}
+            >
+              <Animated.View pointerEvents="none" style={[styles.medimateFabPulseSecondary, fabPulseStyleSecondary]} />
+              <Animated.View pointerEvents="none" style={[styles.medimateFabPulse, fabPulseStyle]} />
+              <Animated.View style={[styles.medimateFabIcon, fabIconAnimatedStyle]}>
+                <Ionicons name="sparkles" size={20} color="#FFFFFF" />
+              </Animated.View>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
       </SafeAreaView>
     </View>
   );
@@ -732,10 +845,10 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bg,
   },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 200,
   },
   scrollContentWithTracker: {
-    paddingBottom: 240,
+    paddingBottom: 300,
   },
   scrollHeroSection: {
     position: "relative",
@@ -950,5 +1063,48 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600",
     textAlign: "center",
+  },
+  medimateFab: {
+    position: "absolute",
+    right: 18,
+    zIndex: 60,
+    borderRadius: 999,
+    shadowColor: patientTheme.colors.primaryBlue,
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  medimateFabGradient: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.42)",
+  },
+  medimateFabPulse: {
+    position: "absolute",
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255,255,255,0.24)",
+  },
+  medimateFabPulseSecondary: {
+    position: "absolute",
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  medimateFabIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.32)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

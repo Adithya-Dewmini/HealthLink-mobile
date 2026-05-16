@@ -12,9 +12,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { fetchDoctorClinics, type DoctorClinicItem } from "../../services/doctorClinicsService";
-import { fetchDoctorSessionsRange } from "../../services/doctorScheduleService";
+import { fetchDoctorRoutine, fetchDoctorSessionsRange } from "../../services/doctorScheduleService";
 import { useClinicStore } from "../../stores/useClinicStore";
-import type { ScheduleSession } from "./scheduleTypes";
+import type { DoctorRoutineDay, ScheduleSession } from "./scheduleTypes";
 
 const THEME = {
   background: "#F6F8FB",
@@ -41,6 +41,8 @@ const STATUS_STYLES: Record<
   Completed: { backgroundColor: "#E2E8F0", color: "#64748B", icon: "checkmark-done-outline" },
   Missed: { backgroundColor: "#FEE2E2", color: "#DC2626", icon: "close-circle-outline" },
 };
+
+const SCHEDULE_LOOKAHEAD_DAYS = 90;
 
 type SessionCardProps = {
   session: ScheduleSession;
@@ -132,45 +134,39 @@ export default function ClinicDetailsScreen() {
       try {
         const start = toLocalDateString(new Date());
         const endCursor = new Date();
-        endCursor.setDate(endCursor.getDate() + 90);
+        endCursor.setDate(endCursor.getDate() + SCHEDULE_LOOKAHEAD_DAYS);
         const end = toLocalDateString(endCursor);
 
-        const [clinicsResponse, sessionResponse] = await Promise.all([
+        const [clinicsResponse, sessionResponse, routineResponse] = await Promise.all([
           fetchDoctorClinics(),
           fetchDoctorSessionsRange(start, end),
+          fetchDoctorRoutine(),
         ]);
 
         const clinics = [...clinicsResponse.active, ...clinicsResponse.pending];
-        const matchedClinic = clinics.find((item) => item.id === clinicId) ?? null;
+        const matchedClinic = clinics.find((item) => isClinicIdMatch(item.id, clinicId)) ?? null;
 
         setClinic(matchedClinic);
         if (matchedClinic) {
           setSelectedClinic(matchedClinic);
         }
 
-        const normalizedClinicId = clinicId.trim().toLowerCase();
-        const normalizedClinicName = matchedClinic?.name.trim().toLowerCase() ?? "";
+        const clinicReference = matchedClinic ?? selectedClinic ?? { id: clinicId, name: "" };
+        const filteredSessions = sessionResponse.filter((session) =>
+          doesSessionBelongToClinic(session, clinicReference)
+        );
+        const projectedRoutineSessions = buildProjectedRoutineSessions({
+          clinic: clinicReference,
+          routineDays: routineResponse,
+          existingSessions: filteredSessions,
+          from: start,
+          daysToGenerate: SCHEDULE_LOOKAHEAD_DAYS,
+        });
+        const mergedSessions = [...filteredSessions, ...projectedRoutineSessions].sort((left, right) =>
+          `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
+        );
 
-        const filteredSessions = sessionResponse
-          .filter((session) => {
-            const sessionClinicId = String(session.clinicId || "").trim().toLowerCase();
-            const sessionClinicName = String(session.clinicName || "").trim().toLowerCase();
-
-            if (sessionClinicId && sessionClinicId === normalizedClinicId) {
-              return true;
-            }
-
-            if (normalizedClinicName && sessionClinicName === normalizedClinicName) {
-              return true;
-            }
-
-            return false;
-          })
-          .sort((left, right) =>
-            `${left.date} ${left.startTime}`.localeCompare(`${right.date} ${right.startTime}`)
-          );
-
-        setSessions(filteredSessions);
+        setSessions(mergedSessions);
         setErrorMessage(null);
       } catch (error) {
         console.log("Clinic details screen error:", error);
@@ -180,7 +176,7 @@ export default function ClinicDetailsScreen() {
         setIsRefreshing(false);
       }
     },
-    [clinicId, setSelectedClinic]
+    [clinicId, selectedClinic, setSelectedClinic]
   );
 
   useEffect(() => {
@@ -405,6 +401,125 @@ function toLocalDateString(date: Date) {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function normalizeComparableText(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isClinicIdMatch(left?: string | null, right?: string | null) {
+  return normalizeComparableText(left) !== "" && normalizeComparableText(left) === normalizeComparableText(right);
+}
+
+function doesSessionBelongToClinic(
+  session: ScheduleSession,
+  clinic: Pick<DoctorClinicItem, "id" | "name">
+) {
+  const sessionClinicId = normalizeComparableText(session.clinicId);
+  const sessionClinicName = normalizeComparableText(session.clinicName);
+  const clinicId = normalizeComparableText(clinic.id);
+  const clinicName = normalizeComparableText(clinic.name);
+
+  if (sessionClinicId && clinicId && sessionClinicId === clinicId) {
+    return true;
+  }
+
+  if (sessionClinicName && clinicName && sessionClinicName === clinicName) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildProjectedRoutineSessions({
+  clinic,
+  routineDays,
+  existingSessions,
+  from,
+  daysToGenerate,
+}: {
+  clinic: Pick<DoctorClinicItem, "id" | "name">;
+  routineDays: DoctorRoutineDay[];
+  existingSessions: ScheduleSession[];
+  from: string;
+  daysToGenerate: number;
+}) {
+  const targetRoutines = routineDays.flatMap((day) =>
+    day.routines
+      .filter(
+        (routine) =>
+          isClinicIdMatch(routine.clinicId, clinic.id) ||
+          normalizeComparableText(routine.clinicName) === normalizeComparableText(clinic.name)
+      )
+      .map((routine) => ({
+        dayKey: day.dayKey,
+        routine,
+      }))
+  );
+
+  if (targetRoutines.length === 0) {
+    return [];
+  }
+
+  const existingKeys = new Set(
+    existingSessions.map((session) =>
+      [
+        normalizeComparableText(session.clinicId || clinic.id),
+        session.date,
+        String(session.startTime || "").slice(0, 5),
+        String(session.endTime || "").slice(0, 5),
+      ].join("|")
+    )
+  );
+
+  const start = new Date(`${from}T00:00:00`);
+  const projected: ScheduleSession[] = [];
+
+  for (let offset = 0; offset <= daysToGenerate; offset += 1) {
+    const cursor = new Date(start);
+    cursor.setDate(start.getDate() + offset);
+    const dateKey = toLocalDateString(cursor);
+    const dayKey = cursor.getDay();
+
+    targetRoutines.forEach(({ dayKey: routineDayKey, routine }) => {
+      if (routineDayKey !== dayKey) {
+        return;
+      }
+
+      const startTime = String(routine.startTime || "").slice(0, 5);
+      const endTime = String(routine.endTime || "").slice(0, 5);
+      const dedupeKey = [
+        normalizeComparableText(routine.clinicId || clinic.id),
+        dateKey,
+        startTime,
+        endTime,
+      ].join("|");
+
+      if (existingKeys.has(dedupeKey)) {
+        return;
+      }
+
+      projected.push({
+        id: `routine-${routine.id}-${dateKey}-${startTime}-${endTime}`,
+        clinicId: routine.clinicId || clinic.id,
+        clinicName: routine.clinicName || clinic.name || "Clinic",
+        location: routine.location ?? undefined,
+        coverImageUrl: routine.coverImageUrl ?? undefined,
+        logoUrl: routine.logoUrl ?? undefined,
+        date: dateKey,
+        startTime,
+        endTime,
+        patientCount: 0,
+        maxPatients: routine.maxPatients || undefined,
+        slotDuration: routine.slotDuration || undefined,
+        status: "Upcoming",
+        source: "internal",
+        note: null,
+      });
+    });
+  }
+
+  return projected;
 }
 
 function formatDisplayTime(value: string) {

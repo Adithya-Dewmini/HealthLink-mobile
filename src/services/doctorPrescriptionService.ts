@@ -8,10 +8,13 @@ export type DoctorPrescriptionListItem = {
     name: string;
     age: number | null;
     gender: string | null;
+    profile_image?: string | null;
   };
   medicalCenter: {
     id: string;
     name: string;
+    logo_url?: string | null;
+    cover_image_url?: string | null;
   } | null;
   issuedAt: string | null;
   status: "Issued" | "Dispensed";
@@ -46,15 +49,19 @@ export type DoctorPrescriptionDetail = {
     name: string;
     age: number | null;
     gender: string | null;
+    profile_image?: string | null;
   };
   doctor: {
     id: string;
     name: string;
     specialization: string;
+    profile_image?: string | null;
   };
   medicalCenter: {
     id: string;
     name: string;
+    logo_url?: string | null;
+    cover_image_url?: string | null;
   } | null;
   consultation: {
     symptoms: string | null;

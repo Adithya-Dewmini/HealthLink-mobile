@@ -24,12 +24,10 @@ export default function GlobalModals() {
   const [patientId, setPatientId] = useState<string | number | null>(null);
   const [lastSeenId, setLastSeenId] = useState<string | null>(null);
   const [lastPopupId, setLastPopupId] = useState<string | null>(null);
-  const [persistedPopupId, setPersistedPopupId] = useState<string | null>(null);
   const [acknowledgedIds, setAcknowledgedIds] = useState<string[]>([]);
   const [storageReady, setStorageReady] = useState(false);
   const lastSeenIdRef = useRef<string | null>(null);
   const lastPopupIdRef = useRef<string | null>(null);
-  const persistedPopupIdRef = useRef<string | null>(null);
   const acknowledgedIdsRef = useRef<string[]>([]);
 
   const syncLastSeenId = useCallback((value: string | null) => {
@@ -40,11 +38,6 @@ export default function GlobalModals() {
   const syncLastPopupId = useCallback((value: string | null) => {
     lastPopupIdRef.current = value;
     setLastPopupId(value);
-  }, []);
-
-  const syncPersistedPopupId = useCallback((value: string | null) => {
-    persistedPopupIdRef.current = value;
-    setPersistedPopupId(value);
   }, []);
 
   const syncAcknowledgedIds = useCallback((value: string[]) => {
@@ -60,7 +53,6 @@ export default function GlobalModals() {
         setPatientId(null);
         syncLastSeenId(null);
         syncLastPopupId(null);
-        syncPersistedPopupId(null);
         syncAcknowledgedIds([]);
         setStorageReady(true);
         return;
@@ -81,20 +73,15 @@ export default function GlobalModals() {
         setPatientId(null);
         syncLastSeenId(null);
         syncLastPopupId(null);
-        syncPersistedPopupId(null);
         syncAcknowledgedIds([]);
       }
 
       const seenKey = decodedId ? `lastSeenPrescriptionId:${decodedId}` : null;
-      const popupKey = decodedId ? `lastPopupId:${decodedId}` : null;
       const acknowledgedKey = decodedId ? `acknowledgedPrescriptionIds:${decodedId}` : null;
 
       const storedSeen =
         (seenKey ? await AsyncStorage.getItem(seenKey) : null) ||
         (await AsyncStorage.getItem("lastSeenPrescriptionId"));
-      const storedPopup =
-        (popupKey ? await AsyncStorage.getItem(popupKey) : null) ||
-        (await AsyncStorage.getItem("lastPopupId"));
       const storedAcknowledgedRaw = acknowledgedKey
         ? await AsyncStorage.getItem(acknowledgedKey)
         : null;
@@ -114,28 +101,21 @@ export default function GlobalModals() {
       if (storedSeen && !storedAcknowledged.includes(storedSeen)) {
         storedAcknowledged.push(storedSeen);
       }
-      if (storedPopup && !storedAcknowledged.includes(storedPopup)) {
-        storedAcknowledged.push(storedPopup);
-      }
 
       if (seenKey && storedSeen) {
         await AsyncStorage.setItem(seenKey, storedSeen);
-      }
-      if (popupKey && storedPopup) {
-        await AsyncStorage.setItem(popupKey, storedPopup);
       }
       if (acknowledgedKey) {
         await AsyncStorage.setItem(acknowledgedKey, JSON.stringify(storedAcknowledged));
       }
 
       syncLastSeenId(storedSeen ?? null);
-      syncPersistedPopupId(storedPopup ?? null);
       syncAcknowledgedIds(storedAcknowledged);
       setStorageReady(true);
-    };
+    }; 
     setStorageReady(false);
     void init();
-  }, [syncAcknowledgedIds, syncLastPopupId, syncLastSeenId, syncPersistedPopupId]);
+  }, [syncAcknowledgedIds, syncLastPopupId, syncLastSeenId]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -211,18 +191,13 @@ export default function GlobalModals() {
       if (!data?.qrToken && !data?.qr_code) return;
 
       const incomingId = String(data.id);
-      if (prescription?.id && String(prescription.id) === incomingId && showQR) return;
+      if (prescription?.id && String(prescription.id) === incomingId) return;
       if (acknowledgedIdsRef.current.includes(incomingId)) return;
       if (lastPopupIdRef.current === incomingId) return;
-      if (persistedPopupIdRef.current && incomingId === persistedPopupIdRef.current) return;
       if (lastSeenIdRef.current && incomingId === lastSeenIdRef.current) return;
 
-      await acknowledgePopupId(incomingId);
       triggerConsultationFlow(data);
       syncLastPopupId(incomingId);
-      const popupKey = `lastPopupId:${patientId}`;
-      await AsyncStorage.setItem(popupKey, incomingId);
-      syncPersistedPopupId(incomingId);
     } catch (err) {
       console.error("Global latest prescription fetch error:", err);
     }
@@ -234,8 +209,6 @@ export default function GlobalModals() {
     prescription?.id,
     showQR,
     syncLastPopupId,
-    syncPersistedPopupId,
-    acknowledgePopupId,
   ]);
 
   useEffect(() => {

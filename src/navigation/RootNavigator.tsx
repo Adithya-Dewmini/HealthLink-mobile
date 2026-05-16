@@ -3,7 +3,6 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import AuthNavigator from "./AuthNavigator";
 import PatientStack from "./PatientStack";
 import PharmacistStack from "./PharmacistStack";
-import AdminTabs from "./AdminTabs";
 import ReceptionistStack from "./ReceptionistStack";
 import { AuthContext } from "../utils/AuthContext";
 import DoctorStack from "./DoctorStack";
@@ -13,6 +12,7 @@ import {
   joinCenterRoom,
   joinDoctorRoom,
   joinPatientRoom,
+  joinReceptionRoom,
   getSocket,
 } from "../services/socket";
 import MedicalCenterStack from "./MedicalCenterStack";
@@ -53,9 +53,7 @@ export default function RootNavigator() {
         ? "Doctor"
         : isAuthenticated && role === "pharmacist"
           ? "PharmacistStack"
-          : isAuthenticated && role === "admin"
-            ? "AdminTabs"
-            : isAuthenticated && role === "receptionist"
+          : isAuthenticated && role === "receptionist"
               ? "ReceptionistTabs"
               : isAuthenticated && role === "medical_center_admin"
                 ? "MedicalCenterTabs"
@@ -75,6 +73,9 @@ export default function RootNavigator() {
       }
       if (["medical_center_admin", "receptionist"].includes(decodedRole) && decoded?.medicalCenterId) {
         joinCenterRoom(decoded.medicalCenterId);
+      }
+      if (decodedRole === "receptionist") {
+        joinReceptionRoom();
       }
       void syncExpoPushTokenWithBackend().catch((error) => {
         console.log("Push token sync error:", error);
@@ -111,7 +112,7 @@ export default function RootNavigator() {
       <Stack.Screen name="AuthSuccess" component={SuccessScreen} />
       <Stack.Screen name="DoctorPendingApproval" component={DoctorPendingApprovalScreen} />
       <Stack.Screen name="ApprovalStatus" component={ApprovalStatusScreen} />
-      {!isAuthenticated && <Stack.Screen name="AuthStack" component={AuthNavigator} />}
+      {(!isAuthenticated || role === "admin") && <Stack.Screen name="AuthStack" component={AuthNavigator} />}
       {isAuthenticated && role === "patient" && (
         <Stack.Screen name="PatientStack" component={PatientStack} />
       )}
@@ -121,7 +122,6 @@ export default function RootNavigator() {
       {isAuthenticated && role === "pharmacist" && isPharmacyApproved && (
         <Stack.Screen name="PharmacistStack" component={PharmacistStack} />
       )}
-      {isAuthenticated && role === "admin" && <Stack.Screen name="AdminTabs" component={AdminTabs} />}
       {isAuthenticated && role === "receptionist" && (
         <Stack.Screen name="ReceptionistTabs" component={ReceptionistStack} />
       )}

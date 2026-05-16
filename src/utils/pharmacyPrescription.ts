@@ -8,6 +8,36 @@ export type ParsedPrescriptionQrPayload = {
   prescriptionId?: string | null;
 };
 
+const resolveQrTokenFromObject = (value: Record<string, unknown>): string | null => {
+  const directCandidates = [
+    value.qrToken,
+    value.qr_code,
+    value.qrCode,
+    value.token,
+    value.value,
+    value.url,
+  ];
+
+  for (const candidate of directCandidates) {
+    const resolved = resolvePrescriptionQrToken(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  const nestedCandidates = [value.prescription, value.data, value.payload];
+  for (const candidate of nestedCandidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const resolved = resolveQrTokenFromObject(candidate as Record<string, unknown>);
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+};
+
 const extractTokenFromUrl = (raw: string) => {
   try {
     const parsedUrl = new URL(raw);
@@ -86,6 +116,53 @@ export const parsePrescriptionQrPayload = (raw: string) => {
     qrToken: trimmed,
     prescriptionId: null,
   } satisfies ParsedPrescriptionQrPayload;
+};
+
+export const resolvePrescriptionQrToken = (value: unknown): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const resolved = resolveQrTokenFromObject(parsed as Record<string, unknown>);
+          if (resolved) {
+            return resolved;
+          }
+        }
+      } catch {
+        // Fall back to generic QR parsers below.
+      }
+    }
+
+    try {
+      return parsePrescriptionQrPayload(trimmed).qrToken;
+    } catch {
+      return trimmed;
+    }
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return resolveQrTokenFromObject(value as Record<string, unknown>);
+  }
+
+  return null;
+};
+
+export const buildPrescriptionQrValue = (prescription: unknown) => {
+  if (!prescription || typeof prescription !== "object" || Array.isArray(prescription)) {
+    return null;
+  }
+
+  return resolveQrTokenFromObject(prescription as Record<string, unknown>);
 };
 
 export const mapPrescriptionDetailsToPreview = (

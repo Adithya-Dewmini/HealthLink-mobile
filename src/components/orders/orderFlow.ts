@@ -1,6 +1,7 @@
 import type { OrderStatus, OrderSummary } from "../../services/commerceService";
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  pending_payment: "Awaiting payment",
   pending: "Pending",
   confirmed: "Confirmed",
   preparing: "Preparing",
@@ -11,6 +12,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   delivered: "Delivered",
   completed: "Completed",
   cancelled: "Cancelled",
+  rejected: "Rejected",
 };
 
 export const ORDER_STATUS_META: Record<
@@ -18,6 +20,7 @@ export const ORDER_STATUS_META: Record<
   { label: string; bg: string; color: string; icon: string }
 > = {
   pending: { label: "Pending", bg: "#FEF3C7", color: "#92400E", icon: "time-outline" },
+  pending_payment: { label: "Awaiting payment", bg: "#E0F2FE", color: "#0369A1", icon: "card-outline" },
   confirmed: { label: "Confirmed", bg: "#DBEAFE", color: "#1D4ED8", icon: "checkmark-done-outline" },
   preparing: { label: "Preparing", bg: "#EDE9FE", color: "#6D28D9", icon: "medkit-outline" },
   awaiting_substitution_approval: {
@@ -37,10 +40,12 @@ export const ORDER_STATUS_META: Record<
   delivered: { label: "Delivered", bg: "#D1FAE5", color: "#065F46", icon: "home-outline" },
   completed: { label: "Completed", bg: "#E7F7EF", color: "#0F8A5F", icon: "checkmark-circle-outline" },
   cancelled: { label: "Cancelled", bg: "#FEE2E2", color: "#B91C1C", icon: "close-circle-outline" },
+  rejected: { label: "Rejected", bg: "#FEE2E2", color: "#B91C1C", icon: "ban-outline" },
 };
 
 const ORDER_TRANSITIONS: Record<OrderSummary["fulfillmentType"], Record<OrderStatus, OrderStatus[]>> = {
   pickup: {
+    pending_payment: [],
     pending: ["confirmed", "awaiting_substitution_approval", "partially_ready", "cancelled"],
     confirmed: ["preparing", "awaiting_substitution_approval", "partially_ready", "cancelled"],
     preparing: ["ready_for_pickup", "awaiting_substitution_approval", "partially_ready", "cancelled"],
@@ -51,8 +56,10 @@ const ORDER_TRANSITIONS: Record<OrderSummary["fulfillmentType"], Record<OrderSta
     delivered: [],
     completed: [],
     cancelled: [],
+    rejected: [],
   },
   delivery: {
+    pending_payment: [],
     pending: ["confirmed", "awaiting_substitution_approval", "partially_ready", "cancelled"],
     confirmed: ["preparing", "awaiting_substitution_approval", "partially_ready", "cancelled"],
     preparing: ["out_for_delivery", "awaiting_substitution_approval", "partially_ready", "cancelled"],
@@ -63,6 +70,7 @@ const ORDER_TRANSITIONS: Record<OrderSummary["fulfillmentType"], Record<OrderSta
     delivered: [],
     completed: [],
     cancelled: [],
+    rejected: [],
   },
 };
 
@@ -71,18 +79,21 @@ export const getAllowedNextStatuses = (order: Pick<OrderSummary, "status" | "ful
 
 export const getTimelineSteps = (order: Pick<OrderSummary, "fulfillmentType">) =>
   order.fulfillmentType === "delivery"
-    ? (["pending", "confirmed", "preparing", "out_for_delivery", "delivered"] as OrderStatus[])
-    : (["pending", "confirmed", "preparing", "ready_for_pickup", "completed"] as OrderStatus[]);
+    ? (["pending_payment", "pending", "confirmed", "preparing", "out_for_delivery", "delivered"] as OrderStatus[])
+    : (["pending_payment", "pending", "confirmed", "preparing", "ready_for_pickup", "completed"] as OrderStatus[]);
 
 export const getActiveTimelineStatuses = (order: Pick<OrderSummary, "status" | "fulfillmentType">) => {
   if (order.status === "awaiting_substitution_approval") {
     return ["pending", "confirmed"] as OrderStatus[];
   }
+  if (order.status === "pending_payment") {
+    return ["pending_payment"] as OrderStatus[];
+  }
   if (order.status === "partially_ready") {
     return ["pending", "confirmed", "preparing"] as OrderStatus[];
   }
-  if (order.status === "cancelled") {
-    return ["pending"] as OrderStatus[];
+  if (order.status === "cancelled" || order.status === "rejected") {
+    return ["pending_payment", "pending"] as OrderStatus[];
   }
 
   const steps = getTimelineSteps(order);

@@ -104,9 +104,13 @@ export const fetchDoctorSchedule = async (month: string) => {
 
 type RangeSessionResponse = Array<{
   scheduleId?: number | string;
+  clinicId?: string;
   date?: string;
   type?: string;
   clinicName?: string;
+  location?: string | null;
+  cover_image_url?: string | null;
+  logo_url?: string | null;
   start?: string;
   end?: string;
   patientsCount?: number;
@@ -135,6 +139,11 @@ export const fetchDoctorSessionsRange = async (start: string, end: string) => {
 
         sessions.push({
           id: String(item.scheduleId ?? `${item.date}-${item.start}-${item.end}`),
+          clinicId: item.clinicId ? String(item.clinicId) : undefined,
+          location: typeof item.location === "string" ? item.location : undefined,
+          coverImageUrl:
+            typeof item.cover_image_url === "string" ? item.cover_image_url : undefined,
+          logoUrl: typeof item.logo_url === "string" ? item.logo_url : undefined,
           clinicName: String(item.clinicName || "Clinic"),
           date: String(item.date || ""),
           startTime: String(item.start || ""),
@@ -286,6 +295,10 @@ type RoutineResponse = Array<{
     id?: number | string;
     clinicId?: string;
     clinicName?: string;
+    location?: string | null;
+    cover_image_url?: string | null;
+    logo_url?: string | null;
+    roomNumber?: string | null;
     startTime?: string;
     endTime?: string;
     slotDuration?: number;
@@ -294,7 +307,7 @@ type RoutineResponse = Array<{
 }>;
 
 export const fetchDoctorRoutine = async () => {
-  const response = await apiFetch("/api/doctors/routines");
+  const response = await apiFetch("/api/doctor/routines");
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error?.message || "Failed to load routine");
@@ -310,6 +323,11 @@ export const fetchDoctorRoutine = async () => {
               id: String(routine.id ?? `${day.day}-${routine.clinicName}-${routine.startTime}`),
               clinicId: String(routine.clinicId || ""),
               clinicName: String(routine.clinicName || "Clinic"),
+              location: typeof routine.location === "string" ? routine.location : null,
+              coverImageUrl:
+                typeof routine.cover_image_url === "string" ? routine.cover_image_url : null,
+              logoUrl: typeof routine.logo_url === "string" ? routine.logo_url : null,
+              roomNumber: typeof routine.roomNumber === "string" ? routine.roomNumber : null,
               startTime: String(routine.startTime || ""),
               endTime: String(routine.endTime || ""),
               slotDuration: Number(routine.slotDuration || 0),
@@ -328,7 +346,7 @@ export const createDoctorRoutine = async (payload: {
   slotDuration: number;
   maxPatients: number;
 }) => {
-  const response = await apiFetch("/api/doctors/routines", {
+  const response = await apiFetch("/api/doctor/routines", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -359,7 +377,7 @@ export const createDoctorRoutine = async (payload: {
 };
 
 export const deleteDoctorRoutine = async (routineId: string) => {
-  const response = await apiFetch(`/api/doctors/routines/${encodeURIComponent(routineId)}`, {
+  const response = await apiFetch(`/api/doctor/routines/${encodeURIComponent(routineId)}`, {
     method: "DELETE",
   });
 

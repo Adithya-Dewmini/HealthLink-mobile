@@ -1,14 +1,48 @@
 import { apiFetch } from "../config/api";
+import { IS_DEVELOPMENT } from "../api/client";
 
 const parseBody = async (response: Response) => {
   const body = await response.json().catch(() => ({}));
   return typeof body === "object" && body !== null ? body : {};
 };
 
+const friendlyReceptionError = (message: string, fallback: string) => {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("max_patients cannot exceed generated slot count")) {
+    return "Max patients is higher than the available appointment slots for this time range.";
+  }
+  if (normalized.includes("doctor already has a session") || normalized.includes("overlapping doctor session")) {
+    return "This doctor already has a session during the selected time.";
+  }
+  if (normalized.includes("room already assigned") || normalized.includes("overlapping room session")) {
+    return "This room is already booked during the selected time.";
+  }
+  if (normalized.includes("date cannot be in the past")) {
+    return "Session date cannot be in the past.";
+  }
+  if (normalized.includes("end time must be after start time")) {
+    return "End time must be later than start time.";
+  }
+  if (normalized.includes("unauthorized") || normalized.includes("session expired")) {
+    return "Your session has expired. Please sign in again.";
+  }
+  if (normalized.includes("forbidden") || normalized.includes("permission")) {
+    return "You do not have permission to perform this action.";
+  }
+
+  return message.trim() || fallback;
+};
+
 const requireOk = async (response: Response, fallback: string) => {
   const body = await parseBody(response);
   if (!response.ok) {
-    throw new Error(typeof body.message === "string" && body.message.trim() ? body.message : fallback);
+    const message = typeof body.message === "string" && body.message.trim() ? body.message : fallback;
+    if (IS_DEVELOPMENT) {
+      console.log("[reception]", response.url, response.status, body);
+      throw new Error(`${message} (HTTP ${response.status} @ ${response.url})`);
+    }
+    throw new Error(friendlyReceptionError(message, fallback));
   }
   return body;
 };

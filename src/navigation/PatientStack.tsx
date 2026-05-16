@@ -17,6 +17,7 @@ import ProfileEditScreen from "../screens/profile/ProfileEditScreen";
 import PrescriptionDetails from "../screens/patient/PrescriptionDetails";
 import PrescriptionFulfillmentScreen from "../screens/patient/PrescriptionFulfillmentScreen";
 import SubstitutionApprovalScreen from "../screens/patient/SubstitutionApprovalScreen";
+import PatientAssistantScreen from "../screens/patient/PatientAssistantScreen";
 import Prescriptions from "../screens/patient/Prescriptions";
 import MedicineTracker from "../screens/patient/MedicineTracker";
 import UploadPrescriptionScreen from "../screens/patient/UploadPrescriptionScreen";
@@ -30,6 +31,8 @@ import CartScreen from "../screens/patient/CartScreen";
 import CheckoutScreen from "../screens/patient/CheckoutScreen";
 import OrdersScreen from "../screens/patient/OrdersScreen";
 import OrderDetailsScreen from "../screens/patient/OrderDetailsScreen";
+import PaymentStatusScreen from "../screens/patient/PaymentStatusScreen";
+import InvoiceScreen from "../screens/patient/InvoiceScreen";
 import MyHealthDashboard from "../screens/patient/MyHealthDashboard";
 import NotificationCenterScreen from "../screens/shared/NotificationCenterScreen";
 import ActivityFeedScreen from "../screens/shared/ActivityFeedScreen";
@@ -138,6 +141,11 @@ export default function PatientStack() {
         component={SubstitutionApprovalScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen
+        name="PatientAssistant"
+        component={PatientAssistantScreen}
+        options={{ headerShown: false }}
+      />
 
       <Stack.Screen
         name="PatientPrescriptions"
@@ -208,6 +216,16 @@ export default function PatientStack() {
       <Stack.Screen
         name="OrderDetails"
         component={OrderDetailsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PaymentStatus"
+        component={PaymentStatusScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="InvoiceScreen"
+        component={InvoiceScreen}
         options={{ headerShown: false }}
       />
 

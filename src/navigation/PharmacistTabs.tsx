@@ -1,57 +1,53 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import Home from "../screens/pharmacist/Home";
-import ScannerScreen from "../screens/pharmacist/ScannerScreen";
-import Inventory from "../screens/pharmacist/Inventory";
-import ToolsHub from "../screens/pharmacist/ToolsHub";
-import OrderManagementScreen from "../screens/pharmacist/OrderManagementScreen";
 import { Ionicons } from "@expo/vector-icons";
-import { View, StyleSheet } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { PHARMACY_PANEL_THEME } from "../components/pharmacist/PharmacyPanelUI";
+import { StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Home from "../screens/pharmacist/Home";
+import Inventory from "../screens/pharmacist/Inventory";
+import OrderManagementScreen from "../screens/pharmacist/OrderManagementScreen";
+import ScannerScreen from "../screens/pharmacist/ScannerScreen";
+import ToolsHub from "../screens/pharmacist/ToolsHub";
+import { pharmacyTheme } from "../theme/pharmacyTheme";
 
 const Tab = createBottomTabNavigator();
 
 export default function PharmacistTabs() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = 70 + insets.bottom;
-  const tabBarBottom = 0;
+  const tabBarHeight = 76 + insets.bottom;
 
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#DFF7FF",
-        tabBarInactiveTintColor: "#6E859D",
+        tabBarActiveTintColor: pharmacyTheme.colors.navy,
+        tabBarInactiveTintColor: pharmacyTheme.colors.tabInactive,
         tabBarLabelStyle: { fontSize: 11, marginBottom: 6, fontWeight: "700" },
         tabBarItemStyle: { paddingVertical: 6 },
         tabBarStyle: {
           position: "absolute",
-          bottom: tabBarBottom,
+          bottom: 0,
           left: 16,
           right: 16,
           height: tabBarHeight,
           paddingBottom: insets.bottom,
           backgroundColor: "transparent",
-          borderRadius: 28,
-          elevation: 14,
-          shadowColor: "#020617",
-          shadowOpacity: 0.38,
-          shadowRadius: 20,
-          shadowOffset: { width: 0, height: 10 },
           borderTopWidth: 0,
+          borderRadius: 28,
+          elevation: 8,
+          shadowColor: pharmacyTheme.colors.navy,
+          shadowOpacity: 0.08,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
         },
         tabBarBackground: () => (
           <LinearGradient
-            colors={["#091A2F", "#0D233C", "#12304E"]}
+            colors={["rgba(255,255,255,0.96)", "rgba(247,250,255,0.98)", "rgba(255,246,236,0.98)"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.tabBackground}
-          >
-            <View style={styles.tabGlowOne} />
-            <View style={styles.tabGlowTwo} />
-          </LinearGradient>
+            style={styles.tabBarBackground}
+          />
         ),
       }}
     >
@@ -86,7 +82,7 @@ export default function PharmacistTabs() {
                 <Ionicons
                   name="grid"
                   size={22}
-                  color={focused ? PHARMACY_PANEL_THEME.background : PHARMACY_PANEL_THEME.cyan}
+                  color={focused ? pharmacyTheme.colors.navy : pharmacyTheme.colors.orange}
                 />
               </View>
             </View>
@@ -127,44 +123,30 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     borderRadius: 33,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#FFF4E3",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#020617",
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    shadowColor: pharmacyTheme.colors.navy,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
     borderWidth: 1,
-    borderColor: "rgba(103, 232, 249, 0.18)",
+    borderColor: "#F8D9AE",
   },
   centerTabCircleActive: {
-    backgroundColor: "#67E8F9",
-    borderColor: "#A5F3FC",
+    backgroundColor: pharmacyTheme.colors.yellow,
+    borderColor: "#FFD68C",
   },
-  tabBackground: {
+  tabBarBackground: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "rgba(125, 211, 252, 0.12)",
-    overflow: "hidden",
-  },
-  tabGlowOne: {
-    position: "absolute",
-    top: -16,
-    right: 24,
-    width: 120,
-    height: 120,
-    borderRadius: 999,
-    backgroundColor: "rgba(56, 189, 248, 0.16)",
-  },
-  tabGlowTwo: {
-    position: "absolute",
-    bottom: -28,
-    left: 12,
-    width: 120,
-    height: 120,
-    borderRadius: 999,
-    backgroundColor: "rgba(52, 211, 153, 0.1)",
+    borderColor: pharmacyTheme.colors.border,
+    shadowColor: pharmacyTheme.colors.navy,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,15 +18,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import PendingApprovalBanner from "./doctor/PendingApprovalBanner";
+import DoctorPanelHeader from "./doctor/DoctorPanelHeader";
+import DoctorAvatar from "./common/DoctorAvatar";
 import { getQueueDashboard } from "../services/doctorQueueService";
 import {
   completeConsultation,
   createConsultationDraft,
   updateConsultationDraft,
 } from "../services/consultationService";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 import { doctorColors } from "../constants/doctorTheme";
 import { useAuth } from "../utils/AuthContext";
+import { getFriendlyError } from "../utils/friendlyErrors";
+import { getDisplayInitials, resolveDoctorImage } from "../utils/imageUtils";
 
 type ConsultationScreenProps = {
   queueId?: string | number;
@@ -156,11 +160,16 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
   const [patientName, setPatientName] = useState("—");
   const [patientAge, setPatientAge] = useState<string>("—");
   const [patientToken, setPatientToken] = useState<string | number | null>(null);
+  const [patientProfileImage, setPatientProfileImage] = useState<string | null>(null);
+  const [contextError, setContextError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [medicines, setMedicines] = useState<MedicineItem[]>([]);
   const [medicineErrors, setMedicineErrors] = useState<Record<number, MedicineFieldErrors>>({});
   const [conflictWarnings, setConflictWarnings] = useState<MedicineConflict[]>([]);
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
+  const [notesValidationMessage, setNotesValidationMessage] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
   const lastSavedRef = useRef<string>("");
   const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
   const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
@@ -172,14 +181,13 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
     }
     const fetchPatientData = async () => {
       if (!queueId) {
+        setContextError("No active patient was selected for consultation.");
         setLoading(false);
         return;
       }
       try {
-        const token = await AsyncStorage.getItem("token");
-        const res = await fetch(`${API_BASE_URL}/api/doctor/consultation/${queueId}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        setContextError(null);
+        const res = await apiFetch(`/api/doctor/consultation/${queueId}`);
         const contentType = res.headers.get("content-type") || "";
         const raw = await res.text();
         if (!res.ok) {
@@ -191,14 +199,17 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         }
         setPatientData(data);
         if (data?.patient?.name) setPatientName(data.patient.name);
+        setPatientProfileImage(resolveDoctorImage(data?.patient?.profile_image, data?.patient?.avatarUrl));
         if (data?.patient?.age) {
           const gender = data?.patient?.gender
             ? String(data.patient.gender).charAt(0).toUpperCase()
             : "";
           setPatientAge(gender ? `${data.patient.age}${gender}` : `${data.patient.age}`);
         }
+        setPatientId(data?.patient?.id ?? null);
       } catch (err) {
         console.error(err);
+        setContextError("This consultation is no longer active. Return to the queue and select the current patient.");
       } finally {
         setLoading(false);
       }
@@ -214,26 +225,33 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         if (!token) return;
         const data = await getQueueDashboard(token);
         const current = data?.currentPatient;
-        if (current) {
+        if (
+          current &&
+          String(current.status || "").toUpperCase() === "WITH_DOCTOR" &&
+          String(current.queue_id ?? "") === String(queueId ?? "")
+        ) {
           setPatientId(current.patient_id ?? null);
           setPatientName(current.name || "—");
+          setPatientProfileImage(resolveDoctorImage(current.profile_image ?? null, patientData?.patient?.profile_image));
           const age = current.age ? `${current.age}` : "—";
           const gender = current.gender ? String(current.gender).charAt(0).toUpperCase() : "";
           setPatientAge(gender ? `${age}${gender}` : age);
           setPatientToken(current.token_number ?? null);
           if (current.consultation_id) setConsultationId(current.consultation_id);
+        } else {
+          setContextError("No active consultation patient was found for this queue.");
         }
       } catch (error) {
         console.log("Consultation load error:", error);
       }
     };
     void load();
-  }, [isVerifiedDoctor, queueId]);
+  }, [isVerifiedDoctor, patientData?.patient?.profile_image, queueId]);
 
   useEffect(() => {
     if (!isVerifiedDoctor) return;
     const createDraft = async () => {
-      if (!patientId || consultationId) return;
+    if (!patientId || consultationId || contextError) return;
       try {
         const token = await AsyncStorage.getItem("token");
         if (!token) return;
@@ -253,7 +271,7 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       }
     };
     void createDraft();
-  }, [isVerifiedDoctor, patientId, queueId, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
+  }, [contextError, isVerifiedDoctor, patientId, queueId, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
 
   useEffect(() => {
     if (!isVerifiedDoctor) return;
@@ -304,6 +322,22 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
     return next;
   }, [medicines]);
 
+  const validateConsultationNotes = useCallback(() => {
+    const nextSymptoms = symptoms.trim();
+    const nextDiagnosis = diagnosis.trim();
+    const nextNotes = doctorNotes.trim();
+
+    if (!nextSymptoms && !nextNotes) {
+      return "Add symptoms or consultation notes before saving this consultation.";
+    }
+
+    if (!nextDiagnosis) {
+      return "Add a diagnosis before completing this consultation.";
+    }
+
+    return null;
+  }, [diagnosis, doctorNotes, symptoms]);
+
   const handleSaveDraft = () => {
     if (!isVerifiedDoctor) {
       Alert.alert("Approval required", "Consultation drafts will be available after doctor approval.");
@@ -315,12 +349,25 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         text: "Save",
         onPress: async () => {
           try {
+            setIsSavingDraft(true);
+            setNotesValidationMessage(null);
+            if (contextError || !queueId || !patientId) {
+              Alert.alert("Consultation unavailable", contextError || "No active patient was found for this consultation.");
+              return;
+            }
             if (!consultationId) {
               Alert.alert("Not ready", "Consultation draft is not ready yet.");
               return;
             }
             const token = await AsyncStorage.getItem("token");
             if (!token) return;
+            const validationMessage = validateConsultationNotes();
+            if (validationMessage && !symptoms.trim() && !doctorNotes.trim()) {
+              setActiveTab("Notes");
+              setNotesValidationMessage(validationMessage);
+              Alert.alert("Missing details", validationMessage);
+              return;
+            }
             const payload = { symptoms, diagnosis, notes: doctorNotes, medicines };
             await updateConsultationDraft(token, consultationId, payload);
             lastSavedRef.current = JSON.stringify(payload);
@@ -328,7 +375,9 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
             Alert.alert("Draft Saved", "Your consultation draft has been saved.");
           } catch (error) {
             console.log("Save draft error:", error);
-            Alert.alert("Save Failed", "Could not save the consultation draft.");
+            Alert.alert("Save Failed", getFriendlyError(error, "Could not save the consultation draft."));
+          } finally {
+            setIsSavingDraft(false);
           }
         },
       },
@@ -340,9 +389,26 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       Alert.alert("Approval required", "You can complete consultations after doctor approval.");
       return;
     }
+    if (isCompleting) return;
     setCompletionMessage(null);
+    setNotesValidationMessage(null);
     setConflictWarnings([]);
     setMedicineErrors(validatedMedicineErrors);
+
+    if (contextError || !queueId || !patientId) {
+      const message = contextError || "No active patient was found for this consultation.";
+      setCompletionMessage(message);
+      Alert.alert("Consultation unavailable", message);
+      return;
+    }
+
+    const noteValidationMessage = validateConsultationNotes();
+    if (noteValidationMessage) {
+      setActiveTab("Notes");
+      setNotesValidationMessage(noteValidationMessage);
+      setCompletionMessage(noteValidationMessage);
+      return;
+    }
 
     if (Object.keys(validatedMedicineErrors).length > 0) {
       setActiveTab("Medicines");
@@ -351,6 +417,7 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
     }
 
     try {
+      setIsCompleting(true);
       if (!consultationId) {
         Alert.alert("Not ready", "Consultation draft is not ready yet.");
         return;
@@ -378,14 +445,19 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         return;
       }
       const backendMessage = error?.response?.data?.message;
-      Alert.alert("Complete Consultation Failed", backendMessage || "Unable to complete this consultation.");
+      Alert.alert("Complete Consultation Failed", getFriendlyError(error, backendMessage || "Unable to complete this consultation."));
+    } finally {
+      setIsCompleting(false);
     }
   };
 
   const handleAddMedicineItem = (newMedicine: MedicineItem) => {
     setMedicines((prev) => {
       const exists = prev.find((medicine) => medicine.name.trim().toLowerCase() === newMedicine.name.trim().toLowerCase());
-      if (exists) return prev;
+      if (exists) {
+        Alert.alert("Medicine already added", "This medicine is already in the prescription list.");
+        return prev;
+      }
       return [...prev, newMedicine];
     });
     setMedicineErrors((prev) => ({ ...prev, [newMedicine.id]: {} }));
@@ -406,6 +478,7 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={THEME.primary} />
           <Text style={styles.loadingText}>Loading consultation...</Text>
+          <Text style={styles.loadingSubtext}>Preparing patient notes and prescription draft.</Text>
         </View>
       </SafeAreaView>
     );
@@ -429,22 +502,16 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.headerIconButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={22} color={THEME.deep} />
-        </TouchableOpacity>
-
-        <View style={styles.headerTitleBlock}>
-          <Text style={styles.headerEyebrow}>Doctor Consultation</Text>
-          <Text style={styles.headerTitle}>Clinical Review</Text>
-        </View>
-
+      <SafeAreaView style={styles.safe}>
+      <DoctorPanelHeader
+        showBack
+        eyebrow="Doctor Consultation"
+        title="Clinical Review"
+        subtitle="Review patient notes, diagnosis, and treatment"
+        rightAvatarUrl={resolveDoctorImage(user?.profile_image ?? null)}
+        onAvatarPress={() => navigation.navigate("DoctorMyProfile")}
+      />
+      <View style={styles.headerMetaBar}>
         <View style={[styles.autosaveChip, { backgroundColor: autosaveState.tone }]}>
           <Ionicons name={autosaveState.icon} size={14} color={autosaveState.color} />
           <Text style={[styles.autosaveText, { color: autosaveState.color }]}>{autosaveState.label}</Text>
@@ -454,9 +521,12 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.patientSummaryCard}>
-            <View style={styles.patientAvatar}>
-              <Ionicons name="person-outline" size={24} color={THEME.deep} />
-            </View>
+            <DoctorAvatar
+              name={patient.name}
+              imageUrl={patientProfileImage}
+              size={52}
+              fallbackLabel={getDisplayInitials(patient.name, "PT")}
+            />
             <View style={styles.patientSummaryCopy}>
               <Text style={styles.patientSummaryName} numberOfLines={1}>
                 {patient.name}
@@ -473,14 +543,28 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
               <ContextPill icon="document-text-outline" label={`Consultation ${consultationId ?? "Draft"}`} />
             </View>
             <Text style={styles.contextText}>
-              Complete this consultation to issue the prescription and move the next patient into the live queue.
+              Complete this consultation to issue the prescription, finish the current patient, and return to the queue.
             </Text>
           </View>
+
+          {contextError ? (
+            <View style={styles.inlineValidationCard}>
+              <Ionicons name="alert-circle-outline" size={18} color={THEME.danger} />
+              <Text style={styles.inlineValidationText}>{contextError}</Text>
+            </View>
+          ) : null}
 
           {completionMessage ? (
             <View style={styles.warningBanner}>
               <Ionicons name="warning-outline" size={18} color={THEME.warning} />
               <Text style={styles.warningBannerText}>{completionMessage}</Text>
+            </View>
+          ) : null}
+
+          {notesValidationMessage ? (
+            <View style={styles.inlineValidationCard}>
+              <Ionicons name="alert-circle-outline" size={18} color={THEME.warning} />
+              <Text style={styles.inlineValidationText}>{notesValidationMessage}</Text>
             </View>
           ) : null}
 
@@ -635,6 +719,9 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
                   <Text style={styles.emptyBuilderText}>
                     Add medicines now if this consultation needs a prescription.
                   </Text>
+                  <TouchableOpacity style={styles.emptyBuilderAction} onPress={() => setModalVisible(true)}>
+                    <Text style={styles.emptyBuilderActionText}>Add First Medicine</Text>
+                  </TouchableOpacity>
                 </View>
               ) : (
                 medicines.map((medicine) => {
@@ -698,22 +785,30 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
 
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={styles.draftButton}
+            style={[styles.draftButton, (isSavingDraft || isCompleting || Boolean(contextError)) && styles.actionButtonDisabled]}
             onPress={handleSaveDraft}
+            disabled={isSavingDraft || isCompleting || Boolean(contextError)}
             accessibilityRole="button"
             accessibilityLabel="Save consultation draft"
           >
-            <Text style={styles.draftButtonText}>Save Draft</Text>
+            {isSavingDraft ? <ActivityIndicator size="small" color={THEME.deep} /> : <Text style={styles.draftButtonText}>Save Draft</Text>}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.completeButton}
+            style={[styles.completeButton, (isSavingDraft || isCompleting || Boolean(contextError)) && styles.actionButtonDisabled]}
             onPress={handleComplete}
+            disabled={isSavingDraft || isCompleting || Boolean(contextError)}
             accessibilityRole="button"
             accessibilityLabel="Complete consultation"
           >
-            <Text style={styles.completeButtonText}>Complete Consultation</Text>
-            <Ionicons name="arrow-forward" size={18} color={THEME.surface} />
+            {isCompleting ? (
+              <ActivityIndicator size="small" color={THEME.surface} />
+            ) : (
+              <>
+                <Text style={styles.completeButtonText}>Complete Consultation</Text>
+                <Ionicons name="arrow-forward" size={18} color={THEME.surface} />
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -970,6 +1065,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.background },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
   loadingText: { color: THEME.textSecondary, fontSize: 15 },
+  loadingSubtext: { color: THEME.textMuted, fontSize: 13 },
   blockedScreen: {
     flex: 1,
     paddingHorizontal: 20,
@@ -997,36 +1093,10 @@ const styles = StyleSheet.create({
     color: THEME.textSecondary,
     textAlign: "center",
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  headerMetaBar: {
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingBottom: 6,
     backgroundColor: THEME.surface,
-  },
-  headerIconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: "#EEF7F7",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerTitleBlock: { flex: 1, marginHorizontal: 14 },
-  headerEyebrow: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: THEME.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  headerTitle: {
-    marginTop: 2,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: "800",
-    color: THEME.deep,
   },
   autosaveChip: {
     minHeight: 36,
@@ -1118,6 +1188,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   warningBannerText: {
+    flex: 1,
+    color: THEME.warning,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  inlineValidationCard: {
+    backgroundColor: "#FFF7EC",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#F5D79C",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  inlineValidationText: {
     flex: 1,
     color: THEME.warning,
     fontSize: 13,
@@ -1297,6 +1385,20 @@ const styles = StyleSheet.create({
     color: THEME.textSecondary,
     lineHeight: 18,
   },
+  emptyBuilderAction: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    minHeight: 42,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    justifyContent: "center",
+    backgroundColor: "#E7F6F5",
+  },
+  emptyBuilderActionText: {
+    color: THEME.primary,
+    fontSize: 14,
+    fontWeight: "800",
+  },
   medicineCard: {
     backgroundColor: THEME.card,
     borderRadius: 22,
@@ -1401,6 +1503,9 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontSize: 14,
     fontWeight: "700",
+  },
+  actionButtonDisabled: {
+    opacity: 0.65,
   },
   completeButton: {
     flex: 1.6,

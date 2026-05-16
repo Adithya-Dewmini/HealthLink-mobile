@@ -68,6 +68,9 @@ export const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
 });
 
+const ADMIN_MOBILE_ACCESS_MESSAGE =
+  "Platform admin access is available through the HealthLink web portal only.";
+
 export function AuthProvider({ children }: any) {
   const [token, setToken] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
@@ -169,6 +172,11 @@ export function AuthProvider({ children }: any) {
       }
 
       decoded = jwtDecode(storedToken);
+      if (normalizeRole(decoded?.role) === "admin") {
+        await AsyncStorage.removeItem("token");
+        clearAuthState();
+        return null;
+      }
       applyAuthState({ token: storedToken, decoded });
 
       const response = await apiFetch("/api/me/context");
@@ -254,6 +262,10 @@ export function AuthProvider({ children }: any) {
     }
 
     const decoded: any = jwtDecode(normalizedToken);
+    if (normalizeRole(userData?.role ?? decoded?.role) === "admin") {
+      throw new Error(ADMIN_MOBILE_ACCESS_MESSAGE);
+    }
+
     await AsyncStorage.setItem("token", normalizedToken);
     applyAuthState({
       token: normalizedToken,
@@ -271,7 +283,7 @@ export function AuthProvider({ children }: any) {
     });
 
     void refreshAuth();
-  }, [applyAuthState, refreshAuth]);
+  }, [applyAuthState, normalizeRole, refreshAuth]);
 
   // 🔥 Logout clears token + resets role
   const logout = useCallback(async () => {

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { jwtDecode } from "jwt-decode";
-import { API_BASE_URL } from "../config/api";
+import { apiFetch } from "../config/api";
 
 export type PharmacyMedicineItem = {
   id: number;
@@ -104,7 +104,7 @@ const getSessionContext = async (providedPharmacyId?: number | string | null): P
 };
 
 const apiRequest = async <T>(path: string, options: RequestInit = {}, token?: string): Promise<T> => {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await apiFetch(path, {
     ...options,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

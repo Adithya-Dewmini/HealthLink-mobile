@@ -43,7 +43,7 @@ const THEME = {
   rose: "#E11D48",
 };
 
-const formatSourceLabel = (source: string) => (source === "routine" ? "Routine" : "Manual");
+const formatSourceLabel = (source: string) => (source === "routine" ? "Weekly" : "Extra");
 
 export default function DoctorSessionDetails({ navigation, route }: Props) {
   const { session, doctorName } = route.params;

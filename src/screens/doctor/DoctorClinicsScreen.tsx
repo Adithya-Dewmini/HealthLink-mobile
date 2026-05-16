@@ -4,12 +4,13 @@ import {
   Alert,
   FlatList,
   Image,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -19,6 +20,9 @@ import {
   type DoctorClinicItem,
 } from "../../services/doctorClinicsService";
 import { useClinicStore } from "../../stores/useClinicStore";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
+import { doctorColors } from "../../constants/doctorTheme";
+import { resolveDoctorImage } from "../../utils/imageUtils";
 
 const THEME = {
   background: "#F4F6F8",
@@ -32,9 +36,6 @@ const THEME = {
   reject: "#F44336",
   shadow: "#000000",
 };
-
-const FALLBACK_CLINIC_IMAGE =
-  "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?q=80&w=1200&auto=format&fit=crop";
 
 type SectionHeaderProps = {
   title: string;
@@ -52,17 +53,38 @@ const SectionHeader = memo(function SectionHeader({ title, subtitle }: SectionHe
 
 const ClinicImage = memo(function ClinicImage({
   coverImage,
+  imageUrl,
   logoImage,
 }: {
   coverImage?: string;
+  imageUrl?: string;
   logoImage?: string;
 }) {
+  const [failed, setFailed] = useState(false);
+  const sourceUri = resolveDoctorImage(coverImage, imageUrl, logoImage);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [sourceUri]);
+
+  if (sourceUri && !failed) {
+    return (
+      <Image
+        source={{ uri: sourceUri }}
+        style={styles.cardImage}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
   return (
-    <Image
-      source={{ uri: coverImage || logoImage || FALLBACK_CLINIC_IMAGE }}
-      style={styles.cardImage}
-      resizeMode="cover"
-    />
+    <View style={styles.cardImageFallback}>
+      <View style={styles.cardImageFallbackIcon}>
+        <Ionicons name="business-outline" size={28} color={doctorColors.primary} />
+      </View>
+      <Text style={styles.cardImageFallbackText}>Clinic image unavailable</Text>
+    </View>
   );
 });
 
@@ -86,7 +108,7 @@ const ActiveClinicCard = memo(function ActiveClinicCard({
       onPress={() => onSelect(clinic)}
     >
       <View style={styles.imageWrap}>
-        <ClinicImage coverImage={clinic.cover_image_url} logoImage={clinic.logo_url} />
+        <ClinicImage coverImage={clinic.cover_image_url} imageUrl={clinic.image_url} logoImage={clinic.logo_url} />
         <View style={[styles.cornerBadge, isSelected ? styles.selectedBadge : styles.activeBadge]}>
           <Text style={[styles.cornerBadgeText, isSelected ? styles.selectedBadgeText : styles.activeBadgeText]}>
             {isSelected ? "SELECTED" : "ACTIVE"}
@@ -145,7 +167,7 @@ const PendingClinicCard = memo(function PendingClinicCard({
   return (
     <View style={styles.imageCard}>
       <View style={styles.imageWrap}>
-        <ClinicImage coverImage={clinic.cover_image_url} logoImage={clinic.logo_url} />
+        <ClinicImage coverImage={clinic.cover_image_url} imageUrl={clinic.image_url} logoImage={clinic.logo_url} />
         <View style={[styles.cornerBadge, styles.pendingBadge]}>
           <Text style={styles.pendingBadgeText}>PENDING</Text>
         </View>
@@ -368,32 +390,25 @@ export default function DoctorClinicsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.screen}>
-        <View style={styles.header}>
-          <TouchableOpacity style={[styles.headerButton, styles.headerButtonLeft]} activeOpacity={0.85} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={22} color={THEME.textDark} />
-          </TouchableOpacity>
+    <View style={styles.root}>
+      <SafeAreaView edges={["top"]} style={styles.topSafeArea}>
+        <StatusBar barStyle="light-content" backgroundColor={doctorColors.primary} />
+      </SafeAreaView>
 
-          <View style={styles.headerCopy}>
-            <Text style={styles.headerTitle}>My Clinics</Text>
-          </View>
+      <DoctorPanelHeader
+        variant="hero"
+        showBack
+        title="My Clinics"
+        subtitle="Review active centers and pending invitations"
+        onRightPress={() => void loadClinics({ silent: true })}
+        rightIcon={isRefreshing ? "sync-outline" : "refresh-outline"}
+        rightAccessibilityLabel="Refresh clinics"
+      />
 
-          <TouchableOpacity
-            style={[styles.headerButton, styles.headerButtonRight]}
-            activeOpacity={0.85}
-            disabled={isRefreshing || isLoading}
-            onPress={() => void loadClinics({ silent: true })}
-          >
-            {isRefreshing ? (
-              <ActivityIndicator size="small" color={THEME.textDark} />
-            ) : (
-              <Ionicons name="refresh-outline" size={20} color={THEME.textDark} />
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <FlatList
+      <View style={styles.contentWrapper}>
+        <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safeArea}>
+          <View style={styles.screen}>
+            <FlatList
             data={isLoading ? [{ key: "loading" }] : [{ key: "content" }]}
             keyExtractor={(item) => item.key}
             showsVerticalScrollIndicator={false}
@@ -453,13 +468,29 @@ export default function DoctorClinicsScreen() {
                 </View>
               </View>
             )}
-          />
+            />
+          </View>
+        </SafeAreaView>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: doctorColors.primary,
+  },
+  topSafeArea: {
+    backgroundColor: doctorColors.primary,
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: THEME.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: "hidden",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: THEME.background,
@@ -467,45 +498,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  header: {
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20,
-    position: "relative",
-  },
-  headerButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
-    backgroundColor: THEME.white,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: THEME.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 4,
-    position: "absolute",
-    top: 0,
-  },
-  headerButtonLeft: {
-    left: 0,
-  },
-  headerButtonRight: {
-    right: 0,
-  },
-  headerCopy: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: THEME.textDark,
-    textAlign: "center",
+    paddingTop: 20,
   },
   loaderWrap: {
     flex: 1,
@@ -557,6 +550,27 @@ const styles = StyleSheet.create({
   cardImage: {
     width: "100%",
     height: 130,
+  },
+  cardImageFallback: {
+    width: "100%",
+    height: 130,
+    backgroundColor: "#EAF7F7",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  cardImageFallbackIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardImageFallbackText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: THEME.textDark,
   },
   cardContent: {
     padding: 16,

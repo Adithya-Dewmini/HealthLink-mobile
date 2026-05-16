@@ -1,5 +1,6 @@
-import React, { memo, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StatusBar,
@@ -18,6 +19,7 @@ import {
   markPatientPrescriptionSeen,
 } from "../../services/patientPrescriptionService";
 import { patientTheme } from "../../constants/patientTheme";
+import { buildPrescriptionQrValue } from "../../utils/pharmacyPrescription";
 
 const THEME = {
   ...patientTheme.colors,
@@ -344,52 +346,49 @@ export default function PrescriptionDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadPrescription = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  const loadPrescription = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        if (!prescriptionId) {
-          throw new Error("Missing prescription id");
-        }
-
-        const data = (await fetchPatientPrescriptionDetail(prescriptionId)) as PrescriptionApiResponse;
-        const normalized = buildPrescriptionModel(data);
-        if (!normalized) {
-          throw new Error("Prescription details are unavailable");
-        }
-
-        setPrescription(normalized);
-        void markPatientPrescriptionSeen(prescriptionId).catch((markError) => {
-          console.log("Mark prescription seen error:", markError);
-        });
-      } catch (err: any) {
-        setPrescription(null);
-        setError(err?.message || "Failed to load prescription");
-      } finally {
-        setLoading(false);
+      if (!prescriptionId) {
+        throw new Error("Missing prescription id");
       }
-    };
 
-    void loadPrescription();
+      const data = (await fetchPatientPrescriptionDetail(prescriptionId)) as PrescriptionApiResponse;
+      const normalized = buildPrescriptionModel(data);
+      if (!normalized) {
+        throw new Error("Prescription details are unavailable");
+      }
+
+      setPrescription(normalized);
+      void markPatientPrescriptionSeen(prescriptionId).catch((markError) => {
+        console.log("Mark prescription seen error:", markError);
+      });
+    } catch (err: any) {
+      setPrescription(null);
+      setError(err?.message || "Failed to load prescription");
+    } finally {
+      setLoading(false);
+    }
   }, [prescriptionId]);
+
+  useEffect(() => {
+    void loadPrescription();
+  }, [loadPrescription]);
 
   const progress = useMemo(
     () => getPrescriptionProgress(prescription?.medicines ?? [], prescription?.prescribedAt ?? null),
     [prescription]
   );
 
-  const qrPayload = useMemo(() => {
-    if (!prescription?.id || !prescription?.qrToken) return null;
-    return JSON.stringify({
-      prescriptionId: prescription.id,
-      token: prescription.qrToken,
-    });
-  }, [prescription?.id, prescription?.qrToken]);
+  const qrValue = useMemo(
+    () => buildPrescriptionQrValue({ qrToken: prescription?.qrToken }),
+    [prescription?.qrToken]
+  );
 
   const handleDownload = () => {
-    Alert.alert("Download", "Prescription download will be available soon.");
+    Alert.alert("Download unavailable", "Prescription download will be added in a later update.");
   };
 
   const handleCheckAvailability = () => {
@@ -426,6 +425,7 @@ export default function PrescriptionDetails() {
 
       {loading ? (
         <View style={styles.stateContainer}>
+          <ActivityIndicator size="large" color={THEME.primary} />
           <Text style={styles.stateTitle}>Loading prescription</Text>
           <Text style={styles.stateText}>Fetching prescription details...</Text>
         </View>
@@ -433,11 +433,17 @@ export default function PrescriptionDetails() {
         <View style={styles.stateContainer}>
           <Text style={styles.stateTitle}>Unable to load prescription</Text>
           <Text style={styles.stateText}>{error}</Text>
+          <TouchableOpacity style={styles.stateButton} onPress={() => void loadPrescription()}>
+            <Text style={styles.stateButtonText}>Try Again</Text>
+          </TouchableOpacity>
         </View>
       ) : !prescription ? (
         <View style={styles.stateContainer}>
           <Text style={styles.stateTitle}>No prescription found</Text>
           <Text style={styles.stateText}>This prescription is not available right now.</Text>
+          <TouchableOpacity style={styles.stateButtonSecondary} onPress={() => navigation.goBack()}>
+            <Text style={styles.stateButtonSecondaryText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <>
@@ -466,9 +472,9 @@ export default function PrescriptionDetails() {
                 <Ionicons name="qr-code-outline" size={24} color={THEME.primary} />
               </View>
               <View style={styles.qrBox}>
-                {qrPayload ? (
+                {qrValue ? (
                   <QRCode
-                    value={qrPayload}
+                    value={qrValue}
                     size={170}
                     color={THEME.textPrimary}
                     backgroundColor={THEME.card}
@@ -538,14 +544,14 @@ export default function PrescriptionDetails() {
                 style={styles.secondaryBtn}
                 onPress={handleCheckAvailability}
               >
-                <Text style={styles.secondaryText}>Availability</Text>
+                <Text style={styles.secondaryText}>Check Availability</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.secondaryBtn}
                 onPress={handleNearbyPharmacies}
               >
-                <Text style={styles.secondaryText}>Nearby</Text>
+                <Text style={styles.secondaryText}>Find Pharmacy</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -606,6 +612,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: THEME.textSecondary,
     textAlign: "center",
+  },
+  stateButton: {
+    marginTop: 16,
+    minHeight: 46,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: THEME.primary,
+  },
+  stateButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  stateButtonSecondary: {
+    marginTop: 16,
+    minHeight: 46,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DCE7F2",
+  },
+  stateButtonSecondaryText: {
+    color: THEME.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
   },
   infoCard: {
     backgroundColor: THEME.card,

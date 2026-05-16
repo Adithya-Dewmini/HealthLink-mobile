@@ -16,6 +16,7 @@ import type { ReceptionistStackParamList } from "../../types/navigation";
 import { useReceptionPermissionGuard } from "../../hooks/useReceptionPermissionGuard";
 import ReceptionAccessNotAssigned from "../../components/ReceptionAccessNotAssigned";
 import { fetchReceptionSessionAvailabilityState } from "../../services/receptionistSessionService";
+import { getFriendlyError } from "../../utils/friendlyErrors";
 
 type Props = NativeStackScreenProps<
   ReceptionistStackParamList,
@@ -174,7 +175,7 @@ export default function ReceptionistDoctorAvailability({ navigation, route }: Pr
         );
         setError(null);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load availability");
+        setError(getFriendlyError(loadError, "Could not load availability."));
       } finally {
         setLoading(false);
         setRefreshing(false);

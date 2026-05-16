@@ -1,67 +1,42 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
-import Constants from "expo-constants";
-import * as Device from "expo-device";
-import { Platform } from "react-native";
 import { resetToLogin } from "../navigation/navigationRef";
 
-const IOS_SIMULATOR_API_URL = "http://127.0.0.1:5050";
-const ANDROID_EMULATOR_API_URL = "http://10.0.2.2:5050";
-const LOCALHOST_API_URL = "http://localhost:5050";
-const DEFAULT_PROD_API_URL = "https://healthlink-backend-m9eo.onrender.com";
+const DEFAULT_PROD_API_URL = "https://healthlink-backend-5a75.onrender.com";
 const API_TIMEOUT_MS = 20000;
+const IS_DEVELOPMENT = typeof __DEV__ !== "undefined" && __DEV__;
 
-const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, "");
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim() ?? "";
+const hasConfiguredApiUrl = configuredApiUrl.length > 0;
 
-const isSimulator = Platform.OS === "ios" && !Device.isDevice;
-const isAndroidEmulator = Platform.OS === "android" && !Device.isDevice;
+const resolveApiBaseUrl = () =>
+  hasConfiguredApiUrl ? normalizeBaseUrl(configuredApiUrl) : DEFAULT_PROD_API_URL;
 
-const getExpoHostUri = () => {
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    (Constants as any).manifest?.debuggerHost ||
-    (Constants as any).manifest2?.extra?.expoClient?.hostUri;
-
-  return typeof hostUri === "string" && hostUri.trim().length > 0 ? hostUri.trim() : null;
+const resolveSocketUrl = (apiBaseUrl: string) => {
+  try {
+    return new URL(apiBaseUrl).origin;
+  } catch {
+    return apiBaseUrl.replace(/\/api\/?$/, "");
+  }
 };
 
-const getDerivedDevApiUrl = () => {
-  const hostUri = getExpoHostUri();
+// Do not auto-derive localhost/LAN targets in Expo dev mode. Use
+// EXPO_PUBLIC_API_URL explicitly when a non-default backend is required.
+export const BASE_URL = resolveApiBaseUrl();
+export const API_BASE_URL = BASE_URL;
+export const SOCKET_URL = resolveSocketUrl(API_BASE_URL);
+export const HAS_EXPO_PUBLIC_API_URL = hasConfiguredApiUrl;
+export { DEFAULT_PROD_API_URL, IS_DEVELOPMENT };
 
-  if (hostUri) {
-    const hostname = hostUri.split(":")[0]?.trim();
-    if (hostname) {
-      return `http://${hostname}:5050`;
-    }
-  }
-
-  if (Platform.OS === "ios") {
-    return IOS_SIMULATOR_API_URL;
-  }
-
-  if (Platform.OS === "android") {
-    return ANDROID_EMULATOR_API_URL;
-  }
-
-  return LOCALHOST_API_URL;
-};
-
-// Physical devices cannot use localhost because that resolves to the phone itself.
-// Keep API switching centralized here so development can target the laptop over LAN
-// while production points at the deployed HTTPS backend.
-export const BASE_URL =
-  __DEV__ && isSimulator
-    ? IOS_SIMULATOR_API_URL
-    : __DEV__ && isAndroidEmulator
-      ? ANDROID_EMULATOR_API_URL
-      : configuredApiUrl && configuredApiUrl.length > 0
-        ? configuredApiUrl
-        : __DEV__
-          ? getDerivedDevApiUrl()
-          : DEFAULT_PROD_API_URL;
+if (IS_DEVELOPMENT) {
+  console.log("[api] resolved API_BASE_URL", API_BASE_URL);
+  console.log("[api] resolved Socket.IO URL", SOCKET_URL);
+  console.log("[api] EXPO_PUBLIC_API_URL detected", HAS_EXPO_PUBLIC_API_URL);
+}
 
 export const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: API_BASE_URL,
   timeout: API_TIMEOUT_MS,
   headers: {
     "Content-Type": "application/json",

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   ActivityIndicator,
   RefreshControl,
   ScrollView,
@@ -11,9 +12,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import Toast from "react-native-toast-message";
 import {
   getPharmacyOrderDetails,
   getPharmacyOrderTimeline,
+  completePharmacyOrder,
+  rejectPharmacyOrder,
+  reviewPharmacyOrder,
   updatePharmacyOrderStatus,
   type OrderStatus,
   type OrderSummary,
@@ -92,6 +97,8 @@ export default function PharmacyOrderDetailsScreen() {
     () => (order ? getAllowedNextStatuses(order) : []),
     [order]
   );
+  const awaitingOnlinePayment =
+    order?.paymentMethod === "online" && order.paymentStatus !== "paid";
 
   const handleStatusUpdate = async (status: OrderStatus) => {
     if (!order) return;
@@ -102,11 +109,85 @@ export default function PharmacyOrderDetailsScreen() {
       setOrder(updated);
       const nextTimeline = await getPharmacyOrderTimeline(order.id);
       setTimeline(nextTimeline);
+      Toast.show({ type: "success", text1: `Order marked ${ORDER_STATUS_LABELS[status].toLowerCase()}` });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Unable to update order");
     } finally {
       setBusyStatus(null);
     }
+  };
+
+  const refreshTimeline = async (nextOrder: OrderSummary) => {
+    setOrder(nextOrder);
+    const nextTimeline = await getPharmacyOrderTimeline(nextOrder.id);
+    setTimeline(nextTimeline);
+  };
+
+  const handleReviewOrder = async () => {
+    if (!order) return;
+    try {
+      setBusyStatus("confirmed");
+      setError(null);
+      const reviewed = await reviewPharmacyOrder(order.id, {
+        pharmacistNote: "Reviewed by pharmacist",
+        items: order.items.map((item) => ({
+          orderItemId: item.id,
+          inventoryItemId: item.inventoryItemId,
+          approvedQuantity: item.approvedQuantity || item.quantity,
+          itemStatus:
+            (item.approvedQuantity || item.quantity) < (item.requestedQuantity || item.quantity)
+              ? "partial"
+              : "available",
+        })),
+      });
+      await refreshTimeline(reviewed);
+      Toast.show({ type: "success", text1: "Prescription items reviewed" });
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Unable to review order");
+    } finally {
+      setBusyStatus(null);
+    }
+  };
+
+  const handleCompleteOrder = async () => {
+    if (!order) return;
+    try {
+      setBusyStatus("completed");
+      setError(null);
+      const completed = await completePharmacyOrder(order.id);
+      await refreshTimeline(completed);
+      Toast.show({ type: "success", text1: "Order completed" });
+    } catch (completeError) {
+      setError(completeError instanceof Error ? completeError.message : "Unable to complete order");
+    } finally {
+      setBusyStatus(null);
+    }
+  };
+
+  const handleRejectOrder = () => {
+    if (!order) return;
+    Alert.alert("Reject order", "Reject this prescription order?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reject",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            try {
+              setBusyStatus("rejected");
+              setError(null);
+              const rejected = await rejectPharmacyOrder(order.id, "Rejected by pharmacist");
+              await refreshTimeline(rejected);
+              Toast.show({ type: "success", text1: "Order rejected" });
+            } catch (rejectError) {
+              setError(rejectError instanceof Error ? rejectError.message : "Unable to reject order");
+            } finally {
+              setBusyStatus(null);
+            }
+          })();
+        },
+      },
+    ]);
   };
 
   if (loading) {
@@ -220,6 +301,18 @@ export default function PharmacyOrderDetailsScreen() {
               <Text style={styles.blockText}>{order.notes}</Text>
             </View>
           ) : null}
+          {order.pharmacistNote ? (
+            <View style={styles.detailBlock}>
+              <Text style={styles.blockLabel}>Pharmacist note</Text>
+              <Text style={styles.blockText}>{order.pharmacistNote}</Text>
+            </View>
+          ) : null}
+          {order.rejectionReason ? (
+            <View style={styles.detailBlock}>
+              <Text style={styles.blockLabel}>Rejection reason</Text>
+              <Text style={styles.blockText}>{order.rejectionReason}</Text>
+            </View>
+          ) : null}
           {order.deliveryNotes ? (
             <View style={styles.detailBlock}>
               <Text style={styles.blockLabel}>Delivery note</Text>
@@ -238,8 +331,10 @@ export default function PharmacyOrderDetailsScreen() {
                 </Text>
                 <Text style={styles.itemMeta}>
                   {formatPrice(item.unitPrice)}
+                  {item.approvedQuantity !== item.quantity ? ` • Approved ${item.approvedQuantity}` : ""}
                   {item.requiresPrescription ? " • Prescription item" : ""}
                 </Text>
+                {item.note ? <Text style={styles.itemNote}>{item.note}</Text> : null}
               </View>
               <Text style={styles.itemTotal}>{formatPrice(item.totalPrice)}</Text>
             </View>
@@ -252,8 +347,51 @@ export default function PharmacyOrderDetailsScreen() {
         </View>
 
         <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Payment</Text>
+          <Text style={styles.primaryValue}>
+            {order.paymentMethod === "online" ? "Online payment" : "Cash / Pay at pharmacy"}
+          </Text>
+          <Text style={styles.metaText}>
+            {order.paymentStatus
+              ? `Status: ${String(order.paymentStatus).replace(/_/g, " ")}`
+              : "Status: awaiting payment selection"}
+          </Text>
+          {order.paidAt ? (
+            <Text style={styles.metaText}>Paid at {new Date(order.paidAt).toLocaleString("en-LK")}</Text>
+          ) : null}
+          {order.invoice ? (
+            <View style={styles.detailBlock}>
+              <Text style={styles.blockLabel}>Invoice</Text>
+              <Text style={styles.blockText}>{order.invoice.invoiceNo}</Text>
+            </View>
+          ) : null}
+          {awaitingOnlinePayment ? (
+            <View style={styles.paymentGuardCard}>
+              <Ionicons name="card-outline" size={18} color="#92400E" />
+              <Text style={styles.paymentGuardText}>
+                Pharmacist processing is locked until the online payment is verified by the backend callback.
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Actions</Text>
-          {allowedNextStatuses.length ? (
+          {awaitingOnlinePayment ? (
+            <Text style={styles.metaText}>No actions are available while payment confirmation is pending.</Text>
+          ) : null}
+          {!awaitingOnlinePayment && order.prescriptionId && order.status === "pending" ? (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.reviewActionBtn, busyStatus !== null && styles.actionBtnDisabled]}
+              disabled={busyStatus !== null}
+              onPress={() => void handleReviewOrder()}
+            >
+              <Text style={[styles.actionBtnText, styles.reviewActionText]}>
+                {busyStatus === "confirmed" ? "Reviewing..." : "Review prescription items"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {!awaitingOnlinePayment && allowedNextStatuses.length ? (
             <View style={styles.actionWrap}>
               {allowedNextStatuses.map((status) => (
                 <TouchableOpacity
@@ -268,9 +406,31 @@ export default function PharmacyOrderDetailsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          ) : (
+          ) : !awaitingOnlinePayment ? (
             <Text style={styles.metaText}>No further status updates are available for this order.</Text>
-          )}
+          ) : null}
+          {!awaitingOnlinePayment && ["ready_for_pickup", "partially_ready"].includes(order.status) ? (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.completeActionBtn, busyStatus !== null && styles.actionBtnDisabled]}
+              disabled={busyStatus !== null}
+              onPress={() => void handleCompleteOrder()}
+            >
+              <Text style={[styles.actionBtnText, styles.completeActionText]}>
+                {busyStatus === "completed" ? "Completing..." : "Complete order"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {!awaitingOnlinePayment && ["pending", "confirmed"].includes(order.status) ? (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.rejectActionBtn, busyStatus !== null && styles.actionBtnDisabled]}
+              disabled={busyStatus !== null}
+              onPress={handleRejectOrder}
+            >
+              <Text style={[styles.actionBtnText, styles.rejectActionText]}>
+                {busyStatus === "rejected" ? "Rejecting..." : "Reject order"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <View style={styles.sectionCard}>
@@ -400,11 +560,22 @@ const styles = StyleSheet.create({
   },
   itemName: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
   itemMeta: { marginTop: 4, fontSize: 12, color: "#64748B" },
+  itemNote: { marginTop: 4, fontSize: 12, color: "#B45309" },
   itemTotal: { fontSize: 14, fontWeight: "800", color: "#0F172A" },
   summaryDivider: { marginTop: 14, borderTopWidth: 1, borderTopColor: "#E2E8F0" },
   summaryRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 12 },
   summaryLabel: { fontSize: 14, color: "#64748B" },
   totalValue: { fontSize: 17, fontWeight: "800", color: "#2BB673" },
+  paymentGuardCard: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+    borderRadius: 16,
+    padding: 14,
+    backgroundColor: "#FEF3C7",
+  },
+  paymentGuardText: { flex: 1, fontSize: 13, lineHeight: 19, color: "#92400E" },
   actionWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   actionBtn: {
     minHeight: 42,
@@ -416,6 +587,12 @@ const styles = StyleSheet.create({
   },
   actionBtnDisabled: { opacity: 0.7 },
   actionBtnText: { fontSize: 13, fontWeight: "800", color: "#0F8A5F" },
+  reviewActionBtn: { alignSelf: "flex-start", marginBottom: 10, backgroundColor: "#EEF2FF" },
+  reviewActionText: { color: "#3730A3" },
+  completeActionBtn: { alignSelf: "flex-start", marginTop: 10, backgroundColor: "#DCFCE7" },
+  completeActionText: { color: "#166534" },
+  rejectActionBtn: { alignSelf: "flex-start", marginTop: 10, backgroundColor: "#FEE2E2" },
+  rejectActionText: { color: "#B91C1C" },
   timelineRow: { flexDirection: "row", gap: 12, paddingBottom: 16 },
   timelineRowLast: { paddingBottom: 0 },
   timelineRail: { alignItems: "center", width: 18 },

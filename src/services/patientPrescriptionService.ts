@@ -11,7 +11,7 @@ export type PatientPrescriptionMedicine = {
 };
 
 export type PrescriptionFulfillmentMatchItem = {
-  prescriptionItemId: number;
+  prescriptionItemId: string;
   inventoryItemId: number;
   marketplaceProductId: number;
   medicineName: string;
@@ -24,7 +24,7 @@ export type PrescriptionFulfillmentMatchItem = {
 };
 
 export type PrescriptionFulfillmentMissingItem = {
-  prescriptionItemId: number;
+  prescriptionItemId: string;
   medicineName: string;
   requiredQuantity: number;
   availableQuantity: number;
@@ -47,6 +47,15 @@ export type PrescriptionFulfillmentMatch = {
 export type PrescriptionFulfillmentResponse = {
   prescriptionId: string;
   matches: PrescriptionFulfillmentMatch[];
+};
+
+export type PrescriptionDeliveryAddress = {
+  line1: string;
+  line2?: string | null;
+  city?: string | null;
+  district?: string | null;
+  postalCode?: string | null;
+  landmark?: string | null;
 };
 
 export type PatientPrescriptionListItem = {
@@ -123,7 +132,13 @@ export const createPrescriptionOrder = async (
   input: {
     pharmacyId: number;
     acceptPartial: boolean;
+    fulfillmentMethod?: "pickup" | "delivery";
+    paymentMethod?: "cash" | "online";
     notes?: string;
+    deliveryAddress?: PrescriptionDeliveryAddress | null;
+    deliveryNotes?: string | null;
+    deliveryContactName?: string | null;
+    deliveryContactPhone?: string | null;
   }
 ) => {
   const response = await apiFetch(
@@ -133,7 +148,13 @@ export const createPrescriptionOrder = async (
       body: JSON.stringify({
         pharmacy_id: input.pharmacyId,
         accept_partial: input.acceptPartial,
+        fulfillment_method: input.fulfillmentMethod ?? "pickup",
+        payment_method: input.paymentMethod ?? "cash",
         notes: input.notes?.trim() || undefined,
+        delivery_address: input.deliveryAddress ?? undefined,
+        delivery_notes: input.deliveryNotes?.trim() || undefined,
+        delivery_contact_name: input.deliveryContactName?.trim() || undefined,
+        delivery_contact_phone: input.deliveryContactPhone?.trim() || undefined,
       }),
     }
   );

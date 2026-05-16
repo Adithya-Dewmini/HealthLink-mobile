@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, Modal, StyleSheet, TouchableOpacity, Dimensions, Animated } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { Ionicons } from "@expo/vector-icons";
+import { buildPrescriptionQrValue } from "../../utils/pharmacyPrescription";
 
 const { height, width } = Dimensions.get("window");
 
@@ -24,31 +25,7 @@ export default function PrescriptionPopup({
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
-  const qrPayload = (() => {
-    let token =
-      prescription?.qrToken ??
-      prescription?.qr_code ??
-      prescription?.qrCode ??
-      prescription?.token ??
-      null;
-    const id =
-      prescription?.id ??
-      prescription?.prescriptionId ??
-      prescription?.prescription_id ??
-      null;
-    if (!token || !id) return null;
-    if (typeof token === "string") {
-      const trimmed = token.trim();
-      if (trimmed.startsWith("{") && trimmed.includes("prescriptionId")) {
-        return trimmed;
-      }
-      const marker = "/prescription/";
-      if (trimmed.includes(marker)) {
-        token = trimmed.split(marker).pop() || trimmed;
-      }
-    }
-    return JSON.stringify({ prescriptionId: String(id), token: String(token) });
-  })();
+  const qrValue = useMemo(() => buildPrescriptionQrValue(prescription), [prescription]);
 
   useEffect(() => {
     if (!visible) return;
@@ -76,9 +53,9 @@ export default function PrescriptionPopup({
 
           <View style={styles.qrContainer}>
             <View style={styles.qrWhiteBox}>
-              {qrPayload ? (
+              {qrValue ? (
                 <QRCode
-                  value={qrPayload}
+                  value={qrValue}
                   size={160}
                   color={THEME.textDark}
                   backgroundColor={THEME.white}

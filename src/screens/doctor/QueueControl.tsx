@@ -1,933 +1,1254 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
+  ActivityIndicator,
   Alert,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Toast from "react-native-toast-message";
-import { useNavigation } from "@react-navigation/native";
 import ClinicEndedModal from "../../components/ClinicEndedModal";
 import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
-import { notifyLocal } from "../../services/notifications";
-import { apiFetch } from "../../config/api";
+import DoctorAvatar from "../../components/common/DoctorAvatar";
+import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
+import { doctorColors } from "../../constants/doctorTheme";
 import {
+  callNextPatient,
+  endClinic,
   getQueueDashboard,
   startQueue,
-  callNextPatient,
   skipPatient,
-  endClinic,
+  type DoctorQueueDashboard,
+  type DoctorQueuePatient,
 } from "../../services/doctorQueueService";
+import { fetchDoctorSessionsRange } from "../../services/doctorScheduleService";
+import { fetchDoctorClinics, type DoctorClinicItem } from "../../services/doctorClinicsService";
 import { connectSocket, joinDoctorRoom, joinSessionRoom, leaveSessionRoom, socket } from "../../services/socket";
+import { notifyLocal } from "../../services/notifications";
 import { useAuth } from "../../utils/AuthContext";
-import { doctorColors, getDoctorStatusTone } from "../../constants/doctorTheme";
-import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
+import { formatLongDateLabel, formatTimeLabel, formatTimeRangeLabel } from "../../utils/dateUtils";
+import { getFriendlyError } from "../../utils/friendlyErrors";
+import { getDisplayInitials, resolveDoctorImage } from "../../utils/imageUtils";
+import type { ScheduleSession } from "./scheduleTypes";
 
 const THEME = {
   background: doctorColors.background,
-  white: doctorColors.surface,
-  textDark: doctorColors.textPrimary,
-  textGray: doctorColors.textSecondary,
-  accentBlue: doctorColors.primary,
-  accentBlueDark: doctorColors.deep,
-  softBlue: "#EAF7F7",
+  surface: doctorColors.surface,
+  deep: doctorColors.deep,
+  primary: doctorColors.primary,
+  text: doctorColors.textPrimary,
+  textSecondary: doctorColors.textSecondary,
   border: doctorColors.border,
-  success: doctorColors.primary,
-  softSuccess: doctorColors.successBg,
+  soft: "#EAF7F7",
+  softAlt: "#F7FAFC",
   warning: doctorColors.warningText,
+  warningBg: doctorColors.warningBg,
   danger: doctorColors.dangerText,
-  softDanger: doctorColors.dangerBg,
-  softWarning: doctorColors.warningBg,
-  softNeutral: "#EEF7F7",
-  cardDark: doctorColors.deep,
+  dangerBg: doctorColors.dangerBg,
+  mutedBg: "#E6ECF2",
+  successBg: doctorColors.successBg,
 };
+
+const NO_ACTIVE_PATIENT_BANNER = require("../../../assets/images/no-active-patient-banner.png");
+
+type QueueRouteParams = {
+  scheduleId?: string | number;
+  sessionId?: string | number;
+  queueId?: string | number;
+  medicalCenterId?: string;
+  clinicId?: string;
+  date?: string;
+};
+
+type QueueSessionCard = ScheduleSession & {
+  location?: string;
+  imageUrl?: string | null;
+};
+
+const getTodayKey = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+  }).format(new Date());
+
+const isQueueStatusLive = (status?: string | null) => {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "LIVE" || normalized === "PAUSED";
+};
+
+const getHeaderStatusVariant = (status?: string | null) => {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "LIVE") return "live" as const;
+  if (normalized === "ENDED") return "error" as const;
+  if (normalized === "PAUSED") return "pending" as const;
+  return "idle" as const;
+};
+
+const getHeaderStatusLabel = (status?: string | null) => {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "LIVE") return "Live";
+  if (normalized === "PAUSED") return "Paused";
+  if (normalized === "ENDED") return "Ended";
+  return "Not Started";
+};
+
+function ClinicImage({
+  imageUrl,
+  name,
+}: {
+  imageUrl?: string | null;
+  name: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [imageUrl]);
+
+  if (imageUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: imageUrl }}
+        style={styles.sessionImage}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <View style={styles.sessionImageFallback}>
+      <Ionicons name="business-outline" size={22} color={THEME.primary} />
+      <Text style={styles.sessionImageFallbackText}>{getDisplayInitials(name, "CL")}</Text>
+    </View>
+  );
+}
+
+function ActionButton({
+  icon,
+  label,
+  onPress,
+  disabled,
+  loading,
+  tone = "default",
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  tone?: "default" | "primary" | "danger";
+}) {
+  const color =
+    tone === "primary" ? THEME.surface : tone === "danger" ? THEME.danger : THEME.deep;
+  const backgroundColor =
+    tone === "primary" ? THEME.primary : tone === "danger" ? THEME.dangerBg : THEME.surface;
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionButton,
+        { backgroundColor, borderColor: tone === "danger" ? "#F7C9C5" : THEME.border },
+        disabled && styles.actionButtonDisabled,
+      ]}
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View style={[styles.actionIconWrap, { backgroundColor: tone === "primary" ? "rgba(255,255,255,0.14)" : "#F4F7FA" }]}>
+        {loading ? <ActivityIndicator size="small" color={color} /> : <Ionicons name={icon} size={18} color={color} />}
+      </View>
+      <Text style={[styles.actionButtonText, { color }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function QueueScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { user } = useAuth();
-  const [queue, setQueue] = useState<any>(null);
-  const [patients, setPatients] = useState<any[]>([]);
-  const [currentPatient, setCurrentPatient] = useState<any>(null);
-  const [doctorId, setDoctorId] = useState<number | string | null>(null);
-  const [showClinicEndedModal, setShowClinicEndedModal] = useState(false);
-  const [todayShift, setTodayShift] = useState<{ start: string; end: string } | null>(null);
-  const sessionId = queue?.sessionId ?? null;
+  const routeParams = (route.params || {}) as QueueRouteParams;
+  const routeScheduleId = String(routeParams.scheduleId || routeParams.sessionId || "").trim() || null;
   const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
   const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
 
-  const showApprovalRequiredToast = () => {
-    Toast.show({
-      type: "info",
-      text1: "Approval required",
-      text2: "This feature is available after admin approval",
-    });
-  };
+  const [queue, setQueue] = useState<DoctorQueueDashboard["queue"]>(null);
+  const [patients, setPatients] = useState<DoctorQueuePatient[]>([]);
+  const [currentPatient, setCurrentPatient] = useState<DoctorQueuePatient | null>(null);
+  const [doctorId, setDoctorId] = useState<number | string | null>(null);
+  const [showClinicEndedModal, setShowClinicEndedModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [actionLoading, setActionLoading] = useState<null | "start" | "next" | "skip" | "end" | "open">(null);
+  const [error, setError] = useState<string | null>(null);
+  const [sessionCards, setSessionCards] = useState<QueueSessionCard[]>([]);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(routeScheduleId);
 
-  const isNotVerifiedError = (error: any) => {
-    return (
-      error?.response?.status === 403 &&
-      String(error?.response?.data?.message || "").toLowerCase().includes("not verified")
-    );
-  };
+  const queueStatus = String(queue?.status || "NOT_STARTED").toUpperCase();
+  const queueStatusLabel = getHeaderStatusLabel(queueStatus);
+  const isQueueEnded = queueStatus === "ENDED";
+  const isQueueLive = queueStatus === "LIVE";
+  const isQueueActive = isQueueStatusLive(queueStatus);
+  const hasActivePatient =
+    Boolean(currentPatient) && String(currentPatient?.status || "").toUpperCase() === "WITH_DOCTOR";
+  const waitingPatients = patients.filter((patient) => String(patient.status || "").toUpperCase() !== "WITH_DOCTOR");
+  const canGoBack = Boolean(routeScheduleId) && navigation.canGoBack();
+  const activeSessionId = String(queue?.sessionId || "").trim() || null;
 
-  const loadDashboard = async () => {
-    if (!isVerifiedDoctor) {
-      setQueue(null);
-      setPatients([]);
-      setCurrentPatient(null);
-      return;
+  const selectedSession = useMemo(() => {
+    if (selectedScheduleId) {
+      return sessionCards.find((session) => String(session.id) === String(selectedScheduleId)) || null;
     }
 
-    try {
-      const token = await AsyncStorage.getItem("token"); // Ensure token is retrieved before API call
-      if (!token) return;
-      const data = await getQueueDashboard(token);
-      setQueue(data.queue ?? null);
-      setPatients(data.patients ?? []);
-      setCurrentPatient(data.currentPatient ?? null);
-      setDoctorId(data?.doctor?.id ?? null);
-    } catch (error: any) {
-      if (isNotVerifiedError(error)) {
-        showApprovalRequiredToast();
+    if (queue?.sessionId) {
+      return sessionCards.find((session) => String(session.id) === String(queue.sessionId)) || null;
+    }
+
+    return null;
+  }, [queue?.sessionId, selectedScheduleId, sessionCards]);
+
+  const sessionContext = useMemo(() => {
+    if (selectedSession) {
+      return {
+        id: String(selectedSession.id),
+        name: selectedSession.clinicName,
+        date: selectedSession.date,
+        startTime: selectedSession.startTime,
+        endTime: selectedSession.endTime,
+        location: selectedSession.location || null,
+        imageUrl: selectedSession.imageUrl || null,
+      };
+    }
+
+    if (queue?.sessionId || queue?.medicalCenterName) {
+      return {
+        id: String(queue?.sessionId || ""),
+        name: queue?.medicalCenterName || "Clinic Session",
+        date: queue?.sessionDate || null,
+        startTime: queue?.sessionStart || null,
+        endTime: queue?.sessionEnd || null,
+        location: queue?.location || null,
+        imageUrl: resolveDoctorImage(queue?.cover_image_url ?? null, queue?.logo_url ?? null),
+      };
+    }
+
+    return null;
+  }, [queue, selectedSession]);
+
+  const headerSubtitle = useMemo(() => {
+    if (!sessionContext) {
+      return "Select or start a clinic session";
+    }
+
+    const dayLabel =
+      sessionContext.date === getTodayKey()
+        ? "Today"
+        : sessionContext.date
+          ? formatLongDateLabel(sessionContext.date)
+          : "Clinic session";
+
+    return `${sessionContext.name} • ${dayLabel}, ${formatTimeRangeLabel(
+      sessionContext.startTime || "",
+      sessionContext.endTime || ""
+    )}`;
+  }, [sessionContext]);
+
+  const loadQueueScreen = useCallback(
+    async (mode: "initial" | "refresh" = "initial") => {
+      if (mode === "refresh") setRefreshing(true);
+      else setLoading(true);
+
+      if (!isVerifiedDoctor) {
+        setQueue(null);
+        setPatients([]);
+        setCurrentPatient(null);
+        setSessionCards([]);
+        setDoctorId(null);
+        setError(null);
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
-      Toast.show({ type: "error", text1: "Unable to load queue" });
-    }
-  };
 
-  const loadTodayShift = async () => {
-    if (!isVerifiedDoctor) {
-      setTodayShift(null);
-      return;
-    }
+      try {
+        setError(null);
+        const token = await AsyncStorage.getItem("token");
+        if (!token) return;
 
-    try {
-      const res = await apiFetch("/api/doctors/availability");
-      if (!res.ok) {
-        if (res.status === 403) {
-          const data = await res.json().catch(() => ({}));
-          const message = String(data?.message || "");
-          if (message.toLowerCase().includes("not verified")) {
-            showApprovalRequiredToast();
-            return;
-          }
+        const todayKey = getTodayKey();
+        const [sessions, clinics, baseDashboard] = await Promise.all([
+          fetchDoctorSessionsRange(todayKey, todayKey),
+          fetchDoctorClinics().catch(() => ({ active: [], pending: [] })),
+          routeScheduleId || selectedScheduleId
+            ? Promise.resolve(null)
+            : getQueueDashboard(token),
+        ]);
+
+        const clinicMap = new Map<string, DoctorClinicItem>(
+          clinics.active.map((clinic) => [String(clinic.id), clinic])
+        );
+
+        const todaySessions = sessions
+          .filter((session) => session.source !== "external")
+          .map<QueueSessionCard>((session) => {
+            const clinic = session.clinicId ? clinicMap.get(String(session.clinicId)) : undefined;
+            return {
+              ...session,
+              location: clinic?.address || clinic?.location || undefined,
+              imageUrl: resolveDoctorImage(clinic?.cover_image_url, clinic?.image_url, clinic?.logo_url),
+            };
+          });
+
+        setSessionCards(todaySessions);
+
+        let nextSelectedScheduleId = routeScheduleId || selectedScheduleId;
+        let dashboard = baseDashboard;
+
+        if (nextSelectedScheduleId) {
+          dashboard = await getQueueDashboard(token, { scheduleId: nextSelectedScheduleId });
+        } else if (dashboard?.queue && isQueueStatusLive(String(dashboard.queue.status || ""))) {
+          nextSelectedScheduleId = dashboard.queue.sessionId ? String(dashboard.queue.sessionId) : null;
+        } else if (todaySessions.length === 1) {
+          nextSelectedScheduleId = String(todaySessions[0].id);
+          dashboard = await getQueueDashboard(token, { scheduleId: nextSelectedScheduleId });
+        } else {
+          dashboard = {
+            doctor: dashboard?.doctor || null,
+            queue: null,
+            patients: [],
+            currentPatient: null,
+          } as DoctorQueueDashboard;
         }
-        return;
+
+        if (
+          nextSelectedScheduleId &&
+          dashboard?.queue?.sessionId &&
+          String(dashboard.queue.sessionId) !== String(nextSelectedScheduleId)
+        ) {
+          setQueue(null);
+          setPatients([]);
+          setCurrentPatient(null);
+          setDoctorId(dashboard?.doctor?.id ?? null);
+          setSelectedScheduleId(nextSelectedScheduleId);
+          setError("The selected clinic session does not match the loaded queue. Please refresh and try again.");
+          return;
+        }
+
+        setSelectedScheduleId(nextSelectedScheduleId || null);
+        setQueue(dashboard?.queue ?? null);
+        setPatients(dashboard?.patients ?? []);
+        setCurrentPatient(dashboard?.currentPatient ?? null);
+        setDoctorId(dashboard?.doctor?.id ?? null);
+      } catch (loadError: any) {
+        Toast.show({ type: "error", text1: "Unable to load queue" });
+        setError(getFriendlyError(loadError, "Unable to load the queue right now."));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      const data = await res.json();
-      const dayKeys = [
-        "sunday",
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-      ] as const;
-      const todayKey = dayKeys[new Date().getDay()];
-      const today = Array.isArray(data?.availability?.[todayKey]) ? data.availability[todayKey][0] : null;
-      if (today?.start && today?.end) {
-        setTodayShift({
-          start: String(today.start).slice(0, 5),
-          end: String(today.end).slice(0, 5),
-        });
-      } else {
-        setTodayShift(null);
-      }
-    } catch {
-      setTodayShift(null);
-    }
-  };
+    },
+    [isVerifiedDoctor, routeScheduleId, selectedScheduleId]
+  );
 
   useEffect(() => {
-    const init = async () => {
-      await loadDashboard();
-      await loadTodayShift();
-    };
-    void init();
-  }, [isVerifiedDoctor]);
+    void loadQueueScreen("initial");
+  }, [loadQueueScreen]);
 
   useEffect(() => {
-    if (!isVerifiedDoctor) return;
-    if (!doctorId) return;
+    if (!isVerifiedDoctor || !doctorId) return;
+
     connectSocket();
     joinDoctorRoom(doctorId);
-    if (sessionId) {
-      joinSessionRoom(sessionId);
+    if (activeSessionId) {
+      joinSessionRoom(activeSessionId);
     }
 
     const handleQueueUpdated = async (data: any) => {
-      if (sessionId && data?.sessionId && String(data.sessionId) !== String(sessionId)) return;
-      if (!sessionId && data?.doctorId !== doctorId) return;
-      if (!data?.queueId && !data?.sessionId) return;
+      if (activeSessionId && data?.sessionId && String(data.sessionId) !== String(activeSessionId)) return;
+      if (!activeSessionId && data?.doctorId && String(data.doctorId) !== String(doctorId)) return;
 
-      if (data?.type === "QUEUE_STARTED") {
-        Toast.show({
-          type: "success",
-          text1: "Queue Started",
-          text2: "The clinic queue is now active",
-        });
-      }
-
-      if (data?.type === "PATIENT_ADDED") {
-        Toast.show({
-          type: "info",
-          text1: "New Patient",
-          text2: "A patient joined the queue",
-        });
-      }
-
-      if (data?.type === "QUEUE_EMPTY") {
-        void notifyLocal("Queue Empty", "There are no patients waiting.");
-      }
-
-      if (data?.type === "CLINIC_ENDED") {
-        Toast.show({
-          type: "info",
-          text1: "Clinic Ended",
-          text2: "Today's clinic session has ended",
-        });
-      }
-
-      await loadDashboard();
-    };
-
-    const handleReconnect = async () => {
-      joinDoctorRoom(doctorId);
-      if (sessionId) {
-        joinSessionRoom(sessionId);
-      }
-      await loadDashboard();
+      await loadQueueScreen("refresh");
     };
 
     socket.on("queue:update", handleQueueUpdated);
     socket.on("queue:next", handleQueueUpdated);
     socket.on("session:start", handleQueueUpdated);
-    socket.on("connect", handleReconnect);
+
     return () => {
       socket.off("queue:update", handleQueueUpdated);
       socket.off("queue:next", handleQueueUpdated);
       socket.off("session:start", handleQueueUpdated);
-      socket.off("connect", handleReconnect);
-      if (sessionId) {
-        leaveSessionRoom(sessionId);
+      if (activeSessionId) {
+        leaveSessionRoom(activeSessionId);
       }
     };
-  }, [doctorId, isVerifiedDoctor, sessionId]);
+  }, [activeSessionId, doctorId, isVerifiedDoctor, loadQueueScreen]);
 
-  const queueStatus = queue?.status || "NOT_STARTED";
-  const isQueueEnded = queueStatus === "ENDED";
-  const isQueueLive = queueStatus === "LIVE";
-  const isQueueActive = queueStatus === "LIVE" || queueStatus === "PAUSED";
-  const queueStatusLabel =
-    queueStatus === "LIVE"
-      ? "LIVE"
-      : queueStatus === "PAUSED"
-        ? "PAUSED"
-      : queueStatus === "ENDED"
-        ? "ENDED"
-        : "NOT STARTED";
-  const queueStatusColor =
-    queueStatus === "LIVE"
-      ? THEME.danger
-      : queueStatus === "PAUSED"
-        ? THEME.warning
-      : queueStatus === "ENDED"
-        ? THEME.textGray
-        : THEME.textGray;
-  const queueStatusBg =
-    queueStatus === "LIVE"
-      ? THEME.softDanger
-      : queueStatus === "PAUSED"
-        ? THEME.softWarning
-      : THEME.softNeutral;
-  const clinicStatusTitle =
-    queueStatus === "LIVE"
-      ? "Clinic Running"
-      : queueStatus === "PAUSED"
-        ? "Clinic Paused"
-      : queueStatus === "ENDED"
-        ? "Clinic Ended"
-        : "Clinic Not Started";
-  const clinicStatusSubtitle =
-    queueStatus === "LIVE"
-      ? "Serving patients"
-      : queueStatus === "PAUSED"
-        ? "Queue temporarily paused"
-      : queueStatus === "ENDED"
-        ? "This clinic session has ended"
-        : "Start the session to begin";
-
-  // API Action Handlers
   const handleStartQueue = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
+    if (!selectedScheduleId) {
+      Toast.show({ type: "info", text1: "Choose a clinic session to start the queue." });
       return;
     }
+
     const token = await AsyncStorage.getItem("token");
     if (!token) return;
+
     try {
-      const confirmStart = async () => {
-        const res = await startQueue(token);
-        Alert.alert("Clinic Status", res?.message ?? "Queue started");
-        await loadDashboard();
-      };
-
-      const now = new Date();
-      if (todayShift?.start) {
-        const [h, m] = todayShift.start.split(":").map(Number);
-        const shiftStart = new Date(now);
-        shiftStart.setHours(h, m, 0, 0);
-        const earlyStartWindow = new Date(shiftStart.getTime() - 30 * 60 * 1000);
-
-        if (now >= earlyStartWindow && now < shiftStart) {
-          Alert.alert(
-            "Start Queue Early?",
-            "You are starting up to 30 minutes before your shift. Continue?",
-            [
-              { text: "Cancel", style: "cancel" },
-              { text: "Start Queue", onPress: confirmStart },
-            ]
-          );
-          return;
-        }
-      }
-
-      await confirmStart();
-    } catch (err: any) {
-      if (isNotVerifiedError(err)) {
-        showApprovalRequiredToast();
-        return;
-      }
-      const backendMessage = err?.response?.data?.message;
-      if (backendMessage === "No active shift found for this time") {
-        Alert.alert(
-          "No Active Shift",
-          "You don't have a shift scheduled for the current time. Please start the clinic during your shift hours."
-        );
-      } else {
-        Alert.alert("Error", backendMessage || "Unable to start queue");
-      }
+      setActionLoading("start");
+      const response = await startQueue(token, selectedScheduleId);
+      Alert.alert("Clinic Status", response?.message ?? "Queue started");
+      Toast.show({ type: "success", text1: "Queue is now live" });
+      await loadQueueScreen("refresh");
+    } catch (loadError: any) {
+      Alert.alert("Error", getFriendlyError(loadError, loadError?.response?.data?.message || "Unable to start queue"));
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleNextPatient = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
-      return;
-    }
+    const token = await AsyncStorage.getItem("token");
+    if (!token) return;
+
     try {
-      const token = await AsyncStorage.getItem("token");
-      if (!token) return;
-      const res = await callNextPatient(token);
-      if (res?.message === "Queue Empty") {
-        void notifyLocal("Queue Empty", "There are no patients waiting.");
-        return;
-      }
-      if (res?.queueId) {
-        navigation.navigate("ConsultationPage", { queueId: res.queueId });
-      }
-      await loadDashboard();
-    } catch (error: any) {
-      if (isNotVerifiedError(error)) {
-        showApprovalRequiredToast();
-        return;
-      }
-      const err: any = error;
-      if (err?.response?.status === 409) {
+      setActionLoading("next");
+      const response = await callNextPatient(token);
+      if (response?.message === "No patients waiting yet") {
         void notifyLocal("Queue Empty", "There are no patients waiting.");
       }
+      if (response?.queueId) {
+        navigation.navigate("ConsultationPage", { queueId: response.queueId });
+      }
+      await loadQueueScreen("refresh");
+    } catch (loadError: any) {
+      const backendMessage = String(loadError?.response?.data?.message || "");
+      if (loadError?.response?.status === 409 && backendMessage.toLowerCase().includes("finish or skip")) {
+        Alert.alert("Current consultation in progress", backendMessage);
+      } else {
+        Toast.show({ type: "error", text1: getFriendlyError(loadError, "Unable to call the next patient") });
+      }
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleOpenConsultation = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
+  const handleOpenConsultation = () => {
+    if (!currentPatient?.queue_id || !hasActivePatient) {
+      Toast.show({ type: "info", text1: "No active patient" });
       return;
     }
-    const targetQueueId = currentPatient?.queue_id || queue?.id;
-    if (!targetQueueId) {
-      if (!isQueueActive) {
-        Toast.show({ type: "info", text1: "Queue is not active" });
-        return;
-      }
-      try {
-        const token = await AsyncStorage.getItem("token");
-        if (!token) return;
-        const res = await callNextPatient(token);
-        if (res?.queueId) {
-          navigation.navigate("ConsultationPage", { queueId: res.queueId });
-        }
-        await loadDashboard();
-        return;
-      } catch (error: any) {
-        if (isNotVerifiedError(error)) {
-          showApprovalRequiredToast();
-          return;
-        }
-        Toast.show({ type: "error", text1: "Unable to open consultation" });
-        return;
-      }
-    }
-    navigation.navigate("ConsultationPage", { queueId: targetQueueId });
+
+    navigation.navigate("ConsultationPage", { queueId: currentPatient.queue_id });
   };
-  const handleSkipPatient = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
-      return;
-    }
-    Alert.alert(
-      "Skip Patient",
-      "Are you sure you want to skip the current patient?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Skip",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const token = await AsyncStorage.getItem("token");
-              if (token) {
-                const res = await skipPatient(token);
-                if (res?.message === "No more patients in queue") {
-                  void notifyLocal("Queue Empty", "No more patients waiting.");
-                } else {
-                  void notifyLocal("Patient Skipped", "The current patient was marked as skipped.");
-                }
-                await loadDashboard();
-              }
-            } catch (error: any) {
-              if (isNotVerifiedError(error)) {
-                showApprovalRequiredToast();
-                return;
-              }
-              Toast.show({ type: "error", text1: "Unable to skip patient" });
-            }
-          },
+
+  const handleSkipPatient = () => {
+    Alert.alert("Skip Patient", "Are you sure you want to skip the current patient?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Skip",
+        style: "destructive",
+        onPress: async () => {
+          const token = await AsyncStorage.getItem("token");
+          if (!token) return;
+          try {
+            setActionLoading("skip");
+            await skipPatient(token);
+            Toast.show({ type: "success", text1: "Patient skipped" });
+            await loadQueueScreen("refresh");
+          } catch (loadError: any) {
+            Toast.show({ type: "error", text1: getFriendlyError(loadError, "Unable to skip patient") });
+          } finally {
+            setActionLoading(null);
+          }
         },
-      ]
+      },
+    ]);
+  };
+
+  const handleEndClinic = () => {
+    Alert.alert("End Clinic", "Are you sure you want to end this clinic session?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "End Clinic",
+        style: "destructive",
+        onPress: async () => {
+          const token = await AsyncStorage.getItem("token");
+          if (!token) return;
+
+          try {
+            setActionLoading("end");
+            await endClinic(token);
+            setShowClinicEndedModal(true);
+            Toast.show({ type: "success", text1: "Clinic session ended" });
+            await loadQueueScreen("refresh");
+          } catch (loadError: any) {
+            if (loadError?.response?.status === 409 && loadError?.response?.data?.requiresConfirmation) {
+              Alert.alert(
+                "Waiting patients remain",
+                String(loadError?.response?.data?.message || "There are waiting patients. End clinic anyway?"),
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "End Clinic",
+                    style: "destructive",
+                    onPress: async () => {
+                      const retryToken = await AsyncStorage.getItem("token");
+                      if (!retryToken) return;
+                      try {
+                        setActionLoading("end");
+                        await endClinic(retryToken, true);
+                        setShowClinicEndedModal(true);
+                        Toast.show({ type: "success", text1: "Clinic session ended" });
+                        await loadQueueScreen("refresh");
+                      } catch (retryError: any) {
+                        Toast.show({ type: "error", text1: getFriendlyError(retryError, "Unable to end clinic") });
+                      } finally {
+                        setActionLoading(null);
+                      }
+                    },
+                  },
+                ]
+              );
+              return;
+            }
+
+            Toast.show({ type: "error", text1: getFriendlyError(loadError, "Unable to end clinic") });
+          } finally {
+            setActionLoading(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderQueueEmptyState = () => {
+    if (!selectedScheduleId && sessionCards.length > 1) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Ionicons name="calendar-outline" size={28} color={THEME.textSecondary} />
+          <Text style={styles.emptyStateTitle}>Select a clinic session to view queue.</Text>
+        </View>
+      );
+    }
+
+    if (!selectedScheduleId && sessionCards.length === 0) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Ionicons name="calendar-clear-outline" size={28} color={THEME.textSecondary} />
+          <Text style={styles.emptyStateTitle}>Select or start a clinic session.</Text>
+        </View>
+      );
+    }
+
+    if (!isQueueActive && !isQueueEnded) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Ionicons name="play-circle-outline" size={28} color={THEME.textSecondary} />
+          <Text style={styles.emptyStateTitle}>Start the clinic to begin queue management.</Text>
+        </View>
+      );
+    }
+
+    if (isQueueEnded) {
+      return (
+        <View style={styles.emptyStateCard}>
+          <Ionicons name="checkmark-done-outline" size={28} color={THEME.textSecondary} />
+          <Text style={styles.emptyStateTitle}>This clinic session has ended.</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyStateCard}>
+        <Ionicons name="people-outline" size={28} color={THEME.textSecondary} />
+        <Text style={styles.emptyStateTitle}>No waiting patients.</Text>
+      </View>
     );
   };
-
-  const handleEndClinic = async () => {
-    if (!isVerifiedDoctor) {
-      showApprovalRequiredToast();
-      return;
-    }
-    Alert.alert(
-      "End Clinic",
-      "Are you sure you want to end today's clinic? This will mark remaining patients as MISSED.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "End Clinic",
-          style: "destructive",
-          onPress: async () => {
-            const token = await AsyncStorage.getItem("token");
-            if (!token) return;
-            try {
-              await endClinic(token);
-              setShowClinicEndedModal(true);
-              await loadDashboard();
-            } catch (error: any) {
-              if (isNotVerifiedError(error)) {
-                showApprovalRequiredToast();
-                return;
-              }
-              Toast.show({ type: "error", text1: "Unable to end clinic" });
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const formatTime = (value?: string | null) => {
-    if (!value) return "--:--";
-    const date = new Date(value);
-    return Number.isNaN(date.getTime())
-      ? "--:--"
-      : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
-  const appointmentTime =
-    currentPatient?.appointment_time ||
-    currentPatient?.appointmentTime ||
-    currentPatient?.scheduled_time ||
-    null;
-  const patientNotes =
-    currentPatient?.symptoms ||
-    currentPatient?.notes ||
-    currentPatient?.note ||
-    null;
 
   if (showClinicEndedModal) {
-    return (
-      <ClinicEndedModal onClose={() => setShowClinicEndedModal(false)} />
-    );
+    return <ClinicEndedModal onClose={() => setShowClinicEndedModal(false)} />;
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Patient Queue</Text>
-            <Text style={styles.subtitle}>{queue?.name || "Daily Clinic"}</Text>
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={THEME.primary} />
+      <View style={styles.headerShell}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerTitleRow}>
+              {canGoBack ? (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => navigation.goBack()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                >
+                  <Ionicons name="chevron-back" size={20} color={THEME.surface} />
+                </TouchableOpacity>
+              ) : null}
+              <View style={styles.headerCopy}>
+                <Text style={styles.headerTitle}>Queue Center</Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  {headerSubtitle}
+                </Text>
+              </View>
+            </View>
           </View>
-        <View style={[styles.liveBadge, { backgroundColor: queueStatusBg }]}>
-            <ScheduleStatusBadge
-              label={queueStatusLabel}
-              tone={
-                queueStatus === "LIVE"
-                  ? "live"
-                  : queueStatus === "PAUSED"
-                    ? "conflict"
-                    : queueStatus === "ENDED"
-                      ? "completed"
-                      : "upcoming"
-              }
-            />
+          <View style={styles.headerStatusPill}>
+            <Text style={styles.headerStatusText}>{queueStatusLabel.toUpperCase()}</Text>
           </View>
         </View>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadQueueScreen("refresh")} />}
+        showsVerticalScrollIndicator={false}
+      >
         {!isVerifiedDoctor ? <PendingApprovalBanner /> : null}
 
-        {!isVerifiedDoctor ? (
-          <View style={styles.pendingInfoCard}>
-            <Text style={styles.pendingInfoTitle}>Limited access</Text>
-            <Text style={styles.pendingInfoText}>
-              Your account is under review. You can explore your profile while waiting
-              for approval.
-            </Text>
+        {loading ? (
+          <View style={styles.stateCard}>
+            <ActivityIndicator size="large" color={THEME.primary} />
+            <Text style={styles.stateTitle}>Loading queue</Text>
+            <Text style={styles.stateText}>Today&apos;s session queue will appear here.</Text>
           </View>
         ) : null}
 
-        <View style={styles.heroCard}>
-          <Text style={styles.heroLabel}>CLINIC STATUS</Text>
-          <Text style={styles.heroTitle}>{clinicStatusTitle}</Text>
-          <Text style={styles.heroSubtitle}>{clinicStatusSubtitle}</Text>
-
-          <View style={styles.heroActions}>
-            <ActionTile
-              icon="play"
-              label={isVerifiedDoctor ? "Start Clinic" : "Approval Needed"}
-              color={THEME.accentBlue}
-              disabled={isQueueEnded}
-              accessibilityLabel="Start clinic queue"
-              onPress={handleStartQueue}
-            />
-            <ActionTile
-              icon="play-forward"
-              label="Call Next"
-              color={THEME.textDark}
-              disabled={!isQueueLive}
-              accessibilityLabel="Call next patient"
-              onPress={handleNextPatient}
-            />
-            <ActionTile
-              icon="refresh-circle"
-              label="Skip"
-              color={THEME.warning}
-              disabled={!isQueueLive}
-              accessibilityLabel="Skip current patient"
-              onPress={handleSkipPatient}
-            />
-            <ActionTile
-              icon="stop"
-              label="End Clinic"
-              color={THEME.danger}
-              disabled={isQueueEnded}
-              accessibilityLabel="End clinic queue"
-              onPress={handleEndClinic}
-            />
-          </View>
-        </View>
-
-        <View style={[styles.focusCard, { backgroundColor: THEME.softBlue }]}>
-          <View style={styles.focusHeader}>
-            <Text style={styles.actionLabel}>CURRENT PATIENT</Text>
-            <View style={styles.focusToken}>
-              <Text style={styles.focusTokenText}>
-                #{String(currentPatient?.token_number ?? "--")}
-              </Text>
-            </View>
-          </View>
-
-          <Text style={styles.focusName} numberOfLines={1}>
-            {currentPatient?.name || "No patient yet"}
-          </Text>
-          <Text style={styles.focusMeta}>
-            {appointmentTime
-              ? `Appointment • ${formatTime(appointmentTime)}`
-              : "Walk-in or time not set"}
-          </Text>
-
-          <View style={styles.focusNotes}>
-            <Text style={styles.focusNotesLabel}>Symptoms / Notes</Text>
-            <Text style={styles.focusNotesText}>
-              {patientNotes || "No notes added"}
-            </Text>
-          </View>
-
-          <View style={styles.focusActions}>
-            <View style={styles.focusActionRow}>
-              <TouchableOpacity
-                style={[styles.focusActionSecondary, styles.focusActionPrimaryAlt]}
-                onPress={handleOpenConsultation}
-                disabled={!isVerifiedDoctor ? false : (!currentPatient && !isQueueActive)}
-                accessibilityRole="button"
-                accessibilityLabel="Open patient consultation"
-              >
-                <Ionicons name="document-text-outline" size={16} color={THEME.white} />
-                <Text style={[styles.focusActionSecondaryText, styles.focusActionPrimaryAltText]}>
-                  Open Consultation
-                </Text>
+        {!loading && error ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle-outline" size={20} color={THEME.warning} />
+            <View style={styles.errorCopy}>
+              <Text style={styles.errorTitle}>Unable to load queue</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.errorRetryButton} onPress={() => void loadQueueScreen("refresh")}>
+                <Text style={styles.errorRetryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        ) : null}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Waiting Queue</Text>
-          <Text style={styles.countText}>
-            {patients.filter((p) => p.status !== "WITH_DOCTOR").length} total
-          </Text>
-        </View>
-
-        {patients.filter((p) => p.status !== "WITH_DOCTOR").length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="people-outline" size={48} color={THEME.textGray} />
-            <Text style={styles.emptyText}>No patients are waiting right now.</Text>
-          </View>
-        ) : (
-          patients
-            .filter((p) => p.status !== "WITH_DOCTOR")
-            .map((p) => {
-            const isPreBooked =
-              Boolean(p?.appointment_time) ||
-              Boolean(p?.appointmentTime) ||
-              Boolean(p?.scheduled_time) ||
-              p?.type === "PREBOOKED" ||
-              p?.type === "PRE_BOOKED";
-            const typeLabel = isPreBooked ? "Pre-booked" : "Walk-in";
-            const typeColor = isPreBooked
-              ? THEME.accentBlueDark
-              : THEME.accentBlue;
-            const statusLabel =
-              p?.status === "SKIPPED"
-                ? "Skipped"
-                : p?.status === "WAITING"
-                  ? "Waiting"
-                  : p?.status || "Waiting";
-
-            return (
-              <View key={p.id} style={styles.queueItem}>
-                <View style={styles.queueBadge}>
-                  <Text style={styles.queueBadgeText}>
-                    {String(p.token_number || "--")}
-                  </Text>
-                </View>
-                <View style={styles.queueInfo}>
-                  <Text style={styles.queueName} numberOfLines={1}>
-                    {p.name || `Patient ${p.patient_id}`}
-                  </Text>
-                  <View style={styles.queueMetaRow}>
-                    <View style={styles.metaPill}>
-                      <View style={[styles.metaDot, { backgroundColor: typeColor }]} />
-                      <Text style={[styles.metaText, { color: typeColor }]}>
-                        {typeLabel}
+        {!loading && sessionCards.length > 1 && !isQueueActive ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Today&apos;s Clinic Sessions</Text>
+            <Text style={styles.sectionCaption}>Choose a clinic session to start or manage its queue.</Text>
+            <View style={styles.sessionSelectorStack}>
+              {sessionCards.map((session) => {
+                const selected = String(session.id) === String(selectedScheduleId || "");
+                return (
+                  <TouchableOpacity
+                    key={session.id}
+                    style={[styles.sessionSelectorCard, selected && styles.sessionSelectorCardActive]}
+                    onPress={() => setSelectedScheduleId(String(session.id))}
+                    activeOpacity={0.9}
+                  >
+                    <ClinicImage imageUrl={session.imageUrl} name={session.clinicName} />
+                    <View style={styles.sessionSelectorCopy}>
+                      <Text style={styles.sessionSelectorTitle} numberOfLines={1}>
+                        {session.clinicName}
+                      </Text>
+                      <Text style={styles.sessionSelectorMeta} numberOfLines={1}>
+                        {`${formatLongDateLabel(session.date)} • ${formatTimeRangeLabel(session.startTime, session.endTime)}`}
+                      </Text>
+                      <Text style={styles.sessionSelectorMeta} numberOfLines={1}>
+                        {session.location || "Location not available"}
                       </Text>
                     </View>
-                    <ScheduleStatusBadge
-                      label={statusLabel}
-                      tone={p?.status === "SKIPPED" ? "cancelled" : "upcoming"}
+                    <ScheduleStatusBadge label={session.status} tone="upcoming" />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {sessionContext ? (
+          <View style={styles.contextCard}>
+            <ClinicImage imageUrl={sessionContext.imageUrl} name={sessionContext.name} />
+            <View style={styles.contextCopy}>
+              <Text style={styles.contextTitle} numberOfLines={1}>
+                {sessionContext.name}
+              </Text>
+              <Text style={styles.contextMeta} numberOfLines={1}>
+                {`${sessionContext.date ? formatLongDateLabel(sessionContext.date) : "Today"} • ${formatTimeRangeLabel(
+                  sessionContext.startTime || "",
+                  sessionContext.endTime || ""
+                )}`}
+              </Text>
+              <Text style={styles.contextMeta} numberOfLines={1}>
+                {sessionContext.location || "Location not available"}
+              </Text>
+            </View>
+            <View style={styles.contextStats}>
+              <ScheduleStatusBadge label={queueStatusLabel} tone={queueStatus === "ENDED" ? "completed" : isQueueLive ? "live" : "upcoming"} />
+              <Text style={styles.contextCount}>{`${queue?.waitingCount ?? waitingPatients.length} waiting`}</Text>
+              <Text style={styles.contextCount}>{`${queue?.completedCount ?? 0} completed`}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.actionGrid}>
+          <ActionButton
+            icon={isQueueActive ? "play-forward" : "play"}
+            label={isQueueActive ? "Call Next" : "Start Clinic"}
+            onPress={isQueueActive ? handleNextPatient : handleStartQueue}
+            disabled={
+              isQueueEnded ||
+              (!isQueueActive && !selectedScheduleId) ||
+              (isQueueActive && (!isQueueLive || hasActivePatient || waitingPatients.length === 0))
+            }
+            loading={actionLoading === "start" || actionLoading === "next"}
+            tone="primary"
+          />
+          <ActionButton
+            icon="arrow-redo-outline"
+            label="Open Consultation"
+            onPress={handleOpenConsultation}
+            disabled={!hasActivePatient}
+            loading={actionLoading === "open"}
+          />
+          <ActionButton
+            icon="refresh-circle"
+            label="Skip"
+            onPress={handleSkipPatient}
+            disabled={!isQueueLive || !hasActivePatient}
+            loading={actionLoading === "skip"}
+          />
+          <ActionButton
+            icon="stop"
+            label="End Clinic"
+            onPress={handleEndClinic}
+            disabled={isQueueEnded || !isQueueActive || hasActivePatient}
+            loading={actionLoading === "end"}
+            tone="danger"
+          />
+        </View>
+
+        {!selectedScheduleId && sessionCards.length > 0 && !isQueueActive ? (
+          <Text style={styles.helperText}>Choose a clinic session to start the queue.</Text>
+        ) : null}
+
+        <View style={styles.currentPatientCard}>
+          <View style={styles.currentPatientHeader}>
+            <Text style={styles.sectionTitle}>Current Patient</Text>
+            <View style={styles.queueBadge}>
+              <Text style={styles.queueBadgeText}>#{String(currentPatient?.token_number ?? "--")}</Text>
+            </View>
+          </View>
+          {hasActivePatient ? (
+            <View style={styles.currentPatientBody}>
+              <DoctorAvatar
+                name={currentPatient?.name || "No active patient"}
+                imageUrl={resolveDoctorImage(currentPatient?.profile_image ?? null)}
+                size={48}
+                fallbackLabel={getDisplayInitials(currentPatient?.name, "PT")}
+              />
+              <View style={styles.currentPatientCopy}>
+                <Text style={styles.currentPatientName} numberOfLines={1}>
+                  {currentPatient?.name || "No active patient"}
+                </Text>
+                <Text style={styles.currentPatientMeta}>
+                  {currentPatient?.appointment_time || currentPatient?.appointmentTime || currentPatient?.scheduled_time
+                    ? `Appointment • ${formatTimeLabel(
+                        String(
+                          currentPatient?.appointment_time ||
+                            currentPatient?.appointmentTime ||
+                            currentPatient?.scheduled_time
+                        )
+                      )}`
+                    : "Walk-in patient"}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.currentPatientBannerWrap}>
+              <Image
+                source={NO_ACTIVE_PATIENT_BANNER}
+                style={styles.currentPatientBanner}
+                resizeMode="cover"
+              />
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.primaryCta, !hasActivePatient && styles.primaryCtaDisabled]}
+            onPress={handleOpenConsultation}
+            disabled={!hasActivePatient}
+          >
+            <Text style={[styles.primaryCtaText, !hasActivePatient && styles.primaryCtaTextDisabled]}>
+              {hasActivePatient ? "Open Consultation" : "Waiting for Next Patient"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.queueSectionHeader}>
+          <Text style={styles.sectionTitle}>Waiting Queue</Text>
+          <Text style={styles.sectionCount}>{waitingPatients.length}</Text>
+        </View>
+
+        {waitingPatients.length === 0
+          ? renderQueueEmptyState()
+          : waitingPatients.map((patient) => {
+              const patientTime =
+                patient.appointment_time || patient.appointmentTime || patient.scheduled_time || null;
+              return (
+                <View key={String(patient.id)} style={styles.queuePatientCard}>
+                  <View style={styles.queuePatientLeading}>
+                    <View style={styles.queueTokenPill}>
+                      <Text style={styles.queueTokenText}>{String(patient.token_number || "--")}</Text>
+                    </View>
+                    <DoctorAvatar
+                      name={patient.name || `Patient ${patient.patient_id}`}
+                      imageUrl={resolveDoctorImage(patient.profile_image ?? null)}
+                      size={40}
+                      fallbackLabel={getDisplayInitials(patient.name || `Patient ${patient.patient_id}`, "PT")}
                     />
                   </View>
+                  <View style={styles.queuePatientCopy}>
+                    <Text style={styles.queuePatientName} numberOfLines={1}>
+                      {patient.name || `Patient ${patient.patient_id}`}
+                    </Text>
+                    <Text style={styles.queuePatientMeta}>
+                      {patientTime ? formatTimeLabel(String(patientTime)) : "Walk-in patient"}
+                    </Text>
+                  </View>
+                  <ScheduleStatusBadge label={String(patient.status || "WAITING")} tone="upcoming" />
                 </View>
-                <View style={styles.queueActions}>
-                  <TouchableOpacity
-                    style={styles.queueActionButton}
-                    onPress={() =>
-                      Alert.alert(
-                        "Queue order unchanged",
-                        "Queue reordering is not available in this version."
-                      )
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={`Prioritize ${p.name || `patient ${p.patient_id}`}`}
-                  >
-                    <Ionicons name="arrow-up" size={16} color={THEME.accentBlue} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.queueActionButton}
-                    onPress={() =>
-                      Alert.alert(
-                        "Queue removal unavailable",
-                        "Removing a patient from the queue is not available in this version."
-                      )
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${p.name || `patient ${p.patient_id}`} from queue`}
-                  >
-                    <Ionicons name="close" size={16} color={THEME.danger} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })
-        )}
+              );
+            })}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-type ActionTileProps = {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  color: string;
-  onPress: () => void;
-  disabled?: boolean;
-  accessibilityLabel?: string;
-};
-
-const ActionTile = ({ icon, label, color, onPress, disabled, accessibilityLabel }: ActionTileProps) => (
-  <TouchableOpacity
-    style={[styles.actionTile, disabled && styles.actionTileDisabled]}
-    onPress={onPress}
-    disabled={disabled}
-    accessibilityRole="button"
-    accessibilityLabel={accessibilityLabel || label}
-  >
-    <View style={[styles.actionIcon, { backgroundColor: color + "1A" }]}>
-      <Ionicons name={icon} size={22} color={color} />
-    </View>
-    <Text style={[styles.actionLabel, { color }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: THEME.background },
-  scrollContent: { padding: 20, paddingBottom: 40 },
-
-  header: {
+  safe: {
+    flex: 1,
+    backgroundColor: THEME.primary,
+  },
+  headerShell: {
+    backgroundColor: THEME.primary,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  headerRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 18,
-    backgroundColor: THEME.white,
-    padding: 18,
-    borderRadius: 22,
-    shadowColor: "#DCE5F2",
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
+    justifyContent: "space-between",
+    gap: 12,
   },
-  title: { fontSize: 24, fontWeight: "900", color: THEME.textDark },
-  subtitle: { fontSize: 13, color: THEME.textGray, fontWeight: "600", marginTop: 2 },
-  liveBadge: {
+  headerLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitleRow: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    alignItems: "flex-start",
+  },
+  backButton: {
+    width: 36,
+    height: 36,
     borderRadius: 12,
-    gap: 6,
-  },
-
-  heroCard: {
-    backgroundColor: THEME.cardDark,
-    borderRadius: 26,
-    padding: 22,
-    marginBottom: 22,
-  },
-  heroLabel: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: "#A1A8B3",
-    letterSpacing: 1,
-  },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: THEME.white,
-    marginTop: 6,
-  },
-  heroSubtitle: {
-    fontSize: 14,
-    color: "#C7CDD6",
-    marginTop: 2,
-    marginBottom: 16,
-  },
-  heroActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
-  pendingInfoCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
-    padding: 16,
-    marginBottom: 16,
-  },
-  pendingInfoTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#B45309",
-    marginBottom: 6,
-  },
-  pendingInfoText: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: THEME.textGray,
-  },
-
-  actionTile: {
-    backgroundColor: THEME.white,
-    width: "23%",
-    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.14)",
     alignItems: "center",
-    paddingVertical: 12,
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: THEME.surface,
+  },
+  headerSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "rgba(255,255,255,0.84)",
+  },
+  headerStatusPill: {
+    backgroundColor: "rgba(234,247,247,0.96)",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignSelf: "flex-start",
+  },
+  headerStatusText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#5E6A84",
+    letterSpacing: 0.6,
+  },
+  container: {
+    padding: 20,
+    paddingBottom: 120,
+    backgroundColor: THEME.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  stateCard: {
+    backgroundColor: THEME.surface,
     borderWidth: 1,
     borderColor: THEME.border,
-    shadowColor: "#DCE5F2",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-  },
-  actionTileDisabled: { opacity: 0.45 },
-  actionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    justifyContent: "center",
+    borderRadius: 20,
+    padding: 22,
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 18,
   },
-  actionLabel: { fontSize: 12, fontWeight: "800" },
-
-  sectionHeader: {
+  stateTitle: {
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  stateText: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textSecondary,
+    textAlign: "center",
+  },
+  errorCard: {
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: "#F8D9A8",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  errorCopy: {
+    flex: 1,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#9A5B00",
+  },
+  errorText: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 18,
+    color: THEME.textSecondary,
+  },
+  errorRetryButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "#FFF4DB",
+    borderWidth: 1,
+    borderColor: "#F8D9A8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  errorRetryButtonText: {
+    color: "#9A5B00",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  sectionCard: {
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  sectionCaption: {
+    marginTop: 4,
+    fontSize: 13,
+    color: THEME.textSecondary,
+  },
+  sessionSelectorStack: {
+    marginTop: 14,
+    gap: 12,
+  },
+  sessionSelectorCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    padding: 12,
+    backgroundColor: THEME.surface,
+  },
+  sessionSelectorCardActive: {
+    borderColor: "#93D8D4",
+    backgroundColor: "#F2FCFB",
+  },
+  sessionImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#DDEEEF",
+  },
+  sessionImageFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#DFF4F2",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  sessionImageFallbackText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: THEME.primary,
+  },
+  sessionSelectorCopy: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
+  },
+  sessionSelectorTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  sessionSelectorMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    color: THEME.textSecondary,
+  },
+  contextCard: {
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  contextCopy: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
+  },
+  contextTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  contextMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: THEME.textSecondary,
+  },
+  contextStats: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  contextCount: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: THEME.textSecondary,
+  },
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 12,
+  },
+  actionButton: {
+    width: "47%",
+    minHeight: 74,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+  actionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  actionButtonText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  helperText: {
+    marginBottom: 18,
+    fontSize: 12,
+    color: THEME.textSecondary,
+  },
+  currentPatientCard: {
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+  },
+  currentPatientHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  queueBadge: {
+    backgroundColor: THEME.soft,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  queueBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: THEME.deep,
+  },
+  currentPatientBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+  },
+  currentPatientBannerWrap: {
+    marginTop: 14,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#E8F5F3",
+  },
+  currentPatientBanner: {
+    width: "100%",
+    height: 184,
+  },
+  currentPatientCopy: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  currentPatientName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  currentPatientMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    color: THEME.textSecondary,
+  },
+  primaryCta: {
+    marginTop: 16,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: THEME.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryCtaDisabled: {
+    backgroundColor: THEME.mutedBg,
+  },
+  primaryCtaText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: THEME.surface,
+  },
+  primaryCtaTextDisabled: {
+    color: THEME.textSecondary,
+  },
+  queueSectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 12,
   },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: THEME.textDark },
-  countText: { fontSize: 12, color: THEME.textGray, fontWeight: "600" },
-
-  queueItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: THEME.white,
-    padding: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: THEME.border,
-    marginBottom: 10,
-  },
-  queueBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: THEME.softBlue,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  queueBadgeText: { fontSize: 16, fontWeight: "800", color: THEME.textDark },
-  queueInfo: { flex: 1 },
-  queueName: { fontSize: 16, fontWeight: "800", color: THEME.textDark },
-  queueMetaRow: { flexDirection: "row", gap: 8, marginTop: 6 },
-  metaPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  sectionCount: {
+    minWidth: 28,
+    textAlign: "center",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: THEME.softNeutral,
+    backgroundColor: THEME.soft,
+    color: THEME.deep,
+    fontSize: 12,
+    fontWeight: "800",
   },
-  metaDot: { width: 6, height: 6, borderRadius: 3 },
-  metaText: { fontSize: 11, fontWeight: "700", color: THEME.textGray },
-  queueActions: { flexDirection: "row", gap: 6, marginLeft: 8 },
-  queueActionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: THEME.softNeutral,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  emptyContainer: { alignItems: "center", marginTop: 40 },
-  emptyText: { marginTop: 10, color: THEME.textGray, fontSize: 14 },
-
-  focusCard: {
-    backgroundColor: THEME.white,
-    borderRadius: 24,
-    padding: 20,
+  emptyStateCard: {
+    backgroundColor: THEME.surface,
     borderWidth: 1,
     borderColor: THEME.border,
-    marginBottom: 22,
-  },
-  focusHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  focusToken: {
-    backgroundColor: THEME.cardDark,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  focusTokenText: { color: THEME.white, fontWeight: "800", fontSize: 12 },
-  focusName: { fontSize: 20, fontWeight: "900", color: THEME.textDark, marginTop: 10 },
-  focusMeta: { fontSize: 13, color: THEME.textGray, marginTop: 2 },
-  focusNotes: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: THEME.softBlue,
-  },
-  focusNotesLabel: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: THEME.textGray,
-    letterSpacing: 0.6,
-    marginBottom: 6,
-  },
-  focusNotesText: { fontSize: 13, color: THEME.textDark },
-  focusActions: { marginTop: 16 },
-  focusActionPrimary: {
-    backgroundColor: THEME.accentBlue,
-    borderRadius: 16,
-    height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 12,
-  },
-  focusActionPrimaryText: { color: THEME.white, fontWeight: "800" },
-  focusActionRow: { flexDirection: "row", gap: 8, marginTop: 16 },
-  focusActionSecondary: {
-    backgroundColor: THEME.accentBlue,
     borderRadius: 18,
-    height: 52,
+    padding: 24,
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  emptyStateTitle: {
+    marginTop: 10,
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.text,
+    textAlign: "center",
+  },
+  queuePatientCard: {
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 10,
+  },
+  queuePatientLeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  queueTokenPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: THEME.soft,
+    alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    width: "100%",
+    marginRight: 10,
   },
-  focusActionSecondaryText: { fontSize: 14, fontWeight: "800", color: THEME.white },
-  focusActionPrimaryAlt: {
-    backgroundColor: THEME.accentBlue,
+  queueTokenText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: THEME.deep,
   },
-  focusActionPrimaryAltText: { color: THEME.white },
+  queuePatientCopy: {
+    flex: 1,
+    marginRight: 10,
+  },
+  queuePatientName: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: THEME.text,
+  },
+  queuePatientMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: THEME.textSecondary,
+  },
 });

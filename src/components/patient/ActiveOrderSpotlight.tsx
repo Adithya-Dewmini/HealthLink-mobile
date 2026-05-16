@@ -20,9 +20,13 @@ import { AuthContext } from "../../utils/AuthContext";
 import { getActiveTimelineStatuses, getTimelineSteps, ORDER_STATUS_META } from "../orders/orderFlow";
 
 const THEME = patientTheme.colors;
-const TERMINAL_STATUSES = new Set(["completed", "delivered", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["completed", "delivered", "cancelled", "rejected"]);
 
 const STATUS_COPY: Record<OrderSummary["status"], { title: string; subtitle: string }> = {
+  pending_payment: {
+    title: "Awaiting payment confirmation",
+    subtitle: "Finish the online checkout and wait for the verified gateway callback.",
+  },
   pending: {
     title: "Order received",
     subtitle: "The pharmacy has your order and will review it shortly.",
@@ -62,6 +66,10 @@ const STATUS_COPY: Record<OrderSummary["status"], { title: string; subtitle: str
   cancelled: {
     title: "Cancelled",
     subtitle: "This order was cancelled.",
+  },
+  rejected: {
+    title: "Rejected",
+    subtitle: "The pharmacy could not fulfill this order.",
   },
 };
 

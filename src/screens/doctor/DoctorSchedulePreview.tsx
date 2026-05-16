@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
+import { formatTimeRangeLabel } from "../../utils/dateUtils";
 
 const THEME = {
   background: "#F8FAFC",
@@ -23,6 +25,11 @@ const THEME = {
 };
 
 type Shift = {
+  id?: string | number;
+  clinicId?: string;
+  clinicName?: string;
+  date?: string;
+  location?: string;
   day: string;
   start_time: string;
   end_time: string;
@@ -33,13 +40,6 @@ type Props = {
   shifts?: Shift[];
   onConfirm?: () => void;
   onClose?: () => void;
-};
-
-const formatTime = (value: string) => {
-  const [h, m] = value.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const hour12 = h % 12 || 12;
-  return `${hour12.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")} ${period}`;
 };
 
 export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, onClose }: Props) {
@@ -62,16 +62,16 @@ export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, o
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
-
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={handleClose}>
-          <Ionicons name="chevron-back" size={24} color={THEME.textDark} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Weekly Schedule</Text>
-        <TouchableOpacity style={styles.editBtn} onPress={handleClose}>
-          <Text style={styles.editBtnText}>Edit</Text>
-        </TouchableOpacity>
-      </View>
+      <DoctorPanelHeader
+        showBack
+        eyebrow="Doctor Sessions"
+        title="Assigned Sessions"
+        subtitle="Review your upcoming clinic schedule"
+        onBackPress={handleClose}
+        onRightPress={handleClose}
+        rightIcon="create-outline"
+        rightAccessibilityLabel="Close schedule preview"
+      />
 
       <View style={styles.body}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -87,7 +87,15 @@ export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, o
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>Active Shifts</Text>
+        <Text style={styles.sectionLabel}>Assigned Sessions</Text>
+
+        {shifts.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="calendar-outline" size={26} color={THEME.textGray} />
+            <Text style={styles.emptyTitle}>No assigned sessions yet</Text>
+            <Text style={styles.emptyText}>Clinic sessions will appear here when they are assigned to you.</Text>
+          </View>
+        ) : null}
 
         {shifts.map((shift, index) => (
           <View key={`${shift.day}-${index}`} style={styles.timelineItem}>
@@ -98,11 +106,25 @@ export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, o
               {index !== shifts.length - 1 && <View style={styles.connectorLine} />}
             </View>
 
-            <TouchableOpacity style={styles.shiftCard} activeOpacity={0.9}>
+            <TouchableOpacity
+              style={styles.shiftCard}
+              activeOpacity={0.9}
+              onPress={() => {
+                if (!shift.id) return;
+                navigation.navigate("DoctorTabs", {
+                  screen: "DoctorQueueControl",
+                  params: {
+                    scheduleId: shift.id,
+                    clinicId: shift.clinicId,
+                    date: shift.date,
+                  },
+                });
+              }}
+            >
               <View style={styles.cardTop}>
-                <Text style={styles.dayText}>{shift.day}</Text>
+                <Text style={styles.dayText}>{shift.clinicName || shift.day}</Text>
                 <View style={styles.locationBadge}>
-                  <Text style={styles.locationText}>Clinic</Text>
+                  <Text style={styles.locationText}>{shift.location || "Clinic"}</Text>
                 </View>
               </View>
 
@@ -110,9 +132,10 @@ export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, o
                 <View style={styles.timeRow}>
                   <Ionicons name="time-outline" size={16} color={THEME.accentBlue} />
                   <Text style={styles.timeText}>
-                    {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
+                    {formatTimeRangeLabel(shift.start_time, shift.end_time)}
                   </Text>
                 </View>
+                <Text style={styles.sessionDateText}>{shift.date || shift.day}</Text>
                 <View style={styles.capacityRow}>
                   <Ionicons name="people-outline" size={16} color={THEME.textGray} />
                   <Text style={styles.capacityText}>
@@ -138,19 +161,6 @@ export default function DoctorSchedulePreview({ shifts: propShifts, onConfirm, o
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: THEME.white },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: THEME.white,
-  },
-  headerTitle: { fontSize: 18, fontWeight: "800", color: THEME.textDark },
-  backBtn: { width: 44, height: 44, justifyContent: "center" },
-  editBtn: { backgroundColor: THEME.softBlue, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
-  editBtnText: { color: THEME.accentBlue, fontWeight: "700" },
-
   body: { flex: 1, backgroundColor: THEME.background },
   container: { padding: 24 },
 
@@ -184,6 +194,17 @@ const styles = StyleSheet.create({
   },
 
   sectionLabel: { fontSize: 14, fontWeight: "800", color: THEME.textGray, textTransform: "uppercase", letterSpacing: 1, marginBottom: 20 },
+  emptyCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  emptyTitle: { marginTop: 10, fontSize: 16, fontWeight: "800", color: THEME.textDark },
+  emptyText: { marginTop: 6, fontSize: 13, lineHeight: 19, color: THEME.textGray, textAlign: "center" },
 
   timelineItem: { flexDirection: "row" },
   timelineLeft: { width: 40, alignItems: "center" },
@@ -220,6 +241,7 @@ const styles = StyleSheet.create({
   cardBody: { gap: 8 },
   timeRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   timeText: { fontSize: 14, fontWeight: "700", color: THEME.textDark },
+  sessionDateText: { fontSize: 12, color: THEME.textGray, fontWeight: "600" },
   capacityRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   capacityText: { fontSize: 13, color: THEME.textGray, fontWeight: "500" },
   doneButton: {

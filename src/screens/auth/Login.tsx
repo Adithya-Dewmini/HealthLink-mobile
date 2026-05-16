@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   StyleSheet,
   Text,
@@ -18,6 +17,9 @@ import AuthHeader from "../../components/auth/AuthHeader";
 import AuthInput from "../../components/auth/AuthInput";
 import { AUTH_COLORS } from "../../components/auth/authTheme";
 import type { AuthStackParamList } from "../../types/navigation";
+
+const ADMIN_MOBILE_ACCESS_MESSAGE =
+  "Platform admin access is available through the HealthLink web portal only.";
 
 export default function Login({ navigation }: any) {
   const route = useRoute<RouteProp<AuthStackParamList, "Login">>();
@@ -47,6 +49,12 @@ export default function Login({ navigation }: any) {
         password,
         expoPushToken,
       });
+
+      const responseRole = String(response.data?.user?.role || "").trim().toLowerCase();
+      if (responseRole === "admin") {
+        Alert.alert("Web Admin Only", ADMIN_MOBILE_ACCESS_MESSAGE);
+        return;
+      }
 
       await login(response.data.user ?? null, response.data.token);
     } catch (error) {
@@ -98,8 +106,9 @@ export default function Login({ navigation }: any) {
             <TouchableOpacity
               style={styles.linkRow}
               onPress={() => navigation.navigate("ForgotPassword")}
+              disabled={loading}
             >
-              <Text style={styles.linkText}>Forgot password?</Text>
+              <Text style={[styles.linkText, loading && styles.linkTextDisabled]}>Forgot password?</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -109,15 +118,15 @@ export default function Login({ navigation }: any) {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Signing In...</Text>
               ) : (
                 <Text style={styles.primaryButtonText}>Sign In</Text>
               )}
             </TouchableOpacity>
       </AuthCard>
 
-      <TouchableOpacity onPress={() => navigation.navigate("Register")}>
-        <Text style={styles.footerLink}>Create an account</Text>
+      <TouchableOpacity onPress={() => navigation.navigate("Register")} disabled={loading}>
+        <Text style={[styles.footerLink, loading && styles.linkTextDisabled]}>Create an account</Text>
       </TouchableOpacity>
     </AuthLayout>
   );
@@ -156,6 +165,9 @@ const styles = StyleSheet.create({
     color: AUTH_COLORS.primary,
     fontSize: 14,
     fontWeight: "600",
+  },
+  linkTextDisabled: {
+    opacity: 0.45,
   },
   primaryButton: {
     width: "100%",

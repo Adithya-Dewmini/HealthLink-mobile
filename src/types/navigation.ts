@@ -57,7 +57,6 @@ export type RootStackParamList = {
           | "PatientStack"
           | "Doctor"
           | "PharmacistStack"
-          | "AdminTabs"
           | "ReceptionistTabs"
           | "MedicalCenterTabs";
       }
@@ -82,7 +81,6 @@ export type RootStackParamList = {
   PatientStack: NavigatorScreenParams<PatientStackParamList> | undefined;
   Doctor: undefined;
   PharmacistStack: undefined;
-  AdminTabs: undefined;
   ReceptionistTabs: undefined;
   MedicalCenterTabs: NavigatorScreenParams<MedicalCenterStackParamList> | undefined;
 };
@@ -128,6 +126,14 @@ export type ReceptionistStackParamList = {
     doctorName?: string;
     specialization?: string | null;
   };
+};
+
+export type ReceptionistTabParamList = {
+  ReceptionistHome: undefined;
+  ReceptionistQueue: undefined;
+  ReceptionistAppointments: undefined;
+  ReceptionistRegistration: undefined;
+  ReceptionistSessions: undefined;
 };
 
 export type MedicalCenterStackParamList = {
@@ -181,6 +187,10 @@ export type PatientStackParamList = {
     | {
         specialty?: string;
         doctorId?: number;
+        initialQuery?: string;
+        reason?: string;
+        preferredDate?: string;
+        preferredTime?: string;
       }
     | undefined;
   PatientDoctorDetails: {
@@ -221,6 +231,7 @@ export type PatientStackParamList = {
   PrescriptionDetails: { id: string };
   PrescriptionFulfillment: { prescriptionId: string; title?: string };
   SubstitutionApproval: { orderId: number };
+  PatientAssistant: undefined;
   PatientPrescriptions: undefined;
   MedicineTracker: undefined;
   UploadPrescription: undefined;
@@ -238,12 +249,25 @@ export type PatientStackParamList = {
   Favorites: undefined;
   SymptomChecker: undefined;
   MedicineSearch: undefined;
-  PharmacyMarketplace: undefined;
+  PharmacyMarketplace:
+    | {
+        initialQuery?: string;
+        medicineName?: string;
+        category?: string;
+        reason?: string;
+      }
+    | undefined;
   PharmacyStore: { pharmacyId: number };
   PharmacyProductDetails: { productId: string; pharmacyId: number };
   Cart: undefined;
   Checkout: undefined;
   Orders: undefined;
   OrderDetails: { orderId: number };
+  PaymentStatus: {
+    orderId: number;
+    checkoutUrl?: string;
+    autoOpenCheckout?: boolean;
+  };
+  InvoiceScreen: { orderId: number };
   MyHealthDashboard: undefined;
 };

@@ -1,4 +1,5 @@
 import { api } from "../api/client";
+import { resolveImageUrl } from "../utils/imageUrl";
 
 export type DoctorClinicItem = {
   id: string;
@@ -6,6 +7,7 @@ export type DoctorClinicItem = {
   name: string;
   location?: string;
   address?: string;
+  image_url?: string;
   cover_image_url?: string;
   logo_url?: string;
 };
@@ -27,16 +29,39 @@ const normalizeClinic = (value: unknown): DoctorClinicItem | null => {
     name?: unknown;
     location?: unknown;
     address?: unknown;
+    image_url?: unknown;
+    imageUrl?: unknown;
     cover_image_url?: unknown;
+    coverImageUrl?: unknown;
     logo_url?: unknown;
+    logoUrl?: unknown;
   };
   const relationshipId = String(clinic.relationship_id ?? clinic.id ?? "").trim();
   const id = String(clinic.medical_center_id ?? clinic.id ?? "").trim();
   const name = String(clinic.name || "").trim();
   const location = String(clinic.location || "").trim();
   const address = String(clinic.address || "").trim();
-  const coverImageUrl = String(clinic.cover_image_url || "").trim();
-  const logoUrl = String(clinic.logo_url || "").trim();
+  const imageUrl = resolveImageUrl(
+    typeof clinic.image_url === "string"
+      ? clinic.image_url
+      : typeof clinic.imageUrl === "string"
+        ? clinic.imageUrl
+        : null
+  );
+  const coverImageUrl = resolveImageUrl(
+    typeof clinic.cover_image_url === "string"
+      ? clinic.cover_image_url
+      : typeof clinic.coverImageUrl === "string"
+        ? clinic.coverImageUrl
+        : null
+  );
+  const logoUrl = resolveImageUrl(
+    typeof clinic.logo_url === "string"
+      ? clinic.logo_url
+      : typeof clinic.logoUrl === "string"
+        ? clinic.logoUrl
+        : null
+  );
 
   if (!id || !name) {
     return null;
@@ -48,6 +73,7 @@ const normalizeClinic = (value: unknown): DoctorClinicItem | null => {
     name,
     location: location || undefined,
     address: address || undefined,
+    image_url: imageUrl || undefined,
     cover_image_url: coverImageUrl || undefined,
     logo_url: logoUrl || undefined,
   };

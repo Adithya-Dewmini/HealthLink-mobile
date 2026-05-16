@@ -1,7 +1,5 @@
 import React, { useCallback, useContext, useMemo, useState } from "react";
 import {
-  Image,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -11,11 +9,14 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiFetch } from "../../config/api";
 import { AuthContext, useAuth } from "../../utils/AuthContext";
+import DoctorPanelHeader from "../../components/doctor/DoctorPanelHeader";
 import PendingApprovalBanner from "../../components/doctor/PendingApprovalBanner";
 import { resolveImageUrl } from "../../utils/imageUrl";
+import { doctorColors } from "../../constants/doctorTheme";
 
 const THEME = {
   primary: "#2196F3",
@@ -208,190 +209,127 @@ export default function ProfileScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.white} />
+    <View style={styles.root}>
+      <SafeAreaView edges={["top"]} style={styles.topSafeArea}>
+        <StatusBar barStyle="light-content" backgroundColor={doctorColors.primary} />
+      </SafeAreaView>
 
       <View style={styles.topSection}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity
-              style={styles.avatarButton}
-              onPress={() => navigation.navigate("ProfileEdit")}
-              activeOpacity={0.88}
-            >
-              {resolvedProfileImage ? (
-                <Image source={{ uri: resolvedProfileImage }} style={styles.avatarImage} />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarInitials}>{initials}</Text>
-                </View>
-              )}
-              <View style={styles.avatarCameraBadge}>
-                <Ionicons name="camera" size={14} color={THEME.white} />
-              </View>
-            </TouchableOpacity>
-            <View>
-              <Text style={styles.headerTitle}>My Profile</Text>
-              <Text style={styles.headerSub}>{headerSubtitle}</Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={styles.headerAction}
-            onPress={() => navigation.navigate("DoctorSettings")}
-            activeOpacity={0.88}
-          >
-            <Ionicons name="settings-outline" size={22} color={THEME.textPrimary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.quickActionsSection}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.quickActionsRow}
-          >
-            {quickActions.map((action) => (
-              <ActionCard key={action.label} {...action} />
-            ))}
-          </ScrollView>
-        </View>
+        <DoctorPanelHeader
+          variant="hero"
+          title={doctorName}
+          subtitle={headerSubtitle}
+          profileImageUri={resolvedProfileImage}
+          initials={initials}
+          onAvatarPress={() => navigation.navigate("DoctorSettings")}
+          rightAccessibilityLabel="Open doctor settings"
+        />
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        style={styles.scrollBody}
-      >
-        {!isVerifiedDoctor ? (
-          <View style={styles.bannerWrap}>
-            <PendingApprovalBanner />
-          </View>
-        ) : null}
+      <View style={styles.quickActionsSection}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickActionsRow}
+        >
+          {quickActions.map((action) => (
+            <ActionCard key={action.label} {...action} />
+          ))}
+        </ScrollView>
+      </View>
 
-        <Text style={styles.sectionTitle}>Practice</Text>
-        <View style={styles.listContainer}>
-          <ProfileListItem
-            icon="person-outline"
-            title="Profile Info"
-            sub="Review your professional details"
-            iconBackground={THEME.softBlue}
-            onPress={() => navigation.navigate("ProfileEdit")}
-          />
-          <ProfileListItem
-            icon="business-outline"
-            title="My Clinics"
-            sub="Switch between connected clinics"
-            iconBackground={THEME.softGreen}
-            onPress={() => navigation.navigate("DoctorClinics")}
-          />
-          <ProfileListItem
-            icon="calendar-outline"
-            title="Availability & Calendar"
-            sub="Manage your sessions and availability"
-            iconBackground={THEME.softPurple}
-            onPress={() => navigation.navigate("DoctorSchedule")}
-          />
-        </View>
+      <View style={styles.contentWrapper}>
+        <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safe}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            style={styles.scrollBody}
+          >
+            {!isVerifiedDoctor ? (
+              <View style={styles.bannerWrap}>
+                <PendingApprovalBanner />
+              </View>
+            ) : null}
 
-        <Text style={styles.sectionTitle}>My Activity</Text>
-        <View style={styles.listContainer}>
-          <ProfileListItem
-            icon="bar-chart-outline"
-            title="Daily Report"
-            sub="Check patient and queue metrics"
-            iconBackground={THEME.softBlue}
-            onPress={() => navigation.navigate("DoctorReport")}
-          />
-          <ProfileListItem
-            icon="settings-outline"
-            title="Settings"
-            sub="Notifications, security and preferences"
-            iconBackground={THEME.softPurple}
-            onPress={() => navigation.navigate("DoctorSettings")}
-          />
-          <ProfileListItem
-            icon="log-out-outline"
-            title="Log Out"
-            sub="Sign out from your doctor panel"
-            iconBackground={"#FFEBEB"}
-            onPress={logout}
-            isNew={false}
-          />
-        </View>
+            <Text style={styles.sectionTitle}>Practice</Text>
+            <View style={styles.listContainer}>
+              <ProfileListItem
+                icon="person-outline"
+                title="Profile Info"
+                sub="Review your professional details"
+                iconBackground={THEME.softBlue}
+                onPress={() => navigation.navigate("ProfileEdit")}
+              />
+              <ProfileListItem
+                icon="business-outline"
+                title="My Clinics"
+                sub="Switch between connected clinics"
+                iconBackground={THEME.softGreen}
+                onPress={() => navigation.navigate("DoctorClinics")}
+              />
+              <ProfileListItem
+                icon="calendar-outline"
+                title="Availability & Calendar"
+                sub="Manage your sessions and availability"
+                iconBackground={THEME.softPurple}
+                onPress={() => navigation.navigate("DoctorSchedule")}
+              />
+            </View>
 
-        <View style={styles.footerSpacer} />
-      </ScrollView>
-    </SafeAreaView>
+            <Text style={styles.sectionTitle}>My Activity</Text>
+            <View style={styles.listContainer}>
+              <ProfileListItem
+                icon="bar-chart-outline"
+                title="Daily Report"
+                sub="Check patient and queue metrics"
+                iconBackground={THEME.softBlue}
+                onPress={() => navigation.navigate("DoctorReport")}
+              />
+              <ProfileListItem
+                icon="settings-outline"
+                title="Settings"
+                sub="Notifications, security and preferences"
+                iconBackground={THEME.softPurple}
+                onPress={() => navigation.navigate("DoctorSettings")}
+              />
+              <ProfileListItem
+                icon="log-out-outline"
+                title="Log Out"
+                sub="Sign out from your doctor panel"
+                iconBackground={"#FFEBEB"}
+                onPress={logout}
+                isNew={false}
+              />
+            </View>
+
+            <View style={styles.footerSpacer} />
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: THEME.white },
-  scrollContent: { paddingBottom: 16 },
+  root: { flex: 1, backgroundColor: doctorColors.primary },
+  topSafeArea: { backgroundColor: doctorColors.primary },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: THEME.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: "hidden",
+    marginTop: 12,
+  },
+  safe: { flex: 1, backgroundColor: THEME.background },
+  scrollContent: { paddingTop: 0, paddingBottom: 16 },
   scrollBody: { backgroundColor: THEME.background },
-  topSection: { backgroundColor: THEME.white },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 18,
-    backgroundColor: THEME.white,
-  },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  headerTitle: { fontSize: 24, fontWeight: "800", color: THEME.textPrimary },
-  headerSub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  headerAction: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: THEME.background,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    overflow: "visible",
-  },
-  avatarImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: THEME.softBlue,
-  },
-  avatarFallback: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: THEME.softBlue,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarInitials: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: THEME.textPrimary,
-  },
-  avatarCameraBadge: {
-    position: "absolute",
-    right: -2,
-    bottom: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: THEME.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: THEME.white,
-  },
+  topSection: { backgroundColor: doctorColors.primary },
   quickActionsSection: {
-    backgroundColor: THEME.background,
-    paddingTop: 12,
-    paddingBottom: 12,
+    backgroundColor: "transparent",
+    marginTop: -8,
+    marginBottom: 6,
+    zIndex: 2,
   },
   bannerWrap: {
     paddingHorizontal: 20,

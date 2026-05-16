@@ -20,6 +20,9 @@ export type ScheduleSessionStatus = "Upcoming" | "Active" | "Completed" | "Misse
 export type ScheduleSession = {
   id: string;
   clinicId?: string;
+  location?: string;
+  coverImageUrl?: string;
+  logoUrl?: string;
   clinicName: string;
   date: string;
   startTime: string;
@@ -41,6 +44,10 @@ export type DoctorRoutineItem = {
   id: string;
   clinicId: string;
   clinicName: string;
+  location?: string | null;
+  coverImageUrl?: string | null;
+  logoUrl?: string | null;
+  roomNumber?: string | null;
   startTime: string;
   endTime: string;
   slotDuration: number;
