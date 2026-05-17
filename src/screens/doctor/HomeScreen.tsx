@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -161,6 +162,7 @@ export default function HomeScreen() {
   const handleOpenQueue = useCallback(
     (session: DoctorDashboardLiveSession | null) => {
       if (!session?.id) {
+        Alert.alert("Queue unavailable", "Live queue details are not available right now.");
         return;
       }
 
@@ -241,76 +243,6 @@ export default function HomeScreen() {
               </View>
             ) : null}
 
-            {shouldShowActiveQueue && liveSession ? (
-              <View style={styles.liveQueueCard}>
-                <View style={styles.sectionTitleRow}>
-                  <View>
-                    <Text style={styles.liveQueueEyebrow}>Live Queue Active</Text>
-                    <Text style={styles.liveQueueTitle} numberOfLines={1}>
-                      {liveSession.medicalCenterName || "Clinic Session"}
-                    </Text>
-                  </View>
-                  <ScheduleStatusBadge label="Live" tone="live" />
-                </View>
-
-                <Text style={styles.liveQueueMeta}>
-                  {`${formatLongDateLabel(liveSession.date)} • ${formatSessionRange(
-                    liveSession.startTime,
-                    liveSession.endTime
-                  )}`}
-                </Text>
-
-                <View style={styles.liveQueueGrid}>
-                  <View style={styles.liveMetricCard}>
-                    <Text style={styles.liveMetricValue}>{liveSession.checkedInCount}</Text>
-                    <Text style={styles.liveMetricLabel}>Checked In</Text>
-                  </View>
-                  <View style={styles.liveMetricCard}>
-                    <Text style={styles.liveMetricValue}>{liveSession.waitingCount}</Text>
-                    <Text style={styles.liveMetricLabel}>Waiting</Text>
-                  </View>
-                  <View style={styles.liveMetricCard}>
-                    <Text style={styles.liveMetricValue}>
-                      {liveSession.currentServingNumber ?? "--"}
-                    </Text>
-                    <Text style={styles.liveMetricLabel}>Current Serving</Text>
-                  </View>
-                  <View style={styles.liveMetricCard}>
-                    <Text style={styles.liveMetricValue}>
-                      {liveSession.nextQueueNumber ?? "--"}
-                    </Text>
-                    <Text style={styles.liveMetricLabel}>Next Queue</Text>
-                  </View>
-                </View>
-
-                <View style={styles.liveQueueActions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.primaryActionButton,
-                      !liveSession.id && styles.actionButtonDisabled,
-                    ]}
-                    disabled={!liveSession.id}
-                    onPress={() => handleOpenQueue(liveSession)}
-                  >
-                    <Text style={styles.primaryActionText}>Open Queue</Text>
-                  </TouchableOpacity>
-
-                  {liveSession.currentServingNumber != null ? (
-                    <TouchableOpacity
-                      style={[
-                        styles.secondaryActionButton,
-                        !liveSession.id && styles.actionButtonDisabled,
-                      ]}
-                      disabled={!liveSession.id}
-                      onPress={() => handleOpenQueue(liveSession)}
-                    >
-                      <Text style={styles.secondaryActionText}>Start Consultation</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            ) : null}
-
             <View style={styles.sectionCard}>
               <View style={styles.sectionTitleRow}>
                 <View>
@@ -356,46 +288,123 @@ export default function HomeScreen() {
               ) : null}
             </View>
 
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionTitleRow}>
-                <View>
-                  <Text style={styles.sectionHeader}>Upcoming</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    Future assigned sessions and appointments for this doctor
-                  </Text>
-                </View>
-              </View>
+            <View
+              style={[
+                styles.sectionCard,
+                shouldShowActiveQueue && liveSession ? styles.liveQueueSectionCard : null,
+              ]}
+            >
+              {shouldShowActiveQueue && liveSession ? (
+                <>
+                  <View style={styles.sectionTitleRow}>
+                    <View>
+                      <Text style={styles.liveQueueEyebrow}>Live Queue Active</Text>
+                      <Text style={styles.liveQueueTitle} numberOfLines={1}>
+                        {liveSession.medicalCenterName || "Clinic Session"}
+                      </Text>
+                    </View>
+                    <ScheduleStatusBadge label="Live" tone="live" />
+                  </View>
 
-              <View style={styles.summaryGrid}>
-                <View style={styles.summaryTile}>
-                  <Text style={styles.summaryValue}>{Number(upcoming?.sessionCount ?? 0)}</Text>
-                  <Text style={styles.summaryLabel}>Sessions</Text>
-                </View>
-                <View style={styles.summaryTile}>
-                  <Text style={styles.summaryValue}>{Number(upcoming?.appointmentCount ?? 0)}</Text>
-                  <Text style={styles.summaryLabel}>Appointments</Text>
-                </View>
-              </View>
-
-              {nextSession ? (
-                <View style={styles.upcomingSessionCard}>
-                  <Text style={styles.upcomingSessionTitle} numberOfLines={1}>
-                    {nextSession.medicalCenterName || "Upcoming clinic"}
-                  </Text>
-                  <Text style={styles.upcomingSessionMeta}>
-                    {`${formatLongDateLabel(nextSession.date)} • ${formatSessionRange(
-                      nextSession.startTime,
-                      nextSession.endTime
+                  <Text style={styles.liveQueueMeta}>
+                    {`${formatLongDateLabel(liveSession.date)} • ${formatSessionRange(
+                      liveSession.startTime,
+                      liveSession.endTime
                     )}`}
                   </Text>
-                  <Text style={styles.upcomingSessionFoot}>
-                    {`${nextSession.appointmentCount} appointment${
-                      nextSession.appointmentCount === 1 ? "" : "s"
-                    }`}
-                  </Text>
-                </View>
+
+                  <View style={styles.liveQueueGrid}>
+                    <View style={styles.liveMetricCard}>
+                      <Text style={styles.liveMetricValue}>{liveSession.checkedInCount}</Text>
+                      <Text style={styles.liveMetricLabel}>Checked In</Text>
+                    </View>
+                    <View style={styles.liveMetricCard}>
+                      <Text style={styles.liveMetricValue}>{liveSession.waitingCount}</Text>
+                      <Text style={styles.liveMetricLabel}>Waiting</Text>
+                    </View>
+                    <View style={styles.liveMetricCard}>
+                      <Text style={styles.liveMetricValue}>
+                        {liveSession.currentServingNumber ?? "--"}
+                      </Text>
+                      <Text style={styles.liveMetricLabel}>Current Serving</Text>
+                    </View>
+                    <View style={styles.liveMetricCard}>
+                      <Text style={styles.liveMetricValue}>
+                        {liveSession.nextQueueNumber ?? "--"}
+                      </Text>
+                      <Text style={styles.liveMetricLabel}>Next Queue</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.liveQueueActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.primaryActionButton,
+                        !liveSession.id && styles.actionButtonDisabled,
+                      ]}
+                      disabled={!liveSession.id}
+                      onPress={() => handleOpenQueue(liveSession)}
+                    >
+                      <Text style={styles.primaryActionText}>Open Queue</Text>
+                    </TouchableOpacity>
+
+                    {liveSession.currentServingNumber != null ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.secondaryActionButton,
+                          !liveSession.id && styles.actionButtonDisabled,
+                        ]}
+                        disabled={!liveSession.id}
+                        onPress={() => handleOpenQueue(liveSession)}
+                      >
+                        <Text style={styles.secondaryActionText}>Start Consultation</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </>
               ) : (
-                <Text style={styles.emptyInlineText}>No upcoming sessions assigned right now.</Text>
+                <>
+                  <View style={styles.sectionTitleRow}>
+                    <View>
+                      <Text style={styles.sectionHeader}>Upcoming</Text>
+                      <Text style={styles.sectionSubtitle}>
+                        Future assigned sessions and appointments for this doctor
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.summaryGrid}>
+                    <View style={styles.summaryTile}>
+                      <Text style={styles.summaryValue}>{Number(upcoming?.sessionCount ?? 0)}</Text>
+                      <Text style={styles.summaryLabel}>Sessions</Text>
+                    </View>
+                    <View style={styles.summaryTile}>
+                      <Text style={styles.summaryValue}>{Number(upcoming?.appointmentCount ?? 0)}</Text>
+                      <Text style={styles.summaryLabel}>Appointments</Text>
+                    </View>
+                  </View>
+
+                  {nextSession ? (
+                    <View style={styles.upcomingSessionCard}>
+                      <Text style={styles.upcomingSessionTitle} numberOfLines={1}>
+                        {nextSession.medicalCenterName || "Upcoming clinic"}
+                      </Text>
+                      <Text style={styles.upcomingSessionMeta}>
+                        {`${formatLongDateLabel(nextSession.date)} • ${formatSessionRange(
+                          nextSession.startTime,
+                          nextSession.endTime
+                        )}`}
+                      </Text>
+                      <Text style={styles.upcomingSessionFoot}>
+                        {`${nextSession.appointmentCount} appointment${
+                          nextSession.appointmentCount === 1 ? "" : "s"
+                        }`}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.emptyInlineText}>No upcoming sessions assigned right now.</Text>
+                  )}
+                </>
               )}
             </View>
 
@@ -599,6 +608,10 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: THEME.border,
+  },
+  liveQueueSectionCard: {
+    backgroundColor: THEME.liveBg,
+    borderColor: THEME.liveBg,
   },
   sectionTitleRow: {
     flexDirection: "row",

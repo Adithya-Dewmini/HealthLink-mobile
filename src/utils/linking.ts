@@ -10,6 +10,30 @@ export const linking: LinkingOptions<RootStackParamList> = {
   prefixes,
   config: {
     screens: {
+      PatientStack: {
+        screens: {
+          PatientTabs: {
+            screens: {
+              PatientDashboard: "patient/dashboard",
+            },
+          },
+          Orders: {
+            path: "patient/orders",
+          },
+          OrderDetails: {
+            path: "patient/orders/:orderId",
+            parse: {
+              orderId: (value: string) => Number(value),
+            },
+          },
+          PaymentStatus: {
+            path: "payment/status/:orderId",
+            parse: {
+              orderId: (value: string) => Number(value),
+            },
+          },
+        },
+      },
       SetPassword: {
         path: "set-password",
         parse: {
