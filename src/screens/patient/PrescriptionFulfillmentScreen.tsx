@@ -121,7 +121,7 @@ export default function PrescriptionFulfillmentScreen() {
           const session = await startOrderPaymentCheckout(orderId);
           navigation.replace("PaymentStatus", {
             orderId,
-            checkoutUrl: session.hosted_url,
+            checkoutUrl: session.hostedUrl,
             autoOpenCheckout: true,
           });
           return;

@@ -115,7 +115,11 @@ export const testConnection = async () => {
   return text;
 };
 
-export async function apiFetch(endpoint: string, options: RequestInit = {}) {
+type ApiFetchOptions = RequestInit & {
+  suppressErrorLog?: boolean;
+};
+
+export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}) {
   const controller = new AbortController();
   const externalSignal = options.signal;
   let didTimeout = false;
@@ -158,7 +162,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
       requestUrl
     );
 
-    if (IS_DEVELOPMENT && !response.ok) {
+    if (IS_DEVELOPMENT && !options.suppressErrorLog && !response.ok) {
       console.log("[api] request failed", response.url, response.status, await response.text());
     }
 
@@ -170,7 +174,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
 
     return response;
   } catch (error) {
-    if (IS_DEVELOPMENT) {
+    if (IS_DEVELOPMENT && !options.suppressErrorLog) {
       console.log("[api] request error", resolveRequestUrl(endpoint), error);
     }
 

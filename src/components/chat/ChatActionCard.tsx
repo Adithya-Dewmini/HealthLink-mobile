@@ -2,6 +2,9 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { PatientChatbotAction } from "../../services/chatbotApi";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 type Props = {
   action: PatientChatbotAction;
@@ -13,27 +16,27 @@ const ACTION_META: Record<
   PatientChatbotAction["type"],
   { icon: keyof typeof Ionicons.glyphMap; title: string; accent: string; urgent?: boolean }
 > = {
-  OPEN_DOCTOR_SEARCH: { icon: "search", title: "Find suitable doctors", accent: "#0F766E" },
-  SHOW_SESSION_RESULTS: { icon: "calendar-outline", title: "Available sessions", accent: "#0F5E78" },
-  SELECT_SESSION: { icon: "checkmark-circle-outline", title: "Choose this session", accent: "#0F5E78" },
-  CONFIRM_BOOKING: { icon: "shield-checkmark-outline", title: "Confirm appointment", accent: "#0F766E" },
-  OPEN_QUEUE: { icon: "time-outline", title: "Check your queue", accent: "#2563EB" },
-  OPEN_APPOINTMENTS: { icon: "calendar-clear-outline", title: "View appointments", accent: "#2563EB" },
-  OPEN_PRESCRIPTIONS: { icon: "receipt-outline", title: "View prescriptions", accent: "#0F5E78" },
-  OPEN_MEDICAL_RECORDS: { icon: "document-text-outline", title: "Medical records", accent: "#0F5E78" },
-  SHOW_MEDICINE_RESULTS: { icon: "medkit-outline", title: "Medicine results", accent: "#0F766E" },
-  SHOW_PHARMACY_RESULTS: { icon: "storefront-outline", title: "Pharmacy results", accent: "#0F5E78" },
-  OPEN_PHARMACY_SEARCH: { icon: "search-outline", title: "Search pharmacies", accent: "#0F5E78" },
-  OPEN_PHARMACY_PRODUCT: { icon: "cube-outline", title: "View product details", accent: "#0F5E78" },
-  ADD_TO_CART: { icon: "cart-outline", title: "Add item to cart", accent: "#0F766E" },
-  CONFIRM_ADD_TO_CART: { icon: "checkmark-done-outline", title: "Confirm cart item", accent: "#0F766E" },
-  OPEN_CART: { icon: "cart-outline", title: "Open cart", accent: "#2563EB" },
-  OPEN_ORDER_STATUS: { icon: "receipt-outline", title: "Track medicine orders", accent: "#2563EB" },
-  OPEN_PRESCRIPTION_ORDER: { icon: "qr-code-outline", title: "Prescription fulfilment", accent: "#0F5E78" },
-  BOOK_DOCTOR_FOR_MEDICINE: { icon: "medkit-outline", title: "Book a doctor", accent: "#0F766E" },
-  CALL_EMERGENCY: { icon: "warning-outline", title: "Urgent care needed", accent: "#DC2626", urgent: true },
-  ASK_FOLLOW_UP: { icon: "chatbubble-ellipses-outline", title: "Tell MediMate more", accent: "#0F5E78" },
-  CLEAR_CONTEXT: { icon: "trash-outline", title: "Clear chat context", accent: "#64748B" },
+  OPEN_DOCTOR_SEARCH: { icon: "search", title: "Find suitable doctors", accent: THEME.primary },
+  SHOW_SESSION_RESULTS: { icon: "calendar-outline", title: "Available sessions", accent: THEME.info },
+  SELECT_SESSION: { icon: "checkmark-circle-outline", title: "Choose this session", accent: THEME.info },
+  CONFIRM_BOOKING: { icon: "shield-checkmark-outline", title: "Confirm appointment", accent: THEME.primary },
+  OPEN_QUEUE: { icon: "time-outline", title: "Check your queue", accent: THEME.primaryBlue },
+  OPEN_APPOINTMENTS: { icon: "calendar-clear-outline", title: "View appointments", accent: THEME.primaryBlue },
+  OPEN_PRESCRIPTIONS: { icon: "receipt-outline", title: "View prescriptions", accent: THEME.info },
+  OPEN_MEDICAL_RECORDS: { icon: "document-text-outline", title: "Medical records", accent: THEME.info },
+  SHOW_MEDICINE_RESULTS: { icon: "medkit-outline", title: "Medicine results", accent: THEME.primary },
+  SHOW_PHARMACY_RESULTS: { icon: "storefront-outline", title: "Pharmacy results", accent: THEME.info },
+  OPEN_PHARMACY_SEARCH: { icon: "search-outline", title: "Search pharmacies", accent: THEME.info },
+  OPEN_PHARMACY_PRODUCT: { icon: "cube-outline", title: "View product details", accent: THEME.info },
+  ADD_TO_CART: { icon: "cart-outline", title: "Add item to cart", accent: THEME.primary },
+  CONFIRM_ADD_TO_CART: { icon: "checkmark-done-outline", title: "Confirm cart item", accent: THEME.primary },
+  OPEN_CART: { icon: "cart-outline", title: "Open cart", accent: THEME.primaryBlue },
+  OPEN_ORDER_STATUS: { icon: "receipt-outline", title: "Track medicine orders", accent: THEME.primaryBlue },
+  OPEN_PRESCRIPTION_ORDER: { icon: "qr-code-outline", title: "Prescription fulfilment", accent: THEME.info },
+  BOOK_DOCTOR_FOR_MEDICINE: { icon: "medkit-outline", title: "Book a doctor", accent: THEME.primary },
+  CALL_EMERGENCY: { icon: "warning-outline", title: "Urgent care needed", accent: THEME.danger, urgent: true },
+  ASK_FOLLOW_UP: { icon: "chatbubble-ellipses-outline", title: "Tell MediMate more", accent: THEME.info },
+  CLEAR_CONTEXT: { icon: "trash-outline", title: "Clear chat context", accent: THEME.textMuted },
 };
 
 export default function ChatActionCard({ action, onPress, subtitle }: Props) {
@@ -62,12 +65,15 @@ export default function ChatActionCard({ action, onPress, subtitle }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "rgba(255,255,255,0.88)",
+    backgroundColor: "rgba(255,255,255,0.9)",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderRadius: 18,
     padding: 13,
   },
   cardUrgent: {
     backgroundColor: "#FFF4F4",
+    borderColor: "#F8C9C9",
   },
   iconWrap: {
     width: 38,
@@ -83,14 +89,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     lineHeight: 22,
-    color: "#16324A",
+    color: THEME.textPrimary,
     fontWeight: "800",
   },
   subtitle: {
     marginTop: 4,
     fontSize: 14,
     lineHeight: 20,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "600",
   },
   cta: {

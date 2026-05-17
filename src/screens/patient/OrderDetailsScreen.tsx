@@ -39,6 +39,12 @@ const formatPaymentStatus = (status: string | null | undefined) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (value) => value.toUpperCase());
 
+const buildOrderItemKey = (item: OrderSummary["items"][number], index: number) =>
+  `${item.id}-${item.marketplaceProductId}-${item.name}-${index}`;
+
+const buildTimelineEntryKey = (entry: ActivityItem, index: number) =>
+  `${entry.id}-${entry.type}-${entry.createdAt}-${index}`;
+
 export default function OrderDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const route = useRoute<RouteProp<PatientStackParamList, "OrderDetails">>();
@@ -96,7 +102,7 @@ export default function OrderDetailsScreen() {
       const session = await startOrderPaymentCheckout(order.id);
       navigation.navigate("PaymentStatus", {
         orderId: order.id,
-        checkoutUrl: session.hosted_url,
+        checkoutUrl: session.hostedUrl,
         autoOpenCheckout: true,
       });
     } catch (paymentError) {
@@ -268,8 +274,8 @@ export default function OrderDetailsScreen() {
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Items</Text>
-          {order.items.map((item) => (
-            <View key={item.id} style={styles.lineItem}>
+          {order.items.map((item, index) => (
+            <View key={buildOrderItemKey(item, index)} style={styles.lineItem}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>
                   {item.quantity} x {item.name}
@@ -301,7 +307,10 @@ export default function OrderDetailsScreen() {
           <Text style={styles.sectionTitle}>Timeline</Text>
           {timeline.length ? (
             timeline.map((entry, index) => (
-              <View key={entry.id} style={[styles.timelineRow, index === timeline.length - 1 && styles.timelineRowLast]}>
+              <View
+                key={buildTimelineEntryKey(entry, index)}
+                style={[styles.timelineRow, index === timeline.length - 1 && styles.timelineRowLast]}
+              >
                 <View style={styles.timelineRail}>
                   <View style={styles.timelineDot} />
                   {index < timeline.length - 1 ? <View style={styles.timelineLine} /> : null}

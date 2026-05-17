@@ -35,6 +35,7 @@ import {
   type DashboardMedicalCenter,
   type DashboardPharmacy,
 } from "../../services/patientDashboardApi";
+import { fetchPatientActiveQueueStatus } from "../../services/patientQueueApi";
 
 const THEME = {
   ...patientTheme.colors,
@@ -106,37 +107,6 @@ type ActionTileProps = {
   accent: string;
   gradient: readonly [string, string];
   onPress: () => void;
-};
-
-const normalizeActiveQueue = (payload: unknown): ActiveQueueState | null => {
-  if (!payload || typeof payload !== "object") return null;
-  const data = payload as Record<string, unknown>;
-  const status = String(data.status ?? "none").toLowerCase();
-
-  return {
-    active: Boolean(data.active),
-    status:
-      status === "appointment_booked" ||
-      status === "queue_live" ||
-      status === "waiting" ||
-      status === "next" ||
-      status === "missed"
-        ? status
-        : "none",
-    appointmentId: data.appointmentId ? String(data.appointmentId) : undefined,
-    queueId: data.queueId ? String(data.queueId) : undefined,
-    doctorId: Number(data.doctorId ?? 0) || undefined,
-    clinicId: data.clinicId ? String(data.clinicId) : undefined,
-    sessionId: Number(data.sessionId ?? 0) || undefined,
-    doctorName: data.doctorName ? String(data.doctorName) : undefined,
-    medicalCenterName: data.medicalCenterName ? String(data.medicalCenterName) : undefined,
-    scheduledTime: data.scheduledTime ? String(data.scheduledTime) : undefined,
-    sessionTime: data.sessionTime ? String(data.sessionTime) : undefined,
-    queueStarted: typeof data.queueStarted === "boolean" ? data.queueStarted : undefined,
-    tokenNumber: Number(data.tokenNumber ?? 0) || undefined,
-    position: Number(data.position ?? 0) || undefined,
-    estimatedWaitMinutes: Number(data.estimatedWaitMinutes ?? 0) || undefined,
-  };
 };
 
 const normalizeBannerTargetScreen = (value: string | null | undefined): keyof PatientStackParamList | null => {
@@ -296,7 +266,7 @@ export default function Dashboard() {
 
     const [profileResult, queueResult, bannersResult, medicalCentersResult, pharmaciesResult] = await Promise.allSettled([
       apiFetch("/api/patients/me"),
-      apiFetch("/api/patient/queue/active"),
+      fetchPatientActiveQueueStatus(),
       getDashboardBanners(),
       getDashboardMedicalCenters(),
       getDashboardPharmacies(),
@@ -307,9 +277,8 @@ export default function Dashboard() {
       setProfileName(typeof profile?.name === "string" && profile.name.trim() ? profile.name : "Patient");
     }
 
-    if (queueResult.status === "fulfilled" && queueResult.value.ok) {
-      const queuePayload = await queueResult.value.json().catch(() => ({}));
-      setActiveQueue(normalizeActiveQueue(queuePayload));
+    if (queueResult.status === "fulfilled") {
+      setActiveQueue((queueResult.value as ActiveQueueState | null) ?? null);
     } else {
       setActiveQueue(null);
     }
@@ -355,7 +324,10 @@ export default function Dashboard() {
   );
 
   const showFloatingQueue = Boolean(
-    activeQueue?.active && activeQueue.status !== "appointment_booked" && activeQueue.status !== "none"
+    activeQueue?.active &&
+      activeQueue.status !== "appointment_booked" &&
+      activeQueue.status !== "today_appointment" &&
+      activeQueue.status !== "none"
   );
 
   const handleUpcomingPress = useCallback(() => {
@@ -363,11 +335,13 @@ export default function Dashboard() {
   }, [navigation]);
 
   const handleQueuePress = useCallback(() => {
-    if (activeQueue?.doctorId) {
+    if (activeQueue?.doctorId || activeQueue?.appointmentId || activeQueue?.sessionId) {
       navigation.navigate("PatientQueue", {
         doctorId: activeQueue.doctorId,
         clinicId: activeQueue.clinicId,
         sessionId: activeQueue.sessionId,
+        appointmentId: activeQueue.appointmentId,
+        queueId: activeQueue.queueId,
       });
       return;
     }
@@ -586,7 +560,7 @@ export default function Dashboard() {
           <View style={styles.bodySection}>
             <ActiveOrderSpotlight />
 
-            {activeQueue?.status === "appointment_booked" ? (
+            {activeQueue && (activeQueue.status === "appointment_booked" || activeQueue.status === "today_appointment") ? (
               <UpcomingAppointmentCard appointment={activeQueue} onPress={handleUpcomingPress} />
             ) : null}
 

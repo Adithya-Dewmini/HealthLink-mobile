@@ -35,6 +35,9 @@ const formatPrice = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+const buildOrderItemKey = (item: OrderSummary["items"][number], index: number) =>
+  `${item.id}-${item.marketplaceProductId}-${item.name}-${index}`;
 export default function OrdersScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const { user } = React.useContext(AuthContext);
@@ -160,8 +163,8 @@ export default function OrdersScreen() {
                   </View>
                 ) : null}
 
-                {order.items.slice(0, 3).map((item) => (
-                  <View key={item.id} style={styles.lineItem}>
+                {order.items.slice(0, 3).map((item, index) => (
+                  <View key={buildOrderItemKey(item, index)} style={styles.lineItem}>
                     <Text style={styles.lineItemName}>
                       {item.quantity} x {item.name}
                     </Text>

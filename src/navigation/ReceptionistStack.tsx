@@ -8,6 +8,7 @@ import ReceptionistDoctorSessionOverview from "../screens/receptionist/DoctorSes
 import ReceptionistDoctorAvailability from "../screens/receptionist/ReceptionistDoctorAvailability";
 import ReceptionistDoctorSessionManagement from "../screens/receptionist/DoctorSessionManagement";
 import ReceptionistDoctorSessionDetails from "../screens/receptionist/DoctorSessionDetails";
+import ReceptionistCheckInPatients from "../screens/receptionist/ReceptionistCheckInPatients";
 import type { ReceptionistStackParamList } from "../types/navigation";
 
 const Stack = createNativeStackNavigator<ReceptionistStackParamList>();
@@ -35,6 +36,10 @@ export default function ReceptionistStack() {
         name="ReceptionistDoctorSessionDetails"
         component={ReceptionistDoctorSessionDetails}
         options={{ presentation: "modal" }}
+      />
+      <Stack.Screen
+        name="ReceptionistCheckInPatients"
+        component={ReceptionistCheckInPatients}
       />
     </Stack.Navigator>
   );

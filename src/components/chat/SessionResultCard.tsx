@@ -2,6 +2,9 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { PatientAssistantSessionCard } from "../../services/chatbotApi";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 type Props = {
   session: PatientAssistantSessionCard;
@@ -13,7 +16,7 @@ export default function SessionResultCard({ session, onPress }: Props) {
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.avatar}>
-          <Ionicons name="medkit-outline" size={16} color="#0F766E" />
+          <Ionicons name="medkit-outline" size={16} color={THEME.primary} />
         </View>
         <View style={styles.headerText}>
           <Text style={styles.doctor}>{session.doctorName}</Text>
@@ -41,6 +44,8 @@ export default function SessionResultCard({ session, onPress }: Props) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "rgba(255,255,255,0.9)",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderRadius: 18,
     padding: 13,
   },
@@ -53,7 +58,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#E8F9F7",
+    backgroundColor: THEME.highlight,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
@@ -63,13 +68,13 @@ const styles = StyleSheet.create({
   },
   doctor: {
     fontSize: 16,
-    color: "#16324A",
+    color: THEME.textPrimary,
     fontWeight: "800",
   },
   specialty: {
     marginTop: 2,
     fontSize: 14,
-    color: "#0F766E",
+    color: THEME.primary,
     fontWeight: "700",
   },
   metaWrap: {
@@ -79,13 +84,13 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 14,
     lineHeight: 20,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "600",
   },
   button: {
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: "#0F5E78",
+    backgroundColor: THEME.primary,
     alignItems: "center",
     justifyContent: "center",
   },

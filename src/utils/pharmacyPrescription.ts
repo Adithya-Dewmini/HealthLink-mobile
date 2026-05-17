@@ -8,6 +8,26 @@ export type ParsedPrescriptionQrPayload = {
   prescriptionId?: string | null;
 };
 
+const MAX_PRESCRIPTION_QR_VALUE_LENGTH = 512;
+
+const sanitizePrescriptionQrToken = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Legacy image/data payloads and oversized values should never be handed to the QR renderer.
+  if (trimmed.startsWith("data:") || trimmed.length > MAX_PRESCRIPTION_QR_VALUE_LENGTH) {
+    return null;
+  }
+
+  return trimmed;
+};
+
 const resolveQrTokenFromObject = (value: Record<string, unknown>): string | null => {
   const directCandidates = [
     value.qrToken,
@@ -81,8 +101,13 @@ export const parsePrescriptionQrPayload = (raw: string) => {
         null;
 
       if (typeof qrToken === "string" && qrToken.trim()) {
+        const sanitizedQrToken = sanitizePrescriptionQrToken(qrToken);
+        if (!sanitizedQrToken) {
+          throw new Error("Invalid QR code");
+        }
+
         return {
-          qrToken: qrToken.trim(),
+          qrToken: sanitizedQrToken,
           prescriptionId:
             prescriptionId !== null && prescriptionId !== undefined
               ? String(prescriptionId).trim()
@@ -96,8 +121,13 @@ export const parsePrescriptionQrPayload = (raw: string) => {
 
   const tokenFromUrl = extractTokenFromUrl(trimmed);
   if (tokenFromUrl) {
+    const sanitizedQrToken = sanitizePrescriptionQrToken(tokenFromUrl);
+    if (!sanitizedQrToken) {
+      throw new Error("Invalid QR code");
+    }
+
     return {
-      qrToken: tokenFromUrl,
+      qrToken: sanitizedQrToken,
       prescriptionId: null,
     } satisfies ParsedPrescriptionQrPayload;
   }
@@ -105,15 +135,25 @@ export const parsePrescriptionQrPayload = (raw: string) => {
   if (trimmed.includes("#")) {
     const extractedToken = trimmed.split("#").pop()?.trim();
     if (extractedToken) {
+      const sanitizedQrToken = sanitizePrescriptionQrToken(extractedToken);
+      if (!sanitizedQrToken) {
+        throw new Error("Invalid QR code");
+      }
+
       return {
-        qrToken: extractedToken,
+        qrToken: sanitizedQrToken,
         prescriptionId: null,
       } satisfies ParsedPrescriptionQrPayload;
     }
   }
 
+  const sanitizedQrToken = sanitizePrescriptionQrToken(trimmed);
+  if (!sanitizedQrToken) {
+    throw new Error("Invalid QR code");
+  }
+
   return {
-    qrToken: trimmed,
+    qrToken: sanitizedQrToken,
     prescriptionId: null,
   } satisfies ParsedPrescriptionQrPayload;
 };
@@ -124,14 +164,14 @@ export const resolvePrescriptionQrToken = (value: unknown): string | null => {
   }
 
   if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
+    const sanitizedValue = sanitizePrescriptionQrToken(value);
+    if (!sanitizedValue) {
       return null;
     }
 
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    if (sanitizedValue.startsWith("{") && sanitizedValue.endsWith("}")) {
       try {
-        const parsed = JSON.parse(trimmed);
+        const parsed = JSON.parse(sanitizedValue);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           const resolved = resolveQrTokenFromObject(parsed as Record<string, unknown>);
           if (resolved) {
@@ -144,9 +184,9 @@ export const resolvePrescriptionQrToken = (value: unknown): string | null => {
     }
 
     try {
-      return parsePrescriptionQrPayload(trimmed).qrToken;
+      return parsePrescriptionQrPayload(sanitizedValue).qrToken;
     } catch {
-      return trimmed;
+      return sanitizedValue;
     }
   }
 

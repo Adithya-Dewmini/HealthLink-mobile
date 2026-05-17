@@ -42,6 +42,12 @@ const formatPrice = (value: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+const buildOrderItemKey = (item: OrderSummary["items"][number], index: number) =>
+  `${item.id}-${item.marketplaceProductId}-${item.name}-${index}`;
+
+const buildTimelineEntryKey = (entry: ActivityItem, index: number) =>
+  `${entry.id}-${entry.type}-${entry.createdAt}-${index}`;
+
 export default function PharmacyOrderDetailsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -323,8 +329,8 @@ export default function PharmacyOrderDetailsScreen() {
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Items</Text>
-          {order.items.map((item) => (
-            <View key={item.id} style={styles.lineItem}>
+          {order.items.map((item, index) => (
+            <View key={buildOrderItemKey(item, index)} style={styles.lineItem}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>
                   {item.quantity} x {item.name}
@@ -437,7 +443,10 @@ export default function PharmacyOrderDetailsScreen() {
           <Text style={styles.sectionTitle}>Timeline</Text>
           {timeline.length ? (
             timeline.map((entry, index) => (
-              <View key={entry.id} style={[styles.timelineRow, index === timeline.length - 1 && styles.timelineRowLast]}>
+              <View
+                key={buildTimelineEntryKey(entry, index)}
+                style={[styles.timelineRow, index === timeline.length - 1 && styles.timelineRowLast]}
+              >
                 <View style={styles.timelineRail}>
                   <View style={styles.timelineDot} />
                   {index < timeline.length - 1 ? <View style={styles.timelineLine} /> : null}

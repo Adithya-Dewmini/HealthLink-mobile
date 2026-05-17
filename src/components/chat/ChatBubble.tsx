@@ -12,6 +12,9 @@ import ChatActionCard from "./ChatActionCard";
 import MedicineResultCard from "./MedicineResultCard";
 import PharmacyResultCard from "./PharmacyResultCard";
 import SessionResultCard from "./SessionResultCard";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 type Props = {
   role: "user" | "bot";
@@ -29,9 +32,9 @@ type Props = {
 };
 
 const RISK_META: Record<Exclude<PatientAssistantRiskLevel, "NONE">, { label: string; bg: string; text: string }> = {
-  LOW: { label: "General guidance", bg: "#E8F7F4", text: "#0F766E" },
-  MODERATE: { label: "Doctor recommended", bg: "#FFF4E5", text: "#B45309" },
-  URGENT: { label: "Urgent care", bg: "#FDECEC", text: "#DC2626" },
+  LOW: { label: "General guidance", bg: THEME.infoSoft, text: THEME.primary },
+  MODERATE: { label: "Doctor recommended", bg: THEME.warningSoft, text: THEME.warning },
+  URGENT: { label: "Urgent care", bg: THEME.dangerSoft, text: THEME.danger },
 };
 
 const getSessionCards = (action: PatientChatbotAction): PatientAssistantSessionCard[] => {
@@ -206,10 +209,10 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#0F766E",
+    backgroundColor: THEME.primary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#0F766E",
+    shadowColor: THEME.primary,
     shadowOpacity: 0.18,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -234,17 +237,19 @@ const styles = StyleSheet.create({
   },
   bubbleBot: {
     backgroundColor: "rgba(255,255,255,0.96)",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderBottomLeftRadius: 8,
-    shadowColor: "#0B3954",
+    shadowColor: THEME.navy,
     shadowOpacity: 0.05,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
     elevation: 1,
   },
   bubbleUser: {
-    backgroundColor: "#154B88",
+    backgroundColor: THEME.primary,
     borderBottomRightRadius: 8,
-    shadowColor: "#154B88",
+    shadowColor: THEME.primary,
     shadowOpacity: 0.14,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -267,7 +272,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   messageBot: {
-    color: "#16324A",
+    color: THEME.textPrimary,
   },
   messageUser: {
     color: "#FFFFFF",

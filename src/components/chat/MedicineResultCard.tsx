@@ -2,6 +2,9 @@ import React from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { MedicineRecommendation } from "../../services/chatbotApi";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 type Props = {
   item: MedicineRecommendation;
@@ -13,10 +16,10 @@ const STOCK_META: Record<
   MedicineRecommendation["stockStatus"],
   { label: string; bg: string; text: string }
 > = {
-  IN_STOCK: { label: "In stock", bg: "#E8F7F0", text: "#0F8A5F" },
-  LOW_STOCK: { label: "Low stock", bg: "#FFF4E5", text: "#B45309" },
-  OUT_OF_STOCK: { label: "Out of stock", bg: "#FDECEC", text: "#DC2626" },
-  UNKNOWN: { label: "Availability unknown", bg: "#EEF2F7", text: "#5F7185" },
+  IN_STOCK: { label: "In stock", bg: THEME.successSoft, text: THEME.success },
+  LOW_STOCK: { label: "Low stock", bg: THEME.warningSoft, text: THEME.warning },
+  OUT_OF_STOCK: { label: "Out of stock", bg: THEME.dangerSoft, text: THEME.danger },
+  UNKNOWN: { label: "Availability unknown", bg: THEME.softGray, text: THEME.textSecondary },
 };
 
 export default function MedicineResultCard({ item, onPressViewDetails, onPressPrimary }: Props) {
@@ -34,7 +37,7 @@ export default function MedicineResultCard({ item, onPressViewDetails, onPressPr
           <Image source={{ uri: item.imageUrl }} style={styles.image} />
         ) : (
           <View style={styles.imageFallback}>
-            <Ionicons name="medkit-outline" size={20} color="#0F766E" />
+            <Ionicons name="medkit-outline" size={20} color={THEME.primary} />
           </View>
         )}
 
@@ -85,6 +88,8 @@ export default function MedicineResultCard({ item, onPressViewDetails, onPressPr
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderRadius: 18,
     padding: 14,
     gap: 10,
@@ -97,13 +102,13 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 16,
-    backgroundColor: "#E8F9F7",
+    backgroundColor: THEME.highlight,
   },
   imageFallback: {
     width: 58,
     height: 58,
     borderRadius: 16,
-    backgroundColor: "#E8F9F7",
+    backgroundColor: THEME.highlight,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -114,13 +119,13 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 16,
     lineHeight: 22,
-    color: "#16324A",
+    color: THEME.textPrimary,
     fontWeight: "800",
   },
   meta: {
     fontSize: 13,
     lineHeight: 18,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "600",
   },
   badgeRow: {
@@ -138,31 +143,31 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   badgePrescription: {
-    backgroundColor: "#E9F0FF",
+    backgroundColor: THEME.highlight,
   },
   badgePrescriptionText: {
-    color: "#1D4ED8",
+    color: THEME.primary,
   },
   price: {
     fontSize: 18,
-    color: "#0F5E78",
+    color: THEME.primary,
     fontWeight: "900",
   },
   safety: {
     fontSize: 13,
     lineHeight: 18,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "600",
   },
   reason: {
     fontSize: 13,
     lineHeight: 18,
-    color: "#16324A",
+    color: THEME.textPrimary,
     fontWeight: "700",
   },
   confidence: {
     fontSize: 12,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "800",
     textTransform: "uppercase",
   },
@@ -174,7 +179,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: "#ECF3F7",
+    backgroundColor: THEME.highlight,
+    borderWidth: 1,
+    borderColor: THEME.border,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -182,12 +189,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: "#0F5E78",
+    backgroundColor: THEME.primary,
     alignItems: "center",
     justifyContent: "center",
   },
   secondaryButtonText: {
-    color: "#16324A",
+    color: THEME.textPrimary,
     fontSize: 14,
     fontWeight: "800",
   },

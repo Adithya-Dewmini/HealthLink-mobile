@@ -215,14 +215,29 @@ export default function PrescriptionDetailsScreen() {
             <View style={styles.infoRow}>
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Verification</Text>
-              <Text style={styles.infoMeta} numberOfLines={1}>
-                {alreadyDispensed ? "Already dispensed" : "QR verified"}
-              </Text>
+                <Text style={styles.infoMeta} numberOfLines={1}>
+                  {alreadyDispensed ? "Already dispensed" : "QR verified"}
+                </Text>
               </View>
               <View style={styles.infoBlock}>
                 <Text style={styles.infoLabel}>Issued</Text>
                 <Text style={styles.infoMeta} numberOfLines={1}>
                   {formatDate(prescription?.issuedAt)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.infoRow}>
+              <View style={styles.infoBlock}>
+                <Text style={styles.infoLabel}>Clinic</Text>
+                <Text style={styles.infoMeta} numberOfLines={2}>
+                  {prescription?.medicalCenterName || "Clinic not recorded"}
+                </Text>
+              </View>
+              <View style={styles.infoBlock}>
+                <Text style={styles.infoLabel}>Consultation</Text>
+                <Text style={styles.infoMeta} numberOfLines={1}>
+                  {prescription?.consultationId ? `#${prescription.consultationId}` : "Not recorded"}
                 </Text>
               </View>
             </View>

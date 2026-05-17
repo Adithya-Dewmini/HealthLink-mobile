@@ -191,6 +191,16 @@ export type InvoiceDetails = {
   }>;
 };
 
+export type HostedCheckoutSession = {
+  orderId: number;
+  paymentId: number;
+  gateway: string;
+  checkoutUrl: string;
+  hostedUrl: string;
+  hostedToken: string;
+  fields: Record<string, string>;
+};
+
 export type OrderSummary = {
   id: number;
   patientId: number;
@@ -788,6 +798,21 @@ const normalizeInvoiceDetails = (item: any): InvoiceDetails => ({
     : [],
 });
 
+const normalizeCheckoutSession = (item: any): HostedCheckoutSession => {
+  const fields =
+    item?.fields && typeof item.fields === "object" ? (item.fields as Record<string, string>) : {};
+
+  return {
+    orderId: Number(item?.orderId ?? item?.order_id_internal ?? 0),
+    paymentId: Number(item?.paymentId ?? item?.payment_id ?? 0),
+    gateway: typeof item?.gateway === "string" ? item.gateway : "payhere",
+    checkoutUrl: typeof item?.checkout_url === "string" ? item.checkout_url : "",
+    hostedUrl: typeof item?.hosted_url === "string" ? item.hosted_url : "",
+    hostedToken: typeof item?.hosted_token === "string" ? item.hosted_token : "",
+    fields,
+  };
+};
+
 export const startOrderPaymentCheckout = async (orderId: number | string) => {
   const response = await apiFetch(`/api/payments/pharmacy-orders/${orderId}/checkout`, {
     method: "POST",
@@ -797,15 +822,8 @@ export const startOrderPaymentCheckout = async (orderId: number | string) => {
     throw new Error(await parseError(response, "Failed to start payment checkout"));
   }
 
-  return response.json() as Promise<{
-    orderId: number;
-    paymentId: number;
-    gateway: string;
-    checkout_url: string;
-    hosted_url: string;
-    hosted_token: string;
-    fields: Record<string, string>;
-  }>;
+  const payload = await response.json();
+  return normalizeCheckoutSession(payload);
 };
 
 export const getOrderPaymentStatus = async (orderId: number | string) => {
@@ -870,6 +888,23 @@ const normalizeActivityItem = (item: any): ActivityItem => ({
         : new Date().toISOString(),
 });
 
+const dedupeTimeline = (items: ActivityItem[]) => {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = [
+      Number.isFinite(item.id) && item.id > 0 ? item.id : "activity",
+      item.type,
+      item.title,
+      item.createdAt,
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
 export const getOrderTimeline = async (orderId: number | string) => {
   const response = await apiFetch(`/api/orders/${orderId}/timeline`);
   if (!response.ok) {
@@ -877,7 +912,7 @@ export const getOrderTimeline = async (orderId: number | string) => {
   }
 
   const payload = await response.json();
-  return Array.isArray(payload?.timeline) ? payload.timeline.map(normalizeActivityItem) : [];
+  return Array.isArray(payload?.timeline) ? dedupeTimeline(payload.timeline.map(normalizeActivityItem)) : [];
 };
 
 export const getPharmacyOrders = async () => {
@@ -907,7 +942,7 @@ export const getPharmacyOrderTimeline = async (orderId: number | string) => {
   }
 
   const payload = await response.json();
-  return Array.isArray(payload?.timeline) ? payload.timeline.map(normalizeActivityItem) : [];
+  return Array.isArray(payload?.timeline) ? dedupeTimeline(payload.timeline.map(normalizeActivityItem)) : [];
 };
 
 export const updatePharmacyOrderStatus = async (

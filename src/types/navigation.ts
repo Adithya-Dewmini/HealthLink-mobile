@@ -126,6 +126,11 @@ export type ReceptionistStackParamList = {
     doctorName?: string;
     specialization?: string | null;
   };
+  ReceptionistCheckInPatients: {
+    sessionId: number;
+    doctorName?: string;
+    specialization?: string | null;
+  };
 };
 
 export type ReceptionistTabParamList = {
@@ -179,7 +184,13 @@ export type PatientStackParamList = {
     nextAvailable: string;
     specialty: string;
   };
-  PatientQueue: { doctorId?: number; clinicId?: string; sessionId?: number };
+  PatientQueue: {
+    doctorId?: number;
+    clinicId?: string;
+    sessionId?: number;
+    appointmentId?: string;
+    queueId?: string;
+  };
   HeartRateScreen: undefined;
   SleepTrackerScreen: undefined;
   MedicalHistoryScreen: undefined;

@@ -109,7 +109,7 @@ export default function CheckoutScreen() {
         const session = await startOrderPaymentCheckout(order.id);
         navigation.replace("PaymentStatus", {
           orderId: order.id,
-          checkoutUrl: session.hosted_url,
+          checkoutUrl: session.hostedUrl,
           autoOpenCheckout: true,
         });
         return;
@@ -192,7 +192,7 @@ export default function CheckoutScreen() {
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Payment method</Text>
               <Text style={styles.helperCopy}>
-                Pay at the pharmacy, or continue to the hosted online checkout after the order is created.
+                Pay at the pharmacy, or continue to secure online checkout after the order is created.
               </Text>
               <View style={styles.paymentOptionRow}>
                 <TouchableOpacity
@@ -247,7 +247,7 @@ export default function CheckoutScreen() {
                         paymentMethod === "online" && styles.paymentOptionTextActive,
                       ]}
                     >
-                      Open the PayHere-style checkout and wait for backend confirmation.
+                      Open the secure PayHere hosted checkout and wait for backend confirmation.
                     </Text>
                   </View>
                 </TouchableOpacity>

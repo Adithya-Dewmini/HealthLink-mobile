@@ -50,6 +50,11 @@ export type PharmacyPrescriptionDetailItem = {
 export type PharmacyPrescriptionDetails = {
   prescription: {
     id: number | string;
+    consultationId?: string | null;
+    patientId?: string | null;
+    doctorId?: string | null;
+    medicalCenterId?: string | null;
+    medicalCenterName?: string | null;
     qrCode?: string;
     token?: string;
     status?: string;
@@ -66,6 +71,11 @@ export type PharmacyPrescriptionDetails = {
 export type PharmacyPrescription = {
   prescription: {
     id: number | string;
+    consultationId?: string | null;
+    patientId?: string | null;
+    doctorId?: string | null;
+    medicalCenterId?: string | null;
+    medicalCenterName?: string | null;
     qrCode?: string;
     isSeen?: boolean;
     issuedAt?: string;

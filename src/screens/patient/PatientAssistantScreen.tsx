@@ -5,6 +5,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -18,6 +19,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
 import ChatBubble from "../../components/chat/ChatBubble";
 import QuickReplyButton from "../../components/chat/QuickReplyButton";
 import TypingIndicator from "../../components/chat/TypingIndicator";
@@ -54,15 +56,16 @@ type StoredChatState = {
 
 const STORAGE_KEY = "healthlink.medimate.advanced.v1";
 
-const THEME = {
-  bg: "#F4FBFD",
-  textPrimary: "#13324A",
-  textSecondary: "#5E7386",
-  brand: "#0F766E",
-  brandDark: "#123F73",
-  white: "#FFFFFF",
-  shadow: "#0B3954",
-};
+const THEME = patientTheme.colors;
+const BASE_HEADER_HEIGHT = 58;
+const TOP_GLOW = "#D7F7FA";
+const BOTTOM_GLOW = "#E8F4FF";
+const EMPTY_AVATAR_GRADIENT = ["#E7FBFF", "#F8FDFF"] as const;
+const INPUT_PLACEHOLDER = "#7A90A3";
+const HEADER_BOTTOM_GAP = 14;
+const HEADER_BACKGROUND = "#0F172A";
+const HEADER_BUTTON_BG = "rgba(255,255,255,0.12)";
+const HEADER_SUBTITLE = "rgba(255,255,255,0.72)";
 
 const DEFAULT_SUGGESTIONS = ["Book doctor", "My queue", "Prescriptions", "Medical records"];
 const HEALTH_SUGGESTIONS = ["Find doctor", "Book appointment", "Ask another question"];
@@ -107,6 +110,8 @@ const normalizeStoredState = (value: unknown): StoredChatState => {
 export default function PatientAssistantScreen() {
   const navigation = useNavigation<PatientNavigation>();
   const insets = useSafeAreaInsets();
+  const headerHeight = insets.top + BASE_HEADER_HEIGHT;
+  const contentTopInset = headerHeight + HEADER_BOTTOM_GAP;
   const listRef = useRef<FlatList<ChatMessage> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const [input, setInput] = useState("");
@@ -114,6 +119,12 @@ export default function PatientAssistantScreen() {
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+
+  const clearLocalChatState = useCallback(() => {
+    setMessages([]);
+    setConversationId(undefined);
+    void AsyncStorage.removeItem(STORAGE_KEY);
+  }, []);
 
   const persistState = useCallback(async (nextMessages: ChatMessage[], nextConversationId?: string) => {
     try {
@@ -378,15 +389,13 @@ export default function PatientAssistantScreen() {
           inputRef.current?.focus();
           break;
         case "CLEAR_CONTEXT":
-          setMessages([]);
-          setConversationId(undefined);
-          void AsyncStorage.removeItem(STORAGE_KEY);
+          clearLocalChatState();
           break;
         default:
           break;
       }
     },
-    [navigation, submitMessage]
+    [clearLocalChatState, navigation, submitMessage]
   );
 
   const clearChat = useCallback(() => {
@@ -395,14 +404,10 @@ export default function PatientAssistantScreen() {
       {
         text: "Clear",
         style: "destructive",
-        onPress: () => {
-          setMessages([]);
-          setConversationId(undefined);
-          void AsyncStorage.removeItem(STORAGE_KEY);
-        },
+        onPress: clearLocalChatState,
       },
     ]);
-  }, []);
+  }, [clearLocalChatState]);
 
   const renderMessage = useCallback(
     ({ item, index }: { item: ChatMessage; index: number }) => {
@@ -457,8 +462,8 @@ export default function PatientAssistantScreen() {
 
   const emptyState = (
     <View style={styles.emptyWrap}>
-      <LinearGradient colors={["#E7FBFF", "#F8FDFF"]} style={styles.emptyAvatar}>
-        <Ionicons name="sparkles" size={40} color={THEME.brand} />
+      <LinearGradient colors={EMPTY_AVATAR_GRADIENT} style={styles.emptyAvatar}>
+        <Ionicons name="sparkles" size={40} color={THEME.primary} />
       </LinearGradient>
       <Text style={styles.emptyTitle}>Hi, I’m MediMate</Text>
       <Text style={styles.emptySubtitle}>
@@ -479,24 +484,24 @@ export default function PatientAssistantScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView edges={["left", "right"]} style={styles.safe}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <KeyboardAvoidingView
         style={styles.keyboardWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 6 : 0}
       >
-        <View style={styles.backgroundGlowTop} />
-        <View style={styles.backgroundGlowBottom} />
+        <View pointerEvents="none" style={styles.backgroundGlowTop} />
+        <View pointerEvents="none" style={styles.backgroundGlowBottom} />
 
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 2, height: headerHeight }]}>
           <TouchableOpacity
             accessibilityLabel="Go back"
             style={styles.iconButton}
             onPress={() => navigation.goBack()}
             activeOpacity={0.88}
           >
-            <Ionicons name="chevron-back" size={22} color={THEME.textPrimary} />
+            <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
@@ -518,26 +523,36 @@ export default function PatientAssistantScreen() {
             onPress={clearChat}
             activeOpacity={0.88}
           >
-            <Ionicons name="trash-outline" size={18} color={THEME.textPrimary} />
+            <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
         {messages.length === 0 ? (
-          <View style={styles.emptyContainer}>{emptyState}</View>
+          <ScrollView
+            style={styles.emptyScroll}
+            contentContainerStyle={[
+              styles.emptyScrollContent,
+              { paddingTop: contentTopInset, paddingBottom: Math.max(insets.bottom, 8) + 24 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {emptyState}
+          </ScrollView>
         ) : (
           <FlatList
             ref={listRef}
             data={messages}
             keyExtractor={(item) => item.id}
             renderItem={renderMessage}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, { paddingTop: contentTopInset }]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             ListFooterComponent={loading ? <TypingIndicator /> : <View style={{ height: 10 }} />}
           />
         )}
 
-        <View style={[styles.composerDock, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.composerDock, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <ChatSuggestionBar
             suggestions={suggestionItems}
             onPressSuggestion={(suggestion) => void submitMessage(suggestion)}
@@ -549,7 +564,7 @@ export default function PatientAssistantScreen() {
               value={input}
               onChangeText={setInput}
               placeholder="Message MediMate…"
-              placeholderTextColor="#7A90A3"
+              placeholderTextColor={INPUT_PLACEHOLDER}
               style={styles.input}
               multiline
               maxLength={500}
@@ -574,7 +589,7 @@ export default function PatientAssistantScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: THEME.bg,
+    backgroundColor: THEME.background,
   },
   keyboardWrap: {
     flex: 1,
@@ -586,7 +601,7 @@ const styles = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: "#D7F7FA",
+    backgroundColor: TOP_GLOW,
     opacity: 0.7,
   },
   backgroundGlowBottom: {
@@ -596,27 +611,33 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: "#E8F4FF",
+    backgroundColor: BOTTOM_GLOW,
     opacity: 0.7,
   },
   header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 12,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    shadowColor: THEME.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    paddingBottom: 10,
+    backgroundColor: HEADER_BACKGROUND,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    shadowColor: THEME.navy,
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   iconButton: {
     width: 44,
     height: 44,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.96)",
+    backgroundColor: HEADER_BUTTON_BG,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -630,7 +651,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: THEME.brand,
+    backgroundColor: "rgba(255,255,255,0.14)",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -640,7 +661,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    color: THEME.textPrimary,
+    color: "#FFFFFF",
     fontWeight: "800",
   },
   headerStatusRow: {
@@ -652,16 +673,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#22C55E",
+    backgroundColor: THEME.success,
     marginRight: 6,
   },
   headerSubtitle: {
     fontSize: 13,
-    color: THEME.textSecondary,
+    color: HEADER_SUBTITLE,
     fontWeight: "700",
   },
-  emptyContainer: {
+  emptyScroll: {
     flex: 1,
+  },
+  emptyScrollContent: {
+    flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 20,
   },
@@ -701,7 +725,7 @@ const styles = StyleSheet.create({
     marginTop: 18,
     fontSize: 14,
     lineHeight: 20,
-    color: "#A16207",
+    color: THEME.warning,
     fontWeight: "700",
     textAlign: "center",
   },
@@ -712,19 +736,23 @@ const styles = StyleSheet.create({
   },
   composerDock: {
     paddingHorizontal: 14,
-    paddingTop: 8,
-    backgroundColor: "rgba(244,251,253,0.74)",
+    paddingTop: 6,
+    backgroundColor: THEME.background,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(216,243,248,0.9)",
   },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
-    backgroundColor: "rgba(255,255,255,0.98)",
+    backgroundColor: "rgba(255,255,255,0.97)",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderRadius: 28,
     paddingLeft: 16,
     paddingRight: 8,
     paddingVertical: 8,
-    shadowColor: THEME.shadow,
-    shadowOpacity: 0.12,
+    shadowColor: THEME.navy,
+    shadowOpacity: 0.1,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 4,
@@ -744,7 +772,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: THEME.brandDark,
+    backgroundColor: THEME.primary,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 10,

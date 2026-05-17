@@ -24,6 +24,7 @@ import { getQueueDashboard } from "../services/doctorQueueService";
 import {
   completeConsultation,
   createConsultationDraft,
+  issueConsultationPrescription,
   updateConsultationDraft,
 } from "../services/consultationService";
 import { apiFetch } from "../config/api";
@@ -57,6 +58,50 @@ type MedicineConflict = {
 };
 
 type MedicineFieldErrors = Partial<Record<"name" | "type" | "strength" | "dosage" | "duration" | "timing", string>>;
+
+type ConsultationContextPayload = {
+  patient?: {
+    id?: number | null;
+    name?: string | null;
+    age?: number | null;
+    gender?: string | null;
+    profile_image?: string | null;
+    avatarUrl?: string | null;
+  } | null;
+  queue?: {
+    queueId?: number | string | null;
+    tokenNumber?: number | string | null;
+    complaint?: string | null;
+    isWalkIn?: boolean;
+  } | null;
+  appointment?: {
+    id?: number | string | null;
+    time?: string | null;
+    status?: string | null;
+  } | null;
+  session?: {
+    id?: number | string | null;
+    date?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    medicalCenterName?: string | null;
+  } | null;
+  consultation?: {
+    id?: number | string | null;
+    status?: string | null;
+    symptoms?: string | null;
+    diagnosis?: string | null;
+    notes?: string | null;
+    medicines?: any[];
+    prescriptionId?: number | string | null;
+    prescriptionIssuedAt?: string | null;
+    prescriptionIssued?: boolean;
+  } | null;
+  conditions?: string[];
+  allergies?: string[];
+  visits?: Array<{ date?: string | null; diagnosis?: string | null; notes?: string | null }>;
+  medications?: string[];
+};
 
 const THEME = {
   background: doctorColors.background,
@@ -142,6 +187,45 @@ const formatConflictCopy = (conflicts: MedicineConflict[]) =>
     })
     .join(" ");
 
+const parseDoseSchedule = (value: unknown) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return {
+      morning: Number((value as any).morning || 0),
+      afternoon: Number((value as any).afternoon || 0),
+      night: Number((value as any).night || 0),
+    };
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return {
+          morning: Number(parsed?.morning || 0),
+          afternoon: Number(parsed?.afternoon || 0),
+          night: Number(parsed?.night || 0),
+        };
+      } catch {
+        return { morning: 1, afternoon: 0, night: 1 };
+      }
+    }
+  }
+
+  return { morning: 1, afternoon: 0, night: 1 };
+};
+
+const mapContextMedicine = (medicine: any, index: number): MedicineItem => ({
+  id: Date.now() + index,
+  name: String(medicine?.name || medicine?.medicine_name || "").trim(),
+  type: String(medicine?.type || "Tablet").trim(),
+  strength: String(medicine?.strength || medicine?.dosage || "").trim(),
+  dosage: parseDoseSchedule(medicine?.frequency ?? medicine?.dosage),
+  duration: Number(medicine?.duration || 0) || 5,
+  timing: String(medicine?.timing || medicine?.instructions || "After Meal").trim(),
+  notes: String(medicine?.instructions || medicine?.notes || "").trim(),
+});
+
 export default function ConsultationScreen({ queueId }: ConsultationScreenProps) {
   const navigation = useNavigation<any>();
   const { user } = useAuth();
@@ -169,7 +253,13 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [notesValidationMessage, setNotesValidationMessage] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isIssuingPrescription, setIsIssuingPrescription] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [prescriptionId, setPrescriptionId] = useState<number | string | null>(null);
+  const [prescriptionIssuedAt, setPrescriptionIssuedAt] = useState<string | null>(null);
+  const [sessionSummary, setSessionSummary] = useState<ConsultationContextPayload["session"]>(null);
+  const [appointmentSummary, setAppointmentSummary] = useState<ConsultationContextPayload["appointment"]>(null);
+  const [queueSummary, setQueueSummary] = useState<ConsultationContextPayload["queue"]>(null);
   const lastSavedRef = useRef<string>("");
   const doctorStatus = String(user?.status || user?.verification_status || "pending").toLowerCase();
   const isVerifiedDoctor = doctorStatus === "verified" || doctorStatus === "approved";
@@ -193,7 +283,9 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
         if (!res.ok) {
           throw new Error("Could not load the consultation context.");
         }
-        const data = contentType.includes("application/json") ? JSON.parse(raw) : null;
+        const data = contentType.includes("application/json")
+          ? (JSON.parse(raw) as ConsultationContextPayload | null)
+          : null;
         if (!data) {
           throw new Error("Invalid consultation response.");
         }
@@ -207,6 +299,19 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
           setPatientAge(gender ? `${data.patient.age}${gender}` : `${data.patient.age}`);
         }
         setPatientId(data?.patient?.id ?? null);
+        setQueueSummary(data?.queue ?? null);
+        setAppointmentSummary(data?.appointment ?? null);
+        setSessionSummary(data?.session ?? null);
+        setPatientToken(data?.queue?.tokenNumber ?? null);
+        setPrescriptionId(data?.consultation?.prescriptionId ?? null);
+        setPrescriptionIssuedAt(data?.consultation?.prescriptionIssuedAt ?? null);
+        if (data?.consultation?.id) setConsultationId(data.consultation.id);
+        if (typeof data?.consultation?.symptoms === "string") setSymptoms(data.consultation.symptoms);
+        if (typeof data?.consultation?.diagnosis === "string") setDiagnosis(data.consultation.diagnosis);
+        if (typeof data?.consultation?.notes === "string") setDoctorNotes(data.consultation.notes);
+        if (Array.isArray(data?.consultation?.medicines)) {
+          setMedicines(data.consultation.medicines.map(mapContextMedicine));
+        }
       } catch (err) {
         console.error(err);
         setContextError("This consultation is no longer active. Return to the queue and select the current patient.");
@@ -304,6 +409,8 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
   }, [isVerifiedDoctor, consultationId, symptoms, diagnosis, doctorNotes, medicines]);
 
   const autosaveState = getAutosavePresentation(saveStatus);
+  const hasIssuedPrescription = Boolean(prescriptionId);
+  const hasMedicineEntries = medicines.length > 0;
 
   const patient = {
     name: patientName || "—",
@@ -410,44 +517,141 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       return;
     }
 
-    if (Object.keys(validatedMedicineErrors).length > 0) {
+    if (hasMedicineEntries && Object.keys(validatedMedicineErrors).length > 0) {
       setActiveTab("Medicines");
       setCompletionMessage("Please review the highlighted medicine entries before completing this consultation.");
       return;
     }
 
-    try {
-      setIsCompleting(true);
-      if (!consultationId) {
-        Alert.alert("Not ready", "Consultation draft is not ready yet.");
-        return;
+    const runCompletion = async () => {
+      try {
+        setIsCompleting(true);
+        if (!consultationId) {
+          Alert.alert("Not ready", "Consultation draft is not ready yet.");
+          return;
+        }
+        const token = await AsyncStorage.getItem("token");
+        if (!token) return;
+        const res = await completeConsultation(token, consultationId, medicines);
+        if (res?.success) {
+          Alert.alert("Consultation Completed", res?.message ?? "Consultation completed successfully.");
+          navigation.replace("DoctorTabs", { screen: "DoctorQueueControl" });
+          return;
+        }
+        Alert.alert("Consultation Completed", res?.message ?? "Consultation completed.");
+      } catch (error: any) {
+        console.log("Complete consultation error:", error);
+        const conflicts = Array.isArray(error?.response?.data?.conflicts)
+          ? (error.response.data.conflicts as MedicineConflict[])
+          : [];
+        if (conflicts.length > 0) {
+          setConflictWarnings(conflicts);
+          setCompletionMessage(
+            "Medicine conflict found. Please review the highlighted medicines before completing this consultation."
+          );
+          setActiveTab("Medicines");
+          return;
+        }
+        const backendMessage = error?.response?.data?.message;
+        Alert.alert("Complete Consultation Failed", getFriendlyError(error, backendMessage || "Unable to complete this consultation."));
+      } finally {
+        setIsCompleting(false);
       }
+    };
+
+    if (!hasIssuedPrescription && !hasMedicineEntries) {
+      Alert.alert(
+        "Complete without prescription",
+        "No medicines were added. Complete this consultation without issuing a prescription?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Complete", onPress: () => void runCompletion() },
+        ]
+      );
+      return;
+    }
+
+    await runCompletion();
+  };
+
+  const handleIssuePrescription = async () => {
+    if (!isVerifiedDoctor) {
+      Alert.alert("Approval required", "You can issue prescriptions after doctor approval.");
+      return;
+    }
+
+    if (isIssuingPrescription) return;
+    setCompletionMessage(null);
+    setConflictWarnings([]);
+    setMedicineErrors(validatedMedicineErrors);
+
+    if (contextError || !queueId || !patientId) {
+      Alert.alert("Consultation unavailable", contextError || "No active patient was found for this consultation.");
+      return;
+    }
+
+    if (!consultationId) {
+      Alert.alert("Not ready", "Consultation draft is not ready yet.");
+      return;
+    }
+
+    if (!hasMedicineEntries) {
+      setActiveTab("Medicines");
+      setCompletionMessage("Add at least one medicine before issuing a prescription.");
+      return;
+    }
+
+    if (Object.keys(validatedMedicineErrors).length > 0) {
+      setActiveTab("Medicines");
+      setCompletionMessage("Please review the highlighted medicine entries before issuing the prescription.");
+      return;
+    }
+
+    try {
+      setIsIssuingPrescription(true);
       const token = await AsyncStorage.getItem("token");
       if (!token) return;
-      const res = await completeConsultation(token, consultationId, medicines);
+      const res = await issueConsultationPrescription(token, consultationId, medicines);
       if (res?.success) {
-        Alert.alert("Prescription Issued", "The prescription was sent to the patient.");
-        navigation.replace("DoctorTabs", { screen: "DoctorQueueControl" });
-        return;
+        setPrescriptionId(res.prescriptionId ?? null);
+        setPrescriptionIssuedAt(new Date().toISOString());
+        Alert.alert(
+          hasIssuedPrescription ? "Prescription Updated" : "Prescription Issued",
+          hasIssuedPrescription
+            ? "The prescription was updated for this consultation."
+            : "The prescription is now linked to this consultation.",
+          res?.prescriptionId
+            ? [
+                { text: "Continue" },
+                {
+                  text: "View",
+                  onPress: () =>
+                    navigation.navigate("DoctorPrescriptionDetails", {
+                      prescriptionId: String(res.prescriptionId),
+                    }),
+                },
+              ]
+            : [{ text: "OK" }]
+        );
       }
-      Alert.alert("Consultation Completed", res?.message ?? "Consultation completed.");
     } catch (error: any) {
-      console.log("Complete consultation error:", error);
       const conflicts = Array.isArray(error?.response?.data?.conflicts)
         ? (error.response.data.conflicts as MedicineConflict[])
         : [];
       if (conflicts.length > 0) {
         setConflictWarnings(conflicts);
         setCompletionMessage(
-          "Medicine conflict found. Please review the highlighted medicines before completing this consultation."
+          "Medicine conflict found. Please review the highlighted medicines before issuing the prescription."
         );
         setActiveTab("Medicines");
         return;
       }
-      const backendMessage = error?.response?.data?.message;
-      Alert.alert("Complete Consultation Failed", getFriendlyError(error, backendMessage || "Unable to complete this consultation."));
+      Alert.alert(
+        hasIssuedPrescription ? "Update Failed" : "Issue Prescription Failed",
+        getFriendlyError(error, error?.response?.data?.message || "Unable to issue this prescription.")
+      );
     } finally {
-      setIsCompleting(false);
+      setIsIssuingPrescription(false);
     }
   };
 
@@ -539,12 +743,52 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
 
           <View style={styles.contextCard}>
             <View style={styles.contextRow}>
-              <ContextPill icon="medical-outline" label={`Queue ${queueId ?? "—"}`} />
-              <ContextPill icon="document-text-outline" label={`Consultation ${consultationId ?? "Draft"}`} />
+              <ContextPill icon="business-outline" label={sessionSummary?.medicalCenterName || "Clinic session"} />
+              <ContextPill icon="calendar-outline" label={sessionSummary?.date || "Today"} />
+              <ContextPill
+                icon="time-outline"
+                label={
+                  sessionSummary?.startTime && sessionSummary?.endTime
+                    ? `${sessionSummary.startTime.slice(0, 5)} - ${sessionSummary.endTime.slice(0, 5)}`
+                    : appointmentSummary?.time || "Session time"
+                }
+              />
             </View>
             <Text style={styles.contextText}>
-              Complete this consultation to issue the prescription, finish the current patient, and return to the queue.
+              {queueSummary?.complaint
+                ? `Reason for visit: ${queueSummary.complaint}`
+                : appointmentSummary?.time
+                  ? `Appointment time: ${appointmentSummary.time}`
+                  : "Review the clinical notes and treatment plan for this patient."}
             </Text>
+          </View>
+
+          <View style={styles.contextCard}>
+            <View style={styles.contextRow}>
+              <ContextPill icon="medical-outline" label={`Queue ${queueId ?? "—"}`} />
+              <ContextPill icon="document-text-outline" label={`Consultation ${consultationId ?? "Draft"}`} />
+              <ContextPill
+                icon="document-attach-outline"
+                label={hasIssuedPrescription ? "Prescription Issued" : "No Prescription Yet"}
+              />
+            </View>
+            <Text style={styles.contextText}>
+              {hasIssuedPrescription
+                ? `Prescription linked${prescriptionIssuedAt ? ` • ${formatDateTime(prescriptionIssuedAt)}` : ""}. Complete this consultation when your notes are final.`
+                : "Issue a prescription if needed, or complete the consultation without one."}
+            </Text>
+            {hasIssuedPrescription ? (
+              <TouchableOpacity
+                style={styles.inlineLinkButton}
+                onPress={() =>
+                  navigation.navigate("DoctorPrescriptionDetails", {
+                    prescriptionId: String(prescriptionId),
+                  })
+                }
+              >
+                <Text style={styles.inlineLinkText}>View Issued Prescription</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {contextError ? (
@@ -785,9 +1029,13 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
 
         <View style={styles.bottomBar}>
           <TouchableOpacity
-            style={[styles.draftButton, (isSavingDraft || isCompleting || Boolean(contextError)) && styles.actionButtonDisabled]}
+            style={[
+              styles.draftButton,
+              (isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)) &&
+                styles.actionButtonDisabled,
+            ]}
             onPress={handleSaveDraft}
-            disabled={isSavingDraft || isCompleting || Boolean(contextError)}
+            disabled={isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)}
             accessibilityRole="button"
             accessibilityLabel="Save consultation draft"
           >
@@ -795,9 +1043,33 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.completeButton, (isSavingDraft || isCompleting || Boolean(contextError)) && styles.actionButtonDisabled]}
+            style={[
+              styles.issueButton,
+              (isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)) &&
+                styles.actionButtonDisabled,
+            ]}
+            onPress={handleIssuePrescription}
+            disabled={isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)}
+            accessibilityRole="button"
+            accessibilityLabel={hasIssuedPrescription ? "Update prescription" : "Issue prescription"}
+          >
+            {isIssuingPrescription ? (
+              <ActivityIndicator size="small" color={THEME.primary} />
+            ) : (
+              <Text style={styles.issueButtonText}>
+                {hasIssuedPrescription ? "Update Prescription" : "Issue Prescription"}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.completeButton,
+              (isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)) &&
+                styles.actionButtonDisabled,
+            ]}
             onPress={handleComplete}
-            disabled={isSavingDraft || isCompleting || Boolean(contextError)}
+            disabled={isSavingDraft || isIssuingPrescription || isCompleting || Boolean(contextError)}
             accessibilityRole="button"
             accessibilityLabel="Complete consultation"
           >
@@ -1178,6 +1450,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: THEME.textSecondary,
   },
+  inlineLinkButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    minHeight: 36,
+    justifyContent: "center",
+  },
+  inlineLinkText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: THEME.primary,
+  },
   warningBanner: {
     backgroundColor: THEME.warningBg,
     borderRadius: 18,
@@ -1486,11 +1769,10 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     borderTopWidth: 1,
     borderTopColor: THEME.border,
-    flexDirection: "row",
+    flexDirection: "column",
     gap: 12,
   },
   draftButton: {
-    flex: 1,
     minHeight: 50,
     borderRadius: 18,
     borderWidth: 1,
@@ -1504,11 +1786,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  issueButton: {
+    minHeight: 50,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#CAE9E7",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EAF7F6",
+  },
+  issueButtonText: {
+    color: THEME.primary,
+    fontSize: 14,
+    fontWeight: "800",
+  },
   actionButtonDisabled: {
     opacity: 0.65,
   },
   completeButton: {
-    flex: 1.6,
     minHeight: 50,
     borderRadius: 18,
     backgroundColor: THEME.deep,

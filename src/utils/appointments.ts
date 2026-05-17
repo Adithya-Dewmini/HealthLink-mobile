@@ -86,6 +86,9 @@ export const validateRescheduleInput = (date: string, time: string) => {
 export const normalizeAppointment = (item: AppointmentApiItem): AppointmentItem => {
   const rawDate = String(item.date ?? "").slice(0, 10);
   const rawTime = String(item.time ?? "").slice(0, 5);
+  const sessionDate = String(item.session_date ?? rawDate).slice(0, 10);
+  const sessionStartTime = item.session_start_time ? String(item.session_start_time).slice(0, 5) : null;
+  const sessionEndTime = item.session_end_time ? String(item.session_end_time).slice(0, 5) : null;
   const scheduledAt =
     item.scheduled_at && !Number.isNaN(new Date(item.scheduled_at).getTime())
       ? new Date(item.scheduled_at).toISOString()
@@ -101,6 +104,9 @@ export const normalizeAppointment = (item: AppointmentApiItem): AppointmentItem 
     clinicId: typeof item.medical_center_id === "string" ? item.medical_center_id : null,
     clinicName: item.medical_center_name ?? "Medical Center",
     sessionId: Number.isFinite(Number(item.session_id)) ? Number(item.session_id) : null,
+    sessionDate,
+    sessionStartTime,
+    sessionEndTime,
     doctor: item.doctor_name ?? "Doctor",
     type: "Appointment",
     location: item.medical_center_name ?? "Medical Center",
@@ -112,6 +118,17 @@ export const normalizeAppointment = (item: AppointmentApiItem): AppointmentItem 
     backendStatus,
     status: deriveAppointmentStatus(backendStatus, scheduledAt),
     isLate: Boolean(item.is_late),
+    queueId: Number.isFinite(Number(item.queue_id)) ? Number(item.queue_id) : null,
+    queueStatus: item.queue_status ? String(item.queue_status).toUpperCase() : null,
+    queueStartedAt: item.queue_started_at ?? null,
+    queueEndedAt: item.queue_ended_at ?? null,
+    queuePatientStatus: item.queue_patient_status ? String(item.queue_patient_status).toUpperCase() : null,
+    queueTokenNumber: Number.isFinite(Number(item.queue_token_number)) ? Number(item.queue_token_number) : null,
+    queueCheckedInAt: item.queue_checked_in_at ?? null,
+    queueMissedAt: item.queue_missed_at ?? null,
+    currentServingToken:
+      Number.isFinite(Number(item.current_serving_token)) ? Number(item.current_serving_token) : null,
+    waitingCount: Number(item.waiting_count ?? 0) || 0,
     startedAt: item.started_at ?? null,
     endedAt: item.ended_at ?? null,
     cancelledBy: item.cancelledBy ?? null,

@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 const Dot = ({ delay }: { delay: number }) => {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -48,18 +51,20 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#0F766E",
+    backgroundColor: THEME.primary,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
   },
   bubble: {
     backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: THEME.border,
     borderRadius: 22,
     borderBottomLeftRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    shadowColor: "#0B3954",
+    shadowColor: THEME.navy,
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
@@ -74,11 +79,11 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#0F766E",
+    backgroundColor: THEME.primary,
   },
   text: {
     fontSize: 14,
-    color: "#5F7185",
+    color: THEME.textSecondary,
     fontWeight: "700",
   },
 });

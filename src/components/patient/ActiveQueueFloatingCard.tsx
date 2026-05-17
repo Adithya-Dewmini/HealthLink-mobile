@@ -14,7 +14,9 @@ const THEME = {
 export type ActiveQueueStatus =
   | "none"
   | "appointment_booked"
+  | "today_appointment"
   | "queue_live"
+  | "check_in_required"
   | "waiting"
   | "next"
   | "missed";
@@ -33,7 +35,9 @@ export type ActiveQueueState = {
   sessionTime?: string;
   queueStarted?: boolean;
   tokenNumber?: number;
+  currentServingNumber?: number;
   position?: number;
+  message?: string | null;
   estimatedWaitMinutes?: number;
 };
 
@@ -61,14 +65,17 @@ export function UpcomingAppointmentCard({
   appointment: ActiveQueueState;
   onPress: () => void;
 }) {
+  const isTodayAppointment = appointment.status === "today_appointment";
   return (
     <View style={styles.upcomingCard}>
       <View style={styles.upcomingTopRow}>
         <View style={styles.upcomingIconWrap}>
-          <Ionicons name="calendar-outline" size={18} color={THEME.accent} />
+          <Ionicons name={isTodayAppointment ? "today-outline" : "calendar-outline"} size={18} color={THEME.accent} />
         </View>
         <View style={styles.upcomingCopy}>
-          <Text style={styles.upcomingEyebrow}>Upcoming Appointment</Text>
+          <Text style={styles.upcomingEyebrow}>
+            {isTodayAppointment ? "Today's Appointment" : "Upcoming Appointment"}
+          </Text>
           <Text style={styles.upcomingTitle} numberOfLines={1}>
             {appointment.doctorName || "Appointment booked"}
           </Text>
@@ -80,12 +87,16 @@ export function UpcomingAppointmentCard({
 
       <View style={styles.upcomingMetaRow}>
         <Text style={styles.upcomingMetaText}>
-          Queue starts at {formatTimeCopy(appointment.scheduledTime)}
+          {isTodayAppointment
+            ? appointment.message || `Session time ${appointment.sessionTime || formatTimeCopy(appointment.scheduledTime)}`
+            : `Queue starts at ${formatTimeCopy(appointment.scheduledTime)}`}
         </Text>
       </View>
 
       <TouchableOpacity style={styles.upcomingButton} activeOpacity={0.88} onPress={onPress}>
-        <Text style={styles.upcomingButtonText}>View Appointment</Text>
+        <Text style={styles.upcomingButtonText}>
+          {isTodayAppointment ? "View Queue Status" : "View Appointment"}
+        </Text>
         <Ionicons name="arrow-forward" size={16} color={THEME.white} />
       </TouchableOpacity>
     </View>
@@ -114,6 +125,13 @@ export default function ActiveQueueFloatingCard({
       accent: ["#22C55E", "#16A34A"] as const,
       icon: "radio-outline" as const,
     },
+    check_in_required: {
+      label: "Check-in required",
+      sub: queue.message || "Please check in at reception to join this queue",
+      button: "View Queue",
+      accent: ["#22C55E", "#15803D"] as const,
+      icon: "log-in-outline" as const,
+    },
     next: {
       label: "You are next",
       sub: "Please stay nearby",
@@ -128,7 +146,15 @@ export default function ActiveQueueFloatingCard({
       accent: ["#EF4444", "#DC2626"] as const,
       icon: "alert-circle-outline" as const,
     },
-  }[queue.status === "waiting" || queue.status === "queue_live" || queue.status === "next" || queue.status === "missed" ? queue.status : "waiting"];
+  }[
+    queue.status === "waiting" ||
+    queue.status === "queue_live" ||
+    queue.status === "check_in_required" ||
+    queue.status === "next" ||
+    queue.status === "missed"
+      ? queue.status
+      : "waiting"
+  ];
 
   return (
     <TouchableOpacity style={styles.floatingWrap} activeOpacity={0.92} onPress={onPress}>
@@ -157,7 +183,11 @@ export default function ActiveQueueFloatingCard({
         </View>
 
         <Text style={styles.floatingHeadline}>{visual.label}</Text>
-        <Text style={styles.floatingSub}>{visual.sub}</Text>
+        <Text style={styles.floatingSub}>
+          {queue.status === "waiting" && queue.currentServingNumber
+            ? `Now serving #${queue.currentServingNumber}. ${visual.sub}`
+            : visual.sub}
+        </Text>
 
         <View style={styles.floatingButtonRow}>
           <Text style={styles.floatingButtonText}>{visual.button}</Text>

@@ -20,6 +20,10 @@ export type DoctorQueuePatient = {
   notes?: string | null;
   note?: string | null;
   type?: string | null;
+  is_walkin?: boolean;
+  completed_at?: string | null;
+  missed_at?: string | null;
+  started_at?: string | null;
 };
 
 export type DoctorQueueDashboard = {
@@ -94,6 +98,23 @@ export const callNextPatient = async (token: string) => {
   const res = await api.post(
     "/api/doctor/queue/next",
     {},
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  return res.data;
+};
+
+export const callSelectedPatient = async (
+  token: string,
+  queuePatientId: string | number
+) => {
+  const res = await api.post(
+    "/api/doctor/queue/call",
+    { queuePatientId },
     {
       headers: {
         Authorization: `Bearer ${token}`,

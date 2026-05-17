@@ -17,6 +17,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { TabBar, TabView } from "react-native-tab-view";
 import AppointmentCard from "../../components/patient/appointments/AppointmentCard";
+import LiveQueueAppointmentCard from "../../components/patient/appointments/LiveQueueAppointmentCard";
 import { cancelAppointment, fetchAppointments, rescheduleAppointment } from "../../services/appointmentsApi";
 import type { PatientStackParamList } from "../../types/navigation";
 import type { AppointmentItem, AppointmentStatus } from "../../types/appointments";
@@ -29,6 +30,49 @@ type AppointmentRoute = {
   key: string;
   title: string;
   status: AppointmentStatus;
+};
+
+type UpcomingPresentation = "live" | "check_in_required" | "today" | "default";
+
+const buildTodayKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
+
+const getUpcomingPresentation = (appointment: AppointmentItem): UpcomingPresentation => {
+  if (appointment.status !== "UPCOMING") return "default";
+  const queueStatus = String(appointment.queueStatus || "").toUpperCase();
+  const queuePatientStatus = String(appointment.queuePatientStatus || "").toUpperCase();
+  const hasLiveQueue = queueStatus === "LIVE" || queueStatus === "PAUSED";
+  const hasActiveQueueEntry = queuePatientStatus === "WAITING" || queuePatientStatus === "WITH_DOCTOR";
+
+  if (hasLiveQueue && hasActiveQueueEntry) {
+    return "live";
+  }
+  if (hasLiveQueue) {
+    return "check_in_required";
+  }
+  if (appointment.rawDate === buildTodayKey()) {
+    return "today";
+  }
+  return "default";
+};
+
+const sortUpcomingAppointments = (items: AppointmentItem[]) => {
+  const weight = (appointment: AppointmentItem) => {
+    const state = getUpcomingPresentation(appointment);
+    if (state === "live") return 0;
+    if (state === "check_in_required") return 1;
+    if (state === "today") return 2;
+    return 3;
+  };
+
+  return [...items].sort((left, right) => {
+    const leftWeight = weight(left);
+    const rightWeight = weight(right);
+    if (leftWeight !== rightWeight) return leftWeight - rightWeight;
+    return `${left.rawDate} ${left.rawTime}`.localeCompare(`${right.rawDate} ${right.rawTime}`);
+  });
 };
 
 const LooseTabBar = TabBar as any;
@@ -78,7 +122,8 @@ export default function Appointments() {
     () =>
       APPOINTMENT_TABS.reduce<Record<AppointmentStatus, AppointmentItem[]>>(
         (accumulator, status) => {
-          accumulator[status] = appointments.filter((appointment) => appointment.status === status);
+          const items = appointments.filter((appointment) => appointment.status === status);
+          accumulator[status] = status === "UPCOMING" ? sortUpcomingAppointments(items) : items;
           return accumulator;
         },
         {
@@ -156,14 +201,16 @@ export default function Appointments() {
 
   const handleGoToQueue = useCallback(
     (appointment: AppointmentItem) => {
-      if (!appointment.doctorId) {
-        Alert.alert("Queue Unavailable", "Doctor information is missing for this appointment.");
+      if (!appointment.doctorId && !appointment.sessionId && !appointment.id) {
+        Alert.alert("Queue Unavailable", "Queue details are missing for this appointment.");
         return;
       }
       navigation.navigate("PatientQueue", {
-        doctorId: appointment.doctorId,
+        doctorId: appointment.doctorId ?? undefined,
         clinicId: appointment.clinicId ?? undefined,
         sessionId: appointment.sessionId ?? undefined,
+        appointmentId: appointment.id,
+        queueId: appointment.queueId ? String(appointment.queueId) : undefined,
       });
     },
     [navigation]
@@ -206,7 +253,7 @@ export default function Appointments() {
             />
           ) : (
             items.map((appointment) => (
-              <AppointmentCard
+              <AppointmentListItem
                 key={appointment.id}
                 appointment={appointment}
                 onCancel={() => cancelBooking(appointment.id)}
@@ -333,6 +380,129 @@ export default function Appointments() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+function AppointmentListItem({
+  appointment,
+  onCancel,
+  onReschedule,
+  onGoToQueue,
+  onViewSummary,
+  onRebook,
+}: {
+  appointment: AppointmentItem;
+  onCancel: () => void;
+  onReschedule: () => void;
+  onGoToQueue: () => void;
+  onViewSummary: () => void;
+  onRebook: () => void;
+}) {
+  const presentation = getUpcomingPresentation(appointment);
+
+  if (presentation === "live" || presentation === "check_in_required") {
+    return (
+      <LiveQueueAppointmentCard
+        doctorName={appointment.doctor}
+        clinicName={appointment.clinicName}
+        sessionTime={
+          appointment.sessionStartTime && appointment.sessionEndTime
+            ? `${appointment.sessionStartTime} - ${appointment.sessionEndTime}`
+            : appointment.displayTime
+        }
+        queueNumber={appointment.queueTokenNumber}
+        currentServingNumber={appointment.currentServingToken}
+        badgeLabel={presentation === "live" ? "Queue Live" : "Check-In Required"}
+        badgeTone={presentation === "live" ? "live" : "warning"}
+        message={
+          presentation === "live"
+            ? appointment.queueTokenNumber
+              ? "Your appointment is already part of the live queue."
+              : "Queue is live for this session."
+            : appointment.backendStatus === "CONFIRMED"
+              ? "Waiting for receptionist queue check-in."
+              : "Please check in at reception to join the queue."
+        }
+        onPress={onGoToQueue}
+      />
+    );
+  }
+
+  if (presentation === "today") {
+    return (
+      <TodayAppointmentCard
+        appointment={appointment}
+        onPress={onGoToQueue}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  return (
+    <AppointmentCard
+      appointment={appointment}
+      onCancel={onCancel}
+      onReschedule={onReschedule}
+      onGoToQueue={onGoToQueue}
+      onViewSummary={onViewSummary}
+      onRebook={onRebook}
+    />
+  );
+}
+
+function TodayAppointmentCard({
+  appointment,
+  onPress,
+  onCancel,
+}: {
+  appointment: AppointmentItem;
+  onPress: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <View style={styles.todayCard}>
+      <View style={styles.todayTopRow}>
+        <View style={styles.todayIconWrap}>
+          <Ionicons name="today-outline" size={20} color={THEME.primary} />
+        </View>
+        <View style={styles.todayCopy}>
+          <Text style={styles.todayEyebrow}>Today's Appointment</Text>
+          <Text style={styles.todayDoctor}>{appointment.doctor}</Text>
+          <Text style={styles.todayClinic}>{appointment.clinicName}</Text>
+        </View>
+        <View style={styles.todayBadge}>
+          <Text style={styles.todayBadgeText}>Session Today</Text>
+        </View>
+      </View>
+
+      <View style={styles.todayMetaRow}>
+        <View style={styles.todayMetaPill}>
+          <Ionicons name="time-outline" size={14} color={THEME.textDark} />
+          <Text style={styles.todayMetaText}>
+            {appointment.sessionStartTime && appointment.sessionEndTime
+              ? `${appointment.sessionStartTime} - ${appointment.sessionEndTime}`
+              : appointment.displayTime}
+          </Text>
+        </View>
+        <View style={styles.todayMetaPill}>
+          <Ionicons name="calendar-outline" size={14} color={THEME.textDark} />
+          <Text style={styles.todayMetaText}>{appointment.displayDate}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.todayMessage}>
+        Your appointment is booked for today. Queue progress will appear once the session starts.
+      </Text>
+
+      <View style={styles.todayActionRow}>
+        <TouchableOpacity style={styles.todayPrimaryButton} activeOpacity={0.88} onPress={onPress}>
+          <Text style={styles.todayPrimaryButtonText}>View Queue Status</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.todaySecondaryButton} activeOpacity={0.88} onPress={onCancel}>
+          <Text style={styles.todaySecondaryButtonText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -485,6 +655,122 @@ const styles = StyleSheet.create({
     color: THEME.white,
     fontWeight: "800",
     fontSize: 14,
+  },
+  todayCard: {
+    backgroundColor: THEME.white,
+    borderRadius: 26,
+    padding: 18,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    ...patientTheme.shadows.soft,
+  },
+  todayTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  todayIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFF6FF",
+  },
+  todayCopy: {
+    flex: 1,
+    marginLeft: 12,
+    paddingRight: 12,
+  },
+  todayEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: THEME.primary,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  todayDoctor: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: THEME.textDark,
+  },
+  todayClinic: {
+    marginTop: 2,
+    fontSize: 13,
+    color: THEME.textMuted,
+    fontWeight: "600",
+  },
+  todayBadge: {
+    borderRadius: 12,
+    backgroundColor: "#E0F2FE",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  todayBadgeText: {
+    color: "#075985",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  todayMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 16,
+  },
+  todayMetaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 14,
+    backgroundColor: THEME.background,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  todayMetaText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: THEME.textDark,
+  },
+  todayMessage: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: THEME.textMuted,
+    fontWeight: "600",
+  },
+  todayActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+  },
+  todayPrimaryButton: {
+    flex: 1,
+    height: 46,
+    borderRadius: 15,
+    backgroundColor: THEME.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  todayPrimaryButtonText: {
+    color: THEME.white,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  todaySecondaryButton: {
+    minWidth: 92,
+    height: 46,
+    borderRadius: 15,
+    backgroundColor: "#F3F7FB",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  todaySecondaryButtonText: {
+    color: THEME.textDark,
+    fontSize: 14,
+    fontWeight: "700",
   },
   modalOverlay: {
     flex: 1,

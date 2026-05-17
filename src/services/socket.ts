@@ -82,19 +82,31 @@ export const connectSocket = (token?: string | null) => {
 export const getSocket = () => socket;
 
 export const joinDoctorRoom = (doctorId: number | string) => {
-  doctorRooms.add(String(doctorId));
+  const roomId = String(doctorId);
+  if (doctorRooms.has(roomId)) {
+    return;
+  }
+  doctorRooms.add(roomId);
   logSocket("joinDoctorRoom", doctorId);
   socket.emit("joinDoctorRoom", { doctorId });
 };
 
 export const joinPatientRoom = (patientId: number | string) => {
-  patientRooms.add(String(patientId));
+  const roomId = String(patientId);
+  if (patientRooms.has(roomId)) {
+    return;
+  }
+  patientRooms.add(roomId);
   logSocket("joinPatientRoom", patientId);
   socket.emit("joinPatientRoom", { patientId });
 };
 
 export const joinOrderRoom = (orderId: number | string) => {
-  orderRooms.add(String(orderId));
+  const roomId = String(orderId);
+  if (orderRooms.has(roomId)) {
+    return;
+  }
+  orderRooms.add(roomId);
   logSocket("joinOrderRoom", orderId);
   socket.emit("joinOrderRoom", { orderId });
 };
@@ -104,13 +116,21 @@ export const leaveOrderRoom = (orderId: number | string) => {
 };
 
 export const joinPharmacyRoom = (pharmacyId: number | string) => {
-  pharmacyRooms.add(String(pharmacyId));
+  const roomId = String(pharmacyId);
+  if (pharmacyRooms.has(roomId)) {
+    return;
+  }
+  pharmacyRooms.add(roomId);
   logSocket("joinPharmacyRoom", pharmacyId);
   socket.emit("joinPharmacyRoom", { pharmacyId });
 };
 
 export const joinCenterRoom = (medicalCenterId: string) => {
-  centerRooms.add(String(medicalCenterId));
+  const roomId = String(medicalCenterId);
+  if (centerRooms.has(roomId)) {
+    return;
+  }
+  centerRooms.add(roomId);
   logSocket("joinCenterRoom", medicalCenterId);
   socket.emit("joinCenterRoom", { medicalCenterId });
 };
@@ -122,7 +142,11 @@ export const joinReceptionRoom = () => {
 };
 
 export const joinSessionRoom = (sessionId: number | string) => {
-  sessionRooms.add(String(sessionId));
+  const roomId = String(sessionId);
+  if (sessionRooms.has(roomId)) {
+    return;
+  }
+  sessionRooms.add(roomId);
   logSocket("joinSessionRoom", sessionId);
   socket.emit("joinSession", { sessionId });
 };
@@ -132,7 +156,11 @@ export const leaveSessionRoom = (sessionId: number | string) => {
 };
 
 export const joinClinicScheduleRoom = (clinicId: string) => {
-  clinicScheduleRooms.add(String(clinicId));
+  const roomId = String(clinicId);
+  if (clinicScheduleRooms.has(roomId)) {
+    return;
+  }
+  clinicScheduleRooms.add(roomId);
   logSocket("joinClinicScheduleRoom", clinicId);
   socket.emit("joinClinicScheduleRoom", { clinicId });
 };

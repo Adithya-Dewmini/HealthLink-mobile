@@ -40,19 +40,25 @@ type Medicine = {
 
 type PrescriptionDetailsModel = {
   id: string;
+  consultationId: string | null;
+  medicalCenterName: string | null;
   title: string;
   doctorName: string;
   specialization: string;
   patientName: string;
   prescribedAt: string | null;
+  status: "ACTIVE" | "COMPLETED";
   diagnosis: string;
   notes: string;
   medicines: Medicine[];
   qrToken: string | null;
+  qrStatus: "active" | "expired" | "unavailable" | "invalid";
 };
 
 type PrescriptionApiResponse = {
   id?: string | number;
+  consultationId?: string | null;
+  medicalCenterName?: string | null;
   title?: string | null;
   doctorName?: string | null;
   specialization?: string | null;
@@ -61,6 +67,10 @@ type PrescriptionApiResponse = {
   diagnosis?: string | null;
   notes?: string | null;
   qrToken?: string | null;
+  qr?: {
+    status?: string | null;
+    available?: boolean | null;
+  } | null;
   medicines?: Array<{
     id?: string | number | null;
     name?: string | null;
@@ -79,9 +89,12 @@ type PrescriptionApiResponse = {
   }> | null;
   prescription?: {
     id?: string | number;
+    consultation_id?: string | number | null;
+    medical_center_name?: string | null;
     patient_name?: string | null;
     doctor_name?: string | null;
     issued_at?: string | null;
+    dispensed_at?: string | null;
     consultation_created_at?: string | null;
     created_at?: string | null;
     qr_code?: string | null;
@@ -170,6 +183,16 @@ const buildPrescriptionModel = (
 
   return {
     id: String(response.id ?? response.prescription?.id),
+    consultationId:
+      response.consultationId?.trim() ||
+      (response.prescription?.consultation_id !== null &&
+      response.prescription?.consultation_id !== undefined
+        ? String(response.prescription.consultation_id).trim()
+        : null),
+    medicalCenterName:
+      response.medicalCenterName?.trim() ||
+      response.prescription?.medical_center_name?.trim() ||
+      null,
     title: response.title?.trim() || "General Treatment",
     doctorName:
       response.doctorName?.trim() ||
@@ -181,9 +204,16 @@ const buildPrescriptionModel = (
       response.prescription?.patient_name?.trim() ||
       "Patient",
     prescribedAt,
+    status: response.prescription?.dispensed_at ? "COMPLETED" : "ACTIVE",
     diagnosis: response.diagnosis?.trim() || response.prescription?.diagnosis?.trim() || "No diagnosis provided",
     notes: response.notes?.trim() || response.prescription?.notes?.trim() || "No notes provided",
     qrToken: response.qrToken ?? response.prescription?.qr_code ?? null,
+    qrStatus:
+      response.qr?.status === "active" ||
+      response.qr?.status === "expired" ||
+      response.qr?.status === "invalid"
+        ? response.qr.status
+        : "unavailable",
     medicines: (response.medicines ?? []).map((medicine, index) => {
       const parsedFrequency = parseFrequency(medicine?.frequency);
       const frequencyFromDosage = looksLikeScheduleString(medicine?.dosage)
@@ -386,6 +416,7 @@ export default function PrescriptionDetails() {
     () => buildPrescriptionQrValue({ qrToken: prescription?.qrToken }),
     [prescription?.qrToken]
   );
+  const activeQrValue = prescription?.qrStatus === "active" ? qrValue : null;
 
   const handleDownload = () => {
     Alert.alert("Download unavailable", "Prescription download will be added in a later update.");
@@ -463,6 +494,22 @@ export default function PrescriptionDetails() {
               prescribedAt={prescription.prescribedAt}
             />
 
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Prescription Context</Text>
+              <SummaryBlock
+                title="Clinic"
+                value={prescription.medicalCenterName || "Clinic not recorded"}
+                icon="business-outline"
+                accent="blue"
+              />
+              <SummaryBlock
+                title="Consultation"
+                value={prescription.consultationId ? `Consultation #${prescription.consultationId}` : "Consultation not recorded"}
+                icon="document-text-outline"
+                accent="mint"
+              />
+            </View>
+
             <View style={styles.qrCard}>
               <View style={styles.qrHeader}>
                 <View>
@@ -472,9 +519,9 @@ export default function PrescriptionDetails() {
                 <Ionicons name="qr-code-outline" size={24} color={THEME.primary} />
               </View>
               <View style={styles.qrBox}>
-                {qrValue ? (
+                {activeQrValue ? (
                   <QRCode
-                    value={qrValue}
+                    value={activeQrValue}
                     size={170}
                     color={THEME.textPrimary}
                     backgroundColor={THEME.card}
@@ -482,7 +529,13 @@ export default function PrescriptionDetails() {
                 ) : (
                   <View style={styles.qrPlaceholder}>
                     <Ionicons name="alert-circle-outline" size={32} color={THEME.textSecondary} />
-                    <Text style={styles.qrPlaceholderText}>QR token is not available yet</Text>
+                    <Text style={styles.qrPlaceholderText}>
+                      {prescription.qrStatus === "expired"
+                        ? "QR is being refreshed. Reopen this prescription to load the latest code."
+                        : prescription.status === "COMPLETED"
+                          ? "QR is not available for completed prescriptions"
+                          : "QR token is not available yet"}
+                    </Text>
                   </View>
                 )}
               </View>

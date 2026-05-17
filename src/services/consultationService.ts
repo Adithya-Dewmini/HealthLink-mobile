@@ -46,6 +46,19 @@ export const completeConsultation = async (
   return res.data;
 };
 
+export const issueConsultationPrescription = async (
+  token: string,
+  consultationId: number | string,
+  medicines: any[]
+) => {
+  const res = await api.post(
+    `/api/consultations/${consultationId}/issue-prescription`,
+    { medicines },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
+
 export const searchMedicines = async (token: string, q: string) => {
   const res = await api.get("/api/medicines", {
     headers: { Authorization: `Bearer ${token}` },

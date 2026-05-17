@@ -1,5 +1,8 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity } from "react-native";
+import { patientTheme } from "../../constants/patientTheme";
+
+const THEME = patientTheme.colors;
 
 type Props = {
   label: string;
@@ -33,23 +36,22 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   button_primary: {
-    backgroundColor: "#0F766E",
-    shadowColor: "#0F766E",
+    backgroundColor: THEME.primary,
+    shadowColor: THEME.primary,
     shadowOpacity: 0.16,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
   button_secondary: {
-    backgroundColor: "#FFFFFF",
-    shadowColor: "#0B3954",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    backgroundColor: THEME.surface,
+    borderWidth: 1,
+    borderColor: THEME.border,
   },
   button_ghost: {
-    backgroundColor: "#EAF7FA",
+    backgroundColor: THEME.highlight,
+    borderWidth: 1,
+    borderColor: THEME.borderStrong,
   },
   text: {
     fontSize: 14,
@@ -59,9 +61,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   text_secondary: {
-    color: "#12344E",
+    color: THEME.textPrimary,
   },
   text_ghost: {
-    color: "#0F5E78",
+    color: THEME.primary,
   },
 });

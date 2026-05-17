@@ -175,8 +175,8 @@ export default function PaymentStatusScreen() {
       setPollTimedOut(false);
       pollStartedAtRef.current = Date.now();
       const session = await startOrderPaymentCheckout(orderId);
-      lastOpenedCheckoutUrlRef.current = session.hosted_url;
-      await openHostedCheckout(session.hosted_url);
+      lastOpenedCheckoutUrlRef.current = session.hostedUrl;
+      await openHostedCheckout(session.hostedUrl);
       await loadStatus("refresh");
     } catch (retryError) {
       setError(retryError instanceof Error ? retryError.message : "Unable to restart payment");

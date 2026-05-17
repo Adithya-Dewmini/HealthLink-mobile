@@ -22,6 +22,7 @@ import DoctorAvatar from "../../components/common/DoctorAvatar";
 import ScheduleStatusBadge from "../../components/schedule/ScheduleStatusBadge";
 import { doctorColors } from "../../constants/doctorTheme";
 import {
+  callSelectedPatient,
   callNextPatient,
   endClinic,
   getQueueDashboard,
@@ -200,7 +201,9 @@ export default function QueueScreen() {
   const isQueueActive = isQueueStatusLive(queueStatus);
   const hasActivePatient =
     Boolean(currentPatient) && String(currentPatient?.status || "").toUpperCase() === "WITH_DOCTOR";
-  const waitingPatients = patients.filter((patient) => String(patient.status || "").toUpperCase() !== "WITH_DOCTOR");
+  const waitingPatients = patients.filter((patient) => String(patient.status || "").toUpperCase() === "WAITING");
+  const completedPatients = patients.filter((patient) => String(patient.status || "").toUpperCase() === "COMPLETED");
+  const missedPatients = patients.filter((patient) => String(patient.status || "").toUpperCase() === "MISSED");
   const canGoBack = Boolean(routeScheduleId) && navigation.canGoBack();
   const activeSessionId = String(queue?.sessionId || "").trim() || null;
 
@@ -448,6 +451,27 @@ export default function QueueScreen() {
     }
 
     navigation.navigate("ConsultationPage", { queueId: currentPatient.queue_id });
+  };
+
+  const handleCallSelectedPatient = async (patient: DoctorQueuePatient) => {
+    const token = await AsyncStorage.getItem("token");
+    if (!token || !patient.id) return;
+
+    try {
+      setActionLoading("next");
+      const response = await callSelectedPatient(token, patient.id);
+      if (response?.queueId) {
+        navigation.navigate("ConsultationPage", { queueId: response.queueId });
+      }
+      await loadQueueScreen("refresh");
+    } catch (loadError: any) {
+      Alert.alert(
+        "Unable to call patient",
+        getFriendlyError(loadError, loadError?.response?.data?.message || "Could not call this patient")
+      );
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleSkipPatient = () => {
@@ -818,13 +842,94 @@ export default function QueueScreen() {
                       {patient.name || `Patient ${patient.patient_id}`}
                     </Text>
                     <Text style={styles.queuePatientMeta}>
-                      {patientTime ? formatTimeLabel(String(patientTime)) : "Walk-in patient"}
+                      {patientTime ? formatTimeLabel(String(patientTime)) : patient.is_walkin ? "Walk-in patient" : "Waiting"}
                     </Text>
                   </View>
-                  <ScheduleStatusBadge label={String(patient.status || "WAITING")} tone="upcoming" />
+                  <View style={styles.queuePatientActions}>
+                    <ScheduleStatusBadge label={String(patient.status || "WAITING")} tone="upcoming" />
+                    <TouchableOpacity
+                      style={[styles.inlineCallButton, (hasActivePatient || !isQueueLive) && styles.inlineCallButtonDisabled]}
+                      onPress={() => void handleCallSelectedPatient(patient)}
+                      disabled={hasActivePatient || !isQueueLive || actionLoading === "next"}
+                    >
+                      <Text style={styles.inlineCallButtonText}>Call</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })}
+
+        <View style={styles.queueSectionHeader}>
+          <Text style={styles.sectionTitle}>Completed</Text>
+          <Text style={styles.sectionCount}>{completedPatients.length}</Text>
+        </View>
+
+        {completedPatients.length === 0 ? (
+          <View style={styles.emptyStateCard}>
+            <Ionicons name="checkmark-done-outline" size={28} color={THEME.textSecondary} />
+            <Text style={styles.emptyStateTitle}>Completed consultations will appear here.</Text>
+          </View>
+        ) : (
+          completedPatients.map((patient) => (
+            <View key={`completed-${String(patient.id)}`} style={styles.queuePatientCard}>
+              <View style={styles.queuePatientLeading}>
+                <View style={styles.queueTokenPill}>
+                  <Text style={styles.queueTokenText}>{String(patient.token_number || "--")}</Text>
+                </View>
+                <DoctorAvatar
+                  name={patient.name || `Patient ${patient.patient_id}`}
+                  imageUrl={resolveDoctorImage(patient.profile_image ?? null)}
+                  size={40}
+                  fallbackLabel={getDisplayInitials(patient.name || `Patient ${patient.patient_id}`, "PT")}
+                />
+              </View>
+              <View style={styles.queuePatientCopy}>
+                <Text style={styles.queuePatientName} numberOfLines={1}>
+                  {patient.name || `Patient ${patient.patient_id}`}
+                </Text>
+                <Text style={styles.queuePatientMeta}>
+                  {patient.completed_at ? "Consultation finished" : "Completed"}
+                </Text>
+              </View>
+              <ScheduleStatusBadge label="Completed" tone="completed" />
+            </View>
+          ))
+        )}
+
+        <View style={styles.queueSectionHeader}>
+          <Text style={styles.sectionTitle}>Missed / Skipped</Text>
+          <Text style={styles.sectionCount}>{missedPatients.length}</Text>
+        </View>
+
+        {missedPatients.length === 0 ? (
+          <View style={styles.emptyStateCard}>
+            <Ionicons name="alert-circle-outline" size={28} color={THEME.textSecondary} />
+            <Text style={styles.emptyStateTitle}>No missed patients.</Text>
+          </View>
+        ) : (
+          missedPatients.map((patient) => (
+            <View key={`missed-${String(patient.id)}`} style={styles.queuePatientCard}>
+              <View style={styles.queuePatientLeading}>
+                <View style={styles.queueTokenPill}>
+                  <Text style={styles.queueTokenText}>{String(patient.token_number || "--")}</Text>
+                </View>
+                <DoctorAvatar
+                  name={patient.name || `Patient ${patient.patient_id}`}
+                  imageUrl={resolveDoctorImage(patient.profile_image ?? null)}
+                  size={40}
+                  fallbackLabel={getDisplayInitials(patient.name || `Patient ${patient.patient_id}`, "PT")}
+                />
+              </View>
+              <View style={styles.queuePatientCopy}>
+                <Text style={styles.queuePatientName} numberOfLines={1}>
+                  {patient.name || `Patient ${patient.patient_id}`}
+                </Text>
+                <Text style={styles.queuePatientMeta}>Marked missed</Text>
+              </View>
+              <ScheduleStatusBadge label="Missed" tone="completed" />
+            </View>
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -1250,5 +1355,25 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     color: THEME.textSecondary,
+  },
+  queuePatientActions: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  inlineCallButton: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: THEME.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inlineCallButtonDisabled: {
+    backgroundColor: THEME.mutedBg,
+  },
+  inlineCallButtonText: {
+    color: THEME.surface,
+    fontSize: 12,
+    fontWeight: "800",
   },
 });
