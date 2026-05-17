@@ -6,10 +6,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
 import { patientTheme } from "../../constants/patientTheme";
-import {
-  getMyOrders,
-  type OrderSummary,
-} from "../../services/commerceService";
+import { getMyOrders, type OrderSummary } from "../../services/commerceService";
 import {
   onOrderUpdated,
   subscribeToOrderRoom,
@@ -21,6 +18,8 @@ import { getActiveTimelineStatuses, getTimelineSteps, ORDER_STATUS_META } from "
 
 const THEME = patientTheme.colors;
 const TERMINAL_STATUSES = new Set(["completed", "delivered", "cancelled", "rejected"]);
+
+type CardVariant = "primary" | "compact";
 
 const STATUS_COPY: Record<OrderSummary["status"], { title: string; subtitle: string }> = {
   pending_payment: {
@@ -84,8 +83,10 @@ const pickActiveOrder = (orders: OrderSummary[]) =>
 
 export default function ActiveOrderSpotlight({
   onActiveStateChange,
+  variant = "primary",
 }: {
   onActiveStateChange?: (active: boolean) => void;
+  variant?: CardVariant;
 }) {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const { user } = React.useContext(AuthContext);
@@ -133,7 +134,6 @@ export default function ActiveOrderSpotlight({
         setOrder((current) => (current?.id === payload.order.id ? null : current));
         return;
       }
-
       setOrder(payload.order);
     });
 
@@ -154,6 +154,9 @@ export default function ActiveOrderSpotlight({
   }, [order]);
 
   if (loading) {
+    if (variant === "compact") {
+      return null;
+    }
     return (
       <View style={styles.loadingCard}>
         <ActivityIndicator size="small" color={THEME.modernAccentDark} />
@@ -168,6 +171,57 @@ export default function ActiveOrderSpotlight({
 
   const statusMeta = ORDER_STATUS_META[order.status];
   const copy = STATUS_COPY[order.status];
+
+  if (variant === "compact") {
+    return (
+      <TouchableOpacity
+        style={styles.compactWrap}
+        activeOpacity={0.92}
+        onPress={() => navigation.navigate("OrderDetails", { orderId: order.id })}
+      >
+        <View style={styles.compactShell}>
+          <LinearGradient
+            colors={[THEME.blue, THEME.modernAccentDark]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.compactAccent}
+          />
+          <View style={styles.compactBody}>
+            <View style={styles.compactLeft}>
+              <View style={styles.compactIconBox}>
+                <Ionicons
+                  name={order.fulfillmentType === "delivery" ? "bicycle-outline" : "bag-handle-outline"}
+                  size={18}
+                  color={THEME.blue}
+                />
+              </View>
+              <View style={styles.compactCopy}>
+                <Text style={styles.compactEyebrow}>Live Order</Text>
+                <Text style={styles.compactTitle} numberOfLines={1}>
+                  {order.pharmacyName}
+                </Text>
+                <Text style={styles.compactSubtitle} numberOfLines={1}>
+                  {order.fulfillmentType === "delivery" ? "Delivery" : "Pickup"} • Updated {formatTime(order.updatedAt)}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.compactRight}>
+              <View style={[styles.statusChip, { backgroundColor: statusMeta.bg }]}>
+                <Text style={[styles.statusChipText, { color: statusMeta.color }]}>{statusMeta.label}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.compactAction}
+                activeOpacity={0.88}
+                onPress={() => navigation.navigate("OrderDetails", { orderId: order.id })}
+              >
+                <Text style={styles.compactActionText}>View</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TouchableOpacity
@@ -184,7 +238,7 @@ export default function ActiveOrderSpotlight({
         >
           <View style={styles.topRow}>
             <View>
-              <Text style={styles.eyebrow}>Live order</Text>
+              <Text style={styles.eyebrow}>Live Order</Text>
               <Text style={styles.pharmacyName}>{order.pharmacyName}</Text>
             </View>
             <View style={[styles.statusChip, { backgroundColor: statusMeta.bg }]}>
@@ -242,7 +296,7 @@ export default function ActiveOrderSpotlight({
               onPress={() => navigation.navigate("OrderDetails", { orderId: order.id })}
             >
               <Ionicons name="locate-outline" size={15} color="#FFFFFF" />
-              <Text style={styles.primaryActionText}>Track</Text>
+              <Text style={styles.primaryActionText}>View Order</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryAction} onPress={() => navigation.navigate("Orders")}>
               <Text style={styles.secondaryActionText}>Orders</Text>
@@ -256,11 +310,13 @@ export default function ActiveOrderSpotlight({
 
 const styles = StyleSheet.create({
   wrap: {
-    marginBottom: 12,
+    marginBottom: 0,
+  },
+  compactWrap: {
+    marginBottom: 0,
   },
   loadingCard: {
-    marginBottom: 12,
-    minHeight: 64,
+    minHeight: 120,
     borderRadius: 20,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
@@ -286,6 +342,82 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 5,
   },
+  compactShell: {
+    flexDirection: "row",
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  compactAccent: {
+    width: 8,
+  },
+  compactBody: {
+    flex: 1,
+    minHeight: 86,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  compactLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  compactIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#EAF8FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactCopy: {
+    flex: 1,
+  },
+  compactEyebrow: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#5E738A",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  compactTitle: {
+    marginTop: 3,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  compactSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: THEME.textSecondary,
+    fontWeight: "600",
+  },
+  compactRight: {
+    alignItems: "flex-end",
+    gap: 10,
+  },
+  compactAction: {
+    minHeight: 32,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "#F1F8FF",
+    borderWidth: 1,
+    borderColor: "#D8ECFA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactActionText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: THEME.blue,
+  },
   headerBand: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -296,7 +428,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     gap: 12,
-    marginBottom: 14,
   },
   eyebrow: {
     color: "rgba(255,255,255,0.72)",

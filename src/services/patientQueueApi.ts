@@ -9,6 +9,11 @@ type QueuePayload = ActiveQueueState & {
   message?: string | null;
 };
 
+type QueueApiError = Error & {
+  code?: string | null;
+  status?: number;
+};
+
 const VALID_STATUSES = new Set<ActiveQueueStatus>([
   "none",
   "appointment_booked",
@@ -27,13 +32,19 @@ const VALID_STATUSES = new Set<ActiveQueueStatus>([
   "completed",
 ]);
 
-const parseErrorMessage = async (response: Response, fallback: string) => {
+const parseQueueApiError = async (response: Response, fallback: string) => {
   const payload = await response.json().catch(() => null);
-  if (payload && typeof payload === "object" && "message" in payload) {
-    const message = String((payload as { message?: unknown }).message ?? "").trim();
-    if (message) return message;
-  }
-  return fallback;
+  const message =
+    payload && typeof payload === "object" && "message" in payload
+      ? String((payload as { message?: unknown }).message ?? "").trim() || fallback
+      : fallback;
+  const error = new Error(message) as QueueApiError;
+  error.status = response.status;
+  error.code =
+    payload && typeof payload === "object" && "code" in payload
+      ? String((payload as { code?: unknown }).code ?? "").trim().toUpperCase() || null
+      : null;
+  return error;
 };
 
 export const normalizePatientActiveQueue = (payload: unknown): QueuePayload | null => {
@@ -77,7 +88,7 @@ export const fetchPatientActiveQueueStatus = async (params?: {
   const suffix = query.toString() ? `?${query.toString()}` : "";
   const response = await apiFetch(`/api/patient/queue/active${suffix}`, { suppressErrorLog: true });
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, "Failed to load queue status"));
+    throw await parseQueueApiError(response, "Failed to load queue status");
   }
 
   return normalizePatientActiveQueue(await response.json().catch(() => null));

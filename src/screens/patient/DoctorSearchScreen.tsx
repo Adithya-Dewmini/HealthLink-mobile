@@ -24,6 +24,8 @@ import { getFavorites, toggleFavorite as toggleFavoriteRequest } from "../../ser
 import type { PatientStackParamList } from "../../types/navigation";
 import { patientTheme } from "../../constants/patientTheme";
 import { resolveImageUrl } from "../../utils/imageUrl";
+import { getDoctorFallbackImage, readDoctorGender } from "../../utils/imageUtils";
+import { usePatientLocation } from "../../context/PatientLocationContext";
 
 const THEME = patientTheme.colors;
 const MODERN_THEME = {
@@ -62,6 +64,7 @@ type DoctorCard = {
     medicalCenterName?: string | null;
   } | null;
   profileImage?: string | null;
+  gender?: string | null;
 };
 
 type DoctorSection = {
@@ -72,6 +75,7 @@ type DoctorSection = {
 export default function DoctorSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const route = useRoute<RouteProp<PatientStackParamList, "DoctorSearchScreen">>();
+  const { selectedLocation } = usePatientLocation();
   const insets = useSafeAreaInsets();
   const bottomSpacing = Math.max(insets.bottom, 16);
   const [activeTab, setActiveTab] = useState("All");
@@ -213,6 +217,7 @@ export default function DoctorSearchScreen() {
               }
             : null,
         profileImage: resolveImageUrl(doc.profile_image ?? null),
+        gender: readDoctorGender(doc.gender, doc.sex),
       }));
       setDoctors(mapped);
     } catch (err) {
@@ -291,14 +296,25 @@ export default function DoctorSearchScreen() {
       );
     }
 
-    return nextDoctors.filter((doctor) => {
+    nextDoctors = nextDoctors.filter((doctor) => {
       if (activeTab === "All") {
         return true;
       }
 
       return normalizeValue(doctor.specialty || "") === normalizeValue(activeTab);
     });
-  }, [activeTab, doctors, filters, search]);
+
+    const selectedCity = String(selectedLocation?.city || "").trim().toLowerCase();
+    if (selectedCity && !filters.location && !search.trim()) {
+      nextDoctors.sort((left, right) => {
+        const leftScore = normalizeValue(left.city || "") === selectedCity ? 0 : 1;
+        const rightScore = normalizeValue(right.city || "") === selectedCity ? 0 : 1;
+        return leftScore - rightScore;
+      });
+    }
+
+    return nextDoctors;
+  }, [activeTab, doctors, filters, search, selectedLocation?.city]);
 
   const hasActiveFilters = useMemo(
     () =>
@@ -608,7 +624,10 @@ function DoctorListingCard({
   onToggleFavorite: () => void;
   onOpenDetails: () => void;
 }) {
-  const hasImage = typeof doctor.profileImage === "string" && doctor.profileImage.trim().length > 0;
+  const [imageFailed, setImageFailed] = useState(false);
+  const hasImage =
+    typeof doctor.profileImage === "string" && doctor.profileImage.trim().length > 0 && !imageFailed;
+  const imageSource = hasImage ? { uri: doctor.profileImage! } : getDoctorFallbackImage(doctor.gender);
   const todayKey = new Date().toISOString().slice(0, 10);
   const isAvailableToday =
     doctor.isAvailableToday === true || doctor.nextAvailableSession?.date === todayKey;
@@ -639,6 +658,10 @@ function DoctorListingCard({
       ? `${doctor.clinicName} • ${doctor.city}`
       : doctor.clinicName || doctor.city || null;
 
+  useEffect(() => {
+    setImageFailed(false);
+  }, [doctor.gender, doctor.profileImage]);
+
   return (
     <TouchableOpacity
       activeOpacity={0.92}
@@ -646,25 +669,12 @@ function DoctorListingCard({
       style={[styles.doctorListingCard, compact ? styles.doctorListingCompact : styles.doctorListingGrid]}
     >
       <View style={styles.doctorImageShell}>
-        {hasImage ? (
-          <Image source={{ uri: doctor.profileImage! }} style={styles.doctorListingImage} />
-        ) : (
-          <View style={styles.doctorListingFallback}>
-            <View style={styles.doctorListingFallbackAvatar}>
-              <View style={styles.doctorListingFallbackAura} />
-              <View style={styles.doctorListingFallbackHair} />
-              <View style={styles.doctorListingFallbackHead} />
-              <View style={styles.doctorListingFallbackNeck} />
-              <View style={styles.doctorListingFallbackCoat} />
-              <View style={styles.doctorListingFallbackShirt} />
-              <View style={styles.doctorListingFallbackTie} />
-              <View style={styles.doctorListingFallbackStethoscopeLeft} />
-              <View style={styles.doctorListingFallbackStethoscopeRight} />
-              <View style={styles.doctorListingFallbackStethoscopeChest} />
-              <View style={styles.doctorListingFallbackStethoscopeBell} />
-            </View>
-          </View>
-        )}
+        <Image
+          source={imageSource}
+          style={[styles.doctorListingImage, !hasImage ? styles.doctorListingImageFallback : null]}
+          resizeMode={hasImage ? "cover" : "contain"}
+          onError={() => setImageFailed(true)}
+        />
 
         <TouchableOpacity
           style={[styles.doctorFavoriteBtn, favoriteBusy ? styles.favoriteBtnDisabled : null]}
@@ -1018,6 +1028,10 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
     resizeMode: "cover",
+  },
+  doctorListingImageFallback: {
+    backgroundColor: "#F4FBFF",
+    padding: 12,
   },
   doctorListingFallback: {
     flex: 1,

@@ -23,6 +23,7 @@ import {
 } from "../../services/patientPrescriptionService";
 import { PatientEmptyState, PatientErrorState } from "../../components/patient/PatientFeedback";
 import { startOrderPaymentCheckout, type PaymentMethod } from "../../services/commerceService";
+import { getSelectedDeliveryLocation } from "../../services/deliveryLocationService";
 
 const THEME = patientTheme.colors;
 
@@ -58,6 +59,13 @@ export default function PrescriptionFulfillmentScreen() {
       try {
         setLoading(true);
         setError(null);
+        const selectedLocation = await getSelectedDeliveryLocation();
+        if (selectedLocation) {
+          setDeliveryLine1((current) => current || selectedLocation.line1 || "");
+          setDeliveryCity((current) => current || selectedLocation.city || "");
+          setDeliveryContactName((current) => current || selectedLocation.label || "");
+          setDeliveryContactPhone((current) => current || selectedLocation.phone || "");
+        }
         const payload = await buildPrescriptionCart(prescriptionId);
         setResult(payload);
         setSelectedPharmacyId(payload.matches[0]?.pharmacy.id ?? null);
@@ -336,6 +344,9 @@ export default function PrescriptionFulfillmentScreen() {
                 {fulfillmentMethod === "delivery" ? (
                   <View style={styles.deliveryCard}>
                     <Text style={styles.deliveryTitle}>Delivery details</Text>
+                    {deliveryLine1 ? (
+                      <Text style={styles.deliveryHint}>Defaulted from your selected dashboard delivery location.</Text>
+                    ) : null}
                     <TextInput
                       value={deliveryLine1}
                       onChangeText={setDeliveryLine1}
@@ -586,6 +597,7 @@ const styles = StyleSheet.create({
   },
   deliveryCard: { marginTop: 16 },
   deliveryTitle: { fontSize: 14, fontWeight: "800", color: THEME.navy, marginBottom: 10 },
+  deliveryHint: { fontSize: 12, color: THEME.textSecondary, marginBottom: 10 },
   inlineInput: {
     marginBottom: 10,
     borderWidth: 1,

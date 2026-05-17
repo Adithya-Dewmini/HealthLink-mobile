@@ -54,6 +54,8 @@ const friendlyReceptionErrorCode = (code: string | null | undefined, fallback: s
       return "This patient already has a queue entry.";
     case "QUEUE_NOT_FOUND":
       return "Queue details are unavailable for this session.";
+    case "ACTIVE_CONSULTATION_EXISTS":
+      return "Finish the active consultation before ending this queue.";
     case "QUEUE_NOT_ACTIVE":
       return "This queue is not active right now.";
     case "QUEUE_NOT_STARTED":
@@ -75,11 +77,14 @@ const requireOk = async (response: Response, fallback: string) => {
           ? body.error.code
           : null;
     const message = typeof body.message === "string" && body.message.trim() ? body.message : fallback;
+    const friendlyMessage = friendlyReceptionError(message, friendlyReceptionErrorCode(errorCode, fallback));
     if (IS_DEVELOPMENT) {
       console.log("[reception]", response.url, response.status, body);
-      throw new Error(`${message} (HTTP ${response.status} @ ${response.url})`);
     }
-    throw new Error(friendlyReceptionError(message, friendlyReceptionErrorCode(errorCode, fallback)));
+    const error = new Error(friendlyMessage) as Error & { code?: string | null; status?: number };
+    error.code = errorCode;
+    error.status = response.status;
+    throw error;
   }
   return body;
 };

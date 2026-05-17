@@ -243,19 +243,20 @@ export default function BookAppointmentScreen() {
   const specialty = schedule?.specialization || specialtyParam || "General Physician";
 
   const dayStatus = useMemo(() => {
-    if (!sessionsForDay.length) return "unavailable";
+    if (!sessionsForDay.length) return "no_session";
     if (sessionsForDay.some((s) => s.status === "LIVE") && isToday) return "live";
     if (bookableSessionsForDay.length > 0) return availableSlots.length > 0 ? "bookable" : "full";
     if (sessionsForDay.every((s) => s.status === "CLOSED")) return "closed";
-    return "unavailable";
+    return "no_session";
   }, [availableSlots.length, bookableSessionsForDay.length, isToday, sessionsForDay]);
 
   const isBookable = dayStatus === "bookable";
   const isLive = dayStatus === "live";
+  const hasNoSession = dayStatus === "no_session";
   const showSlots = isBookable;
 
   const dayRangeLabel = useMemo(() => {
-    if (!sessionsForDay.length) return "No clinic schedule";
+    if (!sessionsForDay.length) return "No sessions scheduled";
     return `${formatTime(sessionsForDay[0].start_time)} - ${formatTime(
       sessionsForDay[sessionsForDay.length - 1].end_time
     )}`;
@@ -266,7 +267,7 @@ export default function BookAppointmentScreen() {
       case "live": return { title: "Live queue is running", message: "Join the current live queue instead." };
       case "closed": return { title: "Session ended", message: "Choose another date for future slots." };
       case "full": return { title: "No slots left", message: "All time slots for this date are booked." };
-      case "unavailable": return { title: "No schedule", message: "Try another day to see availability." };
+      case "no_session": return { title: "No sessions on this date", message: "Choose another day to see available appointments." };
       default: return { title: "Slots available", message: `${availableSlots.length} time slots are open.` };
     }
   }, [availableSlots.length, dayStatus]);
@@ -419,21 +420,58 @@ export default function BookAppointmentScreen() {
           </View>
 
           {/* Status Representation */}
-          <View style={styles.sessionBox}>
+          <View style={[styles.sessionBox, hasNoSession && styles.sessionBoxEmpty]}>
             <View style={styles.sessionHeader}>
-              <View>
-                <Text style={styles.sessionStatusLabel}>Availability Status</Text>
+              <View style={styles.sessionHeaderCopy}>
+                <Text style={styles.sessionStatusLabel}>
+                  {hasNoSession ? "Appointment availability" : "Availability Status"}
+                </Text>
                 <Text style={styles.sessionTimeRange}>{dayRangeLabel}</Text>
               </View>
-              <View style={[styles.badge, { backgroundColor: isLive ? MODERN_THEME.success : MODERN_THEME.accent }]}>
+              <View
+                style={[
+                  styles.badge,
+                  hasNoSession
+                    ? styles.badgeNeutral
+                    : { backgroundColor: isLive ? MODERN_THEME.success : MODERN_THEME.accent },
+                ]}
+              >
                 {isLive && <View style={styles.pulseDot} />}
-                <Text style={styles.badgeText}>{dayStatus.toUpperCase()}</Text>
+                {!isLive && hasNoSession ? (
+                  <Ionicons name="calendar-outline" size={13} color={MODERN_THEME.textMuted} />
+                ) : null}
+                <Text style={[styles.badgeText, hasNoSession && styles.badgeTextNeutral]}>
+                  {hasNoSession ? "NO SESSIONS" : dayStatus.toUpperCase()}
+                </Text>
               </View>
             </View>
-            <View style={styles.progressBarBg}>
-               <View style={[styles.progressBarFill, { width: showSlots ? '100%' : '30%', backgroundColor: showSlots ? MODERN_THEME.accent : MODERN_THEME.danger }]} />
-            </View>
-            <Text style={styles.helperText}>{selectedDateStatusCopy.message}</Text>
+
+            {hasNoSession ? (
+              <View style={styles.emptyAvailabilityCard}>
+                <View style={styles.emptyAvailabilityIcon}>
+                  <Ionicons name="calendar-clear-outline" size={20} color={MODERN_THEME.accent} />
+                </View>
+                <View style={styles.emptyAvailabilityCopy}>
+                  <Text style={styles.emptyAvailabilityTitle}>{selectedDateStatusCopy.title}</Text>
+                  <Text style={styles.helperText}>{selectedDateStatusCopy.message}</Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <View style={styles.progressBarBg}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: showSlots ? '100%' : '30%',
+                        backgroundColor: showSlots ? MODERN_THEME.accent : MODERN_THEME.danger,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.helperText}>{selectedDateStatusCopy.message}</Text>
+              </>
+            )}
           </View>
 
           {/* Slots Grid */}
@@ -468,15 +506,25 @@ export default function BookAppointmentScreen() {
             onPress={handlePrimaryAction}
           >
             <LinearGradient
-              colors={isBookable || isLive ? [MODERN_THEME.accent, '#0284C7'] : [MODERN_THEME.textMuted, '#475569']}
+              colors={
+                isBookable || isLive
+                  ? [MODERN_THEME.accent, '#0284C7']
+                  : ['#CBD5E1', '#94A3B8']
+              }
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.btnGradient}
             >
               <Text style={styles.btnText}>
-                {isLive ? 'Join Live Queue' : isBookable ? 'Confirm Appointment' : 'Unavailable'}
+                {isLive
+                  ? 'Join Live Queue'
+                  : isBookable
+                    ? 'Confirm Appointment'
+                    : hasNoSession
+                      ? 'Choose another date'
+                      : 'Unavailable'}
               </Text>
-              <Ionicons name="chevron-forward" size={18} color="white" />
+              <Ionicons name={hasNoSession ? "calendar-outline" : "chevron-forward"} size={18} color="white" />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -563,12 +611,51 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: MODERN_THEME.border,
   },
+  sessionBoxEmpty: {
+    backgroundColor: '#FCFEFF',
+  },
   sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sessionHeaderCopy: { flex: 1, paddingRight: 12 },
   sessionStatusLabel: { fontSize: 12, color: MODERN_THEME.textMuted },
   sessionTimeRange: { fontSize: 18, fontWeight: '700', color: MODERN_THEME.textMain, marginTop: 2 },
   badge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  badgeNeutral: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 5,
+  },
   badgeText: { color: 'white', fontSize: 10, fontWeight: '800' },
+  badgeTextNeutral: { color: MODERN_THEME.textMuted },
   pulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'white', marginRight: 5 },
+  emptyAvailabilityCard: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: '#F8FBFF',
+    borderWidth: 1,
+    borderColor: '#D9EAF8',
+    borderRadius: 18,
+    padding: 14,
+  },
+  emptyAvailabilityIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EAF6FF',
+  },
+  emptyAvailabilityCopy: {
+    flex: 1,
+  },
+  emptyAvailabilityTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: MODERN_THEME.textMain,
+    marginBottom: 4,
+  },
   progressBarBg: { height: 6, backgroundColor: '#E2E8F0', borderRadius: 3, marginVertical: 15, overflow: 'hidden' },
   progressBarFill: { height: '100%', borderRadius: 3 },
   helperText: { fontSize: 13, color: MODERN_THEME.textMuted, lineHeight: 18 },

@@ -46,6 +46,7 @@ type DoctorProfile = {
   fullName: string;
   specialization: string | null;
   profileImageUrl: string | null;
+  gender?: string | null;
   experienceYears: number | null;
   qualifications: string | null;
   about: string | null;
@@ -131,6 +132,12 @@ export default function PatientDoctorDetailsScreen({ navigation, route }: Props)
         setProfile({
           ...data,
           profileImageUrl: resolveImageUrl(data.profileImageUrl ?? null),
+          gender:
+            typeof data.gender === "string" && data.gender.trim()
+              ? data.gender
+              : typeof (data as any).sex === "string" && String((data as any).sex).trim()
+                ? String((data as any).sex)
+                : null,
           workplaces: Array.isArray(data.workplaces)
             ? data.workplaces.map((workplace) => ({
                 ...workplace,
@@ -186,6 +193,7 @@ export default function PatientDoctorDetailsScreen({ navigation, route }: Props)
                   profile.experienceYears != null ? `${profile.experienceYears} years experience` : null
                 }
                 imageUrl={profile.profileImageUrl}
+                gender={profile.gender}
                 verified={profile.isVerified}
               />
             </View>

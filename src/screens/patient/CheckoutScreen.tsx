@@ -21,6 +21,7 @@ import {
   type CartSummary,
   type PaymentMethod,
 } from "../../services/commerceService";
+import { getSelectedDeliveryLocation } from "../../services/deliveryLocationService";
 import {
   PatientEmptyState,
   PatientErrorState,
@@ -54,6 +55,13 @@ export default function CheckoutScreen() {
     try {
       setLoading(true);
       setError(null);
+      const selectedLocation = await getSelectedDeliveryLocation();
+      if (selectedLocation) {
+        setDeliveryLine1((current) => current || selectedLocation.line1 || "");
+        setDeliveryCity((current) => current || selectedLocation.city || "");
+        setDeliveryContactName((current) => current || selectedLocation.label || "");
+        setDeliveryContactPhone((current) => current || selectedLocation.phone || "");
+      }
       const data = await getCart();
       setCart(data);
     } catch (loadError) {
@@ -253,6 +261,9 @@ export default function CheckoutScreen() {
             {fulfillmentType === "delivery" ? (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Delivery details</Text>
+                {deliveryLine1 ? (
+                  <Text style={styles.deliveryHint}>Defaulted from your selected dashboard delivery location.</Text>
+                ) : null}
                 <TextInput
                   value={deliveryLine1}
                   onChangeText={setDeliveryLine1}
@@ -418,6 +429,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 17, fontWeight: "800", color: THEME.navy, marginBottom: 12 },
   helperCopy: { fontSize: 13, lineHeight: 19, color: THEME.textSecondary, marginBottom: 12 },
+  deliveryHint: { fontSize: 12, color: THEME.textSecondary, marginBottom: 12 },
   summaryItem: {
     flexDirection: "row",
     alignItems: "center",

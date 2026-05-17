@@ -308,11 +308,19 @@ export default function DoctorSessionManagement({ navigation, route }: Props) {
 
   useEffect(() => {
     if (suggestionAppliedRef.current) return;
-    if (!route.params.initialTab && !route.params.suggestedStartTime && !route.params.suggestedEndTime) {
+    if (
+      !route.params.initialTab &&
+      !route.params.suggestedStartTime &&
+      !route.params.suggestedEndTime &&
+      !route.params.openManualForm
+    ) {
       return;
     }
     suggestionAppliedRef.current = true;
     if (route.params.initialTab) setActiveTab(route.params.initialTab);
+    if (route.params.openManualForm) {
+      setShowManualForm(true);
+    }
     if (route.params.suggestedStartTime && route.params.suggestedEndTime) {
       setManualForm((current) => ({
         ...current,

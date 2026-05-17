@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -12,18 +14,23 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
 import { patientTheme } from "../../constants/patientTheme";
 import { getSocket } from "../../services/socket";
 import { connectRealtimeSocket, subscribeToPatientRealtime } from "../../services/socketService";
 import { fetchPatientActiveQueueStatus } from "../../services/patientQueueApi";
 import { apiFetch } from "../../config/api";
+import { ensureNotificationPermissions, notifyLocal } from "../../services/notifications";
 import { useAuth } from "../../utils/AuthContext";
 
 const THEME = patientTheme.colors;
+const QUEUE_ALERTS_STORAGE_KEY = "healthlink.patient.queueAlerts";
 
 type QueueScreenRoute = RouteProp<PatientStackParamList, "PatientQueue">;
+type QueueScreenNavigation = NativeStackNavigationProp<PatientStackParamList, "PatientQueue">;
 type QueueStep = "booked" | "checked_in" | "waiting" | "called" | "consultation" | "completed";
+type QueueScreenError = Error & { code?: string | null; status?: number };
 
 const formatShortTime = (value?: string | null) => {
   const raw = String(value || "").trim();
@@ -212,34 +219,95 @@ const TIMELINE_ITEMS: Array<{
 ];
 
 export default function Queue() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<QueueScreenNavigation>();
   const route = useRoute<QueueScreenRoute>();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queueState, setQueueState] = useState<any | null>(null);
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [lastRealtimeAt, setLastRealtimeAt] = useState<string | null>(null);
+  const previousStatusRef = useRef<string | null>(null);
+  const alertsStorageKey = user?.id ? `${QUEUE_ALERTS_STORAGE_KEY}:${user.id}` : null;
+
+  const announceQueueTransition = useCallback(
+    async (nextState: any | null, previousStatus?: string | null) => {
+      if (!alertsEnabled || !nextState) return;
+
+      const nextStatus = String(nextState.status || "").trim().toLowerCase();
+      if (!nextStatus || nextStatus === previousStatus) return;
+
+      let title: string | null = null;
+      let body: string | null = null;
+
+      switch (nextStatus) {
+        case "next":
+          title = "You are next";
+          body = "Please stay nearby. Your consultation is almost ready.";
+          break;
+        case "called":
+          title = "Doctor is ready for you";
+          body = "Please go to the consultation room now.";
+          break;
+        case "in_consultation":
+          title = "Consultation started";
+          body = "Your consultation is now in progress.";
+          break;
+        case "completed":
+          title = "Consultation completed";
+          body = "Your queue status has been completed.";
+          break;
+        case "check_in_required":
+        case "queue_live":
+          title = "Queue has started";
+          body = "Please check in at reception to receive your queue number.";
+          break;
+        default:
+          return;
+      }
+
+      await notifyLocal(title, body);
+    },
+    [alertsEnabled]
+  );
 
   const loadQueue = useCallback(
-    async (mode: "initial" | "refresh" = "initial") => {
+    async (mode: "initial" | "refresh" | "realtime" = "initial") => {
       if (mode === "refresh") setRefreshing(true);
-      else setLoading(true);
+      else if (mode === "initial") setLoading(true);
 
       try {
+        const previousStatus = previousStatusRef.current;
         const scopedState = await fetchPatientActiveQueueStatus({
           appointmentId: route.params?.appointmentId,
           sessionId: route.params?.sessionId,
         });
 
         if (scopedState) {
+          if (scopedState.status === "none") {
+            setQueueState(null);
+            previousStatusRef.current = null;
+            setError(null);
+            if (mode === "realtime") {
+              setLastRealtimeAt(new Date().toISOString());
+            }
+            return;
+          }
+
           setQueueState(scopedState);
+          previousStatusRef.current = String(scopedState.status || "").trim().toLowerCase() || null;
           setError(null);
+          if (mode === "realtime") {
+            setLastRealtimeAt(new Date().toISOString());
+          }
+          void announceQueueTransition(scopedState, previousStatus);
           return;
         }
 
-        if (!route.params?.doctorId) {
+        if (route.params?.appointmentId || route.params?.sessionId || !route.params?.doctorId) {
           setQueueState(null);
-          setError("Queue details are unavailable for this appointment.");
+          setError(null);
           return;
         }
 
@@ -255,44 +323,81 @@ export default function Queue() {
         }
 
         const payload = await response.json().catch(() => null);
-        setQueueState(
-          payload
-            ? {
-                active: true,
-                status:
-                  payload.patientStatus === "WITH_DOCTOR"
-                    ? "called"
-                    : payload.patientStatus === "WAITING"
-                      ? "waiting"
-                      : payload.status === "LIVE"
-                        ? "queue_live"
-                        : "today_appointment",
-                doctorName: payload.doctorName,
-                medicalCenterName: payload.clinicName ?? payload.medicalCenterName,
-                sessionId: Number(payload.sessionId ?? 0) || route.params?.sessionId,
-                tokenNumber: Number(payload.patientToken ?? 0) || undefined,
-                currentServingNumber: Number(payload.currentToken ?? 0) || undefined,
-                position: Number(payload.yourPosition ?? 0) || undefined,
-                estimatedWaitMinutes: Number(payload.estimatedWaitMinutes ?? 0) || undefined,
-                sessionTime: payload.sessionTime ? String(payload.sessionTime) : undefined,
-              }
-            : null
-        );
+        const nextState = payload
+          ? {
+              active: true,
+              status:
+                payload.patientStatus === "WITH_DOCTOR"
+                  ? "called"
+                  : payload.patientStatus === "WAITING"
+                    ? "waiting"
+                    : payload.status === "LIVE"
+                      ? "queue_live"
+                      : "today_appointment",
+              doctorName: payload.doctorName,
+              medicalCenterName: payload.clinicName ?? payload.medicalCenterName,
+              sessionId: Number(payload.sessionId ?? 0) || route.params?.sessionId,
+              tokenNumber: Number(payload.patientToken ?? 0) || undefined,
+              currentServingNumber: Number(payload.currentToken ?? 0) || undefined,
+              position: Number(payload.yourPosition ?? 0) || undefined,
+              estimatedWaitMinutes: Number(payload.estimatedWaitMinutes ?? 0) || undefined,
+              sessionTime: payload.sessionTime ? String(payload.sessionTime) : undefined,
+            }
+          : null;
+        setQueueState(nextState);
+        previousStatusRef.current = String(nextState?.status || "").trim().toLowerCase() || null;
         setError(null);
+        if (mode === "realtime") {
+          setLastRealtimeAt(new Date().toISOString());
+        }
+        void announceQueueTransition(nextState, previousStatus);
       } catch (loadError) {
+        const appError = loadError as QueueScreenError;
+        if (
+          appError?.code === "QUEUE_NOT_FOUND" ||
+          appError?.code === "SESSION_NOT_LIVE" ||
+          appError?.status === 404
+        ) {
+          setQueueState(null);
+          setError(null);
+          return;
+        }
+
         setQueueState(null);
         setError(loadError instanceof Error ? loadError.message : "Could not load queue progress.");
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode === "initial") setLoading(false);
+        if (mode === "refresh") setRefreshing(false);
       }
     },
-    [route.params?.appointmentId, route.params?.clinicId, route.params?.doctorId, route.params?.sessionId]
+    [
+      announceQueueTransition,
+      route.params?.appointmentId,
+      route.params?.clinicId,
+      route.params?.doctorId,
+      route.params?.sessionId,
+    ]
   );
 
   useEffect(() => {
     void loadQueue("initial");
   }, [loadQueue]);
+
+  useEffect(() => {
+    let active = true;
+    if (!alertsStorageKey) return undefined;
+
+    void AsyncStorage.getItem(alertsStorageKey)
+      .then((storedValue) => {
+        if (!active) return;
+        setAlertsEnabled(storedValue === "true");
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [alertsStorageKey]);
 
   useEffect(() => {
     if (user?.id) {
@@ -302,7 +407,7 @@ export default function Queue() {
 
     const socket = getSocket();
     const refresh = () => {
-      void loadQueue("refresh");
+      void loadQueue("realtime");
     };
 
     socket.on("queue:update", refresh);
@@ -310,6 +415,9 @@ export default function Queue() {
     socket.on("appointment.updated", refresh);
     socket.on("consultation.updated", refresh);
     socket.on("connect", refresh);
+    socket.on("patient:called", refresh);
+    socket.on("patient:missed", refresh);
+    socket.on("prescription:ready", refresh);
 
     return () => {
       socket.off("queue:update", refresh);
@@ -317,8 +425,36 @@ export default function Queue() {
       socket.off("appointment.updated", refresh);
       socket.off("consultation.updated", refresh);
       socket.off("connect", refresh);
+      socket.off("patient:called", refresh);
+      socket.off("patient:missed", refresh);
+      socket.off("prescription:ready", refresh);
     };
   }, [loadQueue, user?.id]);
+
+  const handleNotificationToggle = useCallback(async () => {
+    if (!alertsStorageKey) {
+      Alert.alert("Unavailable", "Queue alerts are unavailable until your profile finishes loading.");
+      return;
+    }
+
+    if (!alertsEnabled) {
+      const granted = await ensureNotificationPermissions();
+      if (!granted) {
+        Alert.alert("Notifications Off", "Please allow notifications to receive queue updates in real time.");
+        return;
+      }
+
+      setAlertsEnabled(true);
+      await AsyncStorage.setItem(alertsStorageKey, "true").catch(() => undefined);
+      await notifyLocal("Queue alerts enabled", "We'll notify you when your queue status changes.");
+      Alert.alert("Queue Alerts On", "Live queue notifications are now enabled for this appointment flow.");
+      return;
+    }
+
+    setAlertsEnabled(false);
+    await AsyncStorage.setItem(alertsStorageKey, "false").catch(() => undefined);
+    Alert.alert("Queue Alerts Off", "Live queue notifications have been turned off.");
+  }, [alertsEnabled, alertsStorageKey]);
 
   const headline = getQueueHeadline(queueState?.status);
   const supportingMessage = getQueueMessage(queueState?.status, queueState?.message);
@@ -352,9 +488,21 @@ export default function Queue() {
         <View style={styles.headerCopy}>
           <Text style={styles.headerTitle}>Queue Progress</Text>
           <Text style={styles.headerSubtitle}>Live appointment and queue status</Text>
+          {lastRealtimeAt ? <Text style={styles.headerLiveText}>Live updates connected</Text> : null}
         </View>
-        <TouchableOpacity style={styles.refreshButton} onPress={() => void loadQueue("refresh")}>
-          <Ionicons name="refresh-outline" size={20} color={THEME.textDark} />
+        <TouchableOpacity
+          style={[styles.alertToggleButton, alertsEnabled && styles.alertToggleButtonActive]}
+          onPress={handleNotificationToggle}
+          activeOpacity={0.88}
+        >
+          <Ionicons
+            name={alertsEnabled ? "notifications" : "notifications-outline"}
+            size={18}
+            color={alertsEnabled ? "#FFFFFF" : THEME.textDark}
+          />
+          <Text style={[styles.alertToggleText, alertsEnabled && styles.alertToggleTextActive]}>
+            {alertsEnabled ? "On" : "Off"}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -507,13 +655,34 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     fontWeight: "600",
   },
-  refreshButton: {
-    width: 42,
+  headerLiveText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: THEME.primary,
+    fontWeight: "700",
+  },
+  alertToggleButton: {
+    minWidth: 74,
     height: 42,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: THEME.background,
+    position: "relative",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  alertToggleButtonActive: {
+    backgroundColor: THEME.primary,
+  },
+  alertToggleText: {
+    color: THEME.textDark,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  alertToggleTextActive: {
+    color: "#FFFFFF",
   },
   scroll: {
     flex: 1,

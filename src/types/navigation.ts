@@ -113,6 +113,7 @@ export type ReceptionistStackParamList = {
     doctorUserId: number;
     doctorName?: string;
     specialization?: string | null;
+    openManualForm?: boolean;
     editScheduleId?: number;
     initialTab?: "routine" | "manual";
     suggestedDate?: string;

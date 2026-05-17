@@ -62,6 +62,8 @@ export const getFriendlyError = (
       return "Your doctor profile is not linked to this clinic session.";
     case "QUEUE_NOT_FOUND":
       return "Queue details are unavailable right now. Refresh and try again.";
+    case "ACTIVE_CONSULTATION_EXISTS":
+      return "Finish the active consultation before ending the queue.";
     case "QUEUE_ALREADY_COMPLETED":
       return "This clinic queue has already ended.";
     case "PATIENT_NOT_CALLED":

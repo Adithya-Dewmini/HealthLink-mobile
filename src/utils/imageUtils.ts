@@ -1,4 +1,8 @@
+import type { ImageSourcePropType } from "react-native";
 import { resolveImageUrl } from "./imageUrl";
+
+export const DEFAULT_DOCTOR_MALE_IMAGE = require("../../assets/images/doctors/default_doctor_male.png");
+export const DEFAULT_DOCTOR_FEMALE_IMAGE = require("../../assets/images/doctors/default_doctor_female.png");
 
 const DEFAULT_IMAGE_FIELDS = [
   "cover_image_url",
@@ -54,6 +58,24 @@ export const resolveDoctorImage = (
     }
   }
 
+  return null;
+};
+
+export const getDoctorFallbackImage = (gender?: string | null): ImageSourcePropType => {
+  const normalized = String(gender || "").trim().toLowerCase();
+  if (normalized === "female" || normalized === "f") {
+    return DEFAULT_DOCTOR_FEMALE_IMAGE;
+  }
+  return DEFAULT_DOCTOR_MALE_IMAGE;
+};
+
+export const readDoctorGender = (...candidates: Array<string | null | undefined>) => {
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim().toLowerCase();
+    if (!normalized) continue;
+    if (normalized === "female" || normalized === "f") return "female";
+    if (normalized === "male" || normalized === "m") return "male";
+  }
   return null;
 };
 

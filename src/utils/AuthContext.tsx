@@ -18,6 +18,8 @@ export type AuthUser = {
   verification_status?: string | null;
   verification_notes?: string | null;
   phone?: string | null;
+  address?: string | null;
+  city?: string | null;
   profile_image?: string | null;
   specialization?: string | null;
   experience_years?: number | null;

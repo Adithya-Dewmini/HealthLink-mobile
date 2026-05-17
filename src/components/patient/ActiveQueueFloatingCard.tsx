@@ -48,6 +48,8 @@ export type ActiveQueueState = {
   message?: string | null;
 };
 
+type QueueCardVariant = "primary" | "compact";
+
 const formatTimeCopy = (value?: string) => {
   if (!value) return "Upcoming session";
   const parsed = new Date(value);
@@ -62,84 +64,98 @@ const formatTimeCopy = (value?: string) => {
 
 const formatWaitCopy = (minutes?: number) => {
   const normalized = Number(minutes ?? 0);
-  if (!normalized) return "Waiting time updating";
+  if (!normalized) return "Wait time updating";
   if (normalized < 60) return `${normalized} min`;
   return `${Math.floor(normalized / 60)}h ${normalized % 60}m`;
 };
 
-const getQueueVisual = (queue: ActiveQueueState) => {
-  switch (queue.status) {
+const formatMetric = (value?: number | null, prefix = "") => {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return "--";
+  }
+  return `${prefix}${value}`;
+};
+
+const resolveQueueIcon = (status: ActiveQueueStatus) => {
+  switch (status) {
+    case "called":
+      return "megaphone-outline" as const;
+    case "in_consultation":
+      return "medkit-outline" as const;
     case "next":
-      return {
-        badgeLabel: "You are next",
-        badgeTone: styles.badgeSuccess,
-        icon: "notifications-outline" as const,
-        message: queue.message || "Please stay nearby. The doctor will call you shortly.",
-        cta: "Open Queue",
-      };
+      return "notifications-outline" as const;
+    case "late":
+      return "alert-circle-outline" as const;
+    default:
+      return "pulse-outline" as const;
+  }
+};
+
+const getQueueCopy = (queue: ActiveQueueState) => {
+  switch (queue.status) {
     case "called":
       return {
+        title: "Doctor is ready",
         badgeLabel: "Called",
-        badgeTone: styles.badgeSuccess,
-        icon: "megaphone-outline" as const,
-        message: queue.message || "Doctor is ready for you. Please enter the consultation room.",
+        badgeStyle: styles.badgeSuccess,
+        message: "Please enter the consultation room.",
         cta: "Open Queue",
       };
     case "in_consultation":
       return {
+        title: "Consultation in progress",
         badgeLabel: "In Consultation",
-        badgeTone: styles.badgeInfo,
-        icon: "medkit-outline" as const,
-        message: queue.message || "Consultation in progress.",
-        cta: "View Status",
+        badgeStyle: styles.badgeInfo,
+        message: "Your consultation has started.",
+        cta: "Open Queue",
+      };
+    case "next":
+      return {
+        title: "You are next",
+        badgeLabel: "Next",
+        badgeStyle: styles.badgeSuccess,
+        message: "Please stay nearby.",
+        cta: "Open Queue",
+      };
+    case "waiting":
+    case "checked_in":
+      return {
+        title: "Live Queue Active",
+        badgeLabel: "Waiting",
+        badgeStyle: styles.badgeInfo,
+        message: "You are checked in. Please wait for your turn.",
+        cta: "Open Queue",
       };
     case "late":
       return {
+        title: "Marked late",
         badgeLabel: "Late",
-        badgeTone: styles.badgeWarning,
-        icon: "alert-circle-outline" as const,
-        message: queue.message || "You are marked late. Please contact reception.",
+        badgeStyle: styles.badgeWarning,
+        message: "Please contact reception.",
         cta: "View Details",
       };
     case "check_in_required":
     case "not_arrived":
     case "queue_live":
       return {
-        badgeLabel: "Check-In Required",
-        badgeTone: styles.badgeNeutral,
-        icon: "log-in-outline" as const,
-        message: queue.message || "Queue has started. Please check in at reception.",
-        cta: "View Details",
-      };
-    case "checked_in":
-    case "waiting":
-      return {
-        badgeLabel: "Waiting",
-        badgeTone: styles.badgeInfo,
-        icon: "time-outline" as const,
-        message: queue.message || "You are checked in. Please wait for your turn.",
-        cta: "Open Queue",
-      };
-    case "missed":
-      return {
-        badgeLabel: "Missed",
-        badgeTone: styles.badgeDanger,
-        icon: "close-circle-outline" as const,
-        message: queue.message || "Appointment missed.",
+        title: "Queue has started",
+        badgeLabel: "Check In",
+        badgeStyle: styles.badgeNeutral,
+        message: "Please check in at reception.",
         cta: "View Details",
       };
     default:
       return {
-        badgeLabel: "Live",
-        badgeTone: styles.badgeInfo,
-        icon: "pulse-outline" as const,
-        message: queue.message || "Queue is active for this appointment.",
+        title: "Live Queue Active",
+        badgeLabel: "Queue",
+        badgeStyle: styles.badgeInfo,
+        message: queue.message || "Follow your live queue progress here.",
         cta: "Open Queue",
       };
   }
 };
 
-const MetricPill = ({ label, value }: { label: string; value: string }) => (
+const QueueMetric = ({ label, value }: { label: string; value: string }) => (
   <View style={styles.metricPill}>
     <Text style={styles.metricLabel}>{label}</Text>
     <Text style={styles.metricValue}>{value}</Text>
@@ -156,8 +172,8 @@ export function UpcomingAppointmentCard({
   const isTodayAppointment = appointment.status === "today_appointment";
   return (
     <View style={styles.upcomingCard}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderCopy}>
+      <View style={styles.simpleHeader}>
+        <View style={styles.simpleHeaderCopy}>
           <Text style={styles.cardEyebrow}>
             {isTodayAppointment ? "Today's Appointment" : "Upcoming Appointment"}
           </Text>
@@ -168,8 +184,8 @@ export function UpcomingAppointmentCard({
             {appointment.medicalCenterName || "Medical Center"}
           </Text>
         </View>
-        <View style={[styles.statusBadge, styles.badgeNeutral]}>
-          <Text style={styles.statusBadgeText}>{isTodayAppointment ? "Today" : "Booked"}</Text>
+        <View style={[styles.statusBadge, styles.badgeNeutralLight]}>
+          <Text style={styles.statusBadgeDarkText}>{isTodayAppointment ? "Today" : "Booked"}</Text>
         </View>
       </View>
 
@@ -202,112 +218,164 @@ export function UpcomingAppointmentCard({
 export default function ActiveQueueFloatingCard({
   queue,
   onPress,
+  variant = "primary",
 }: {
   queue: ActiveQueueState;
   onPress: () => void;
+  variant?: QueueCardVariant;
 }) {
-  const visual = getQueueVisual(queue);
+  const copy = getQueueCopy(queue);
   const patientsAhead =
     queue.position !== undefined && queue.position !== null
       ? Math.max(Number(queue.position) || 0, 0)
       : null;
 
-  return (
-    <TouchableOpacity style={styles.liveCardTouch} activeOpacity={0.92} onPress={onPress}>
-      <LinearGradient
-        colors={["#07182F", THEME.primaryBlue, "#35C8F4"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.liveCard}
-      >
-        <View style={styles.liveCardOverlay} />
-        <View style={styles.cardHeader}>
-          <View style={styles.liveIdentity}>
-            <View style={styles.liveIconBox}>
-              <Ionicons name={visual.icon} size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.cardHeaderCopy}>
-              <Text style={styles.liveEyebrow}>Live Queue Active</Text>
-              <Text style={styles.liveTitle} numberOfLines={1}>
-                {queue.doctorName || "Doctor appointment"}
-              </Text>
-              <Text style={styles.liveSubtitle} numberOfLines={1}>
-                {queue.medicalCenterName || "Medical Center"}
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.statusBadge, visual.badgeTone]}>
-            <Text style={styles.statusBadgeText}>{visual.badgeLabel}</Text>
-          </View>
-        </View>
-
-        <View style={styles.inlineInfoRow}>
-          {queue.sessionTime ? (
-            <View style={styles.liveInfoPill}>
-              <Ionicons name="time-outline" size={13} color="#D7F6FF" />
-              <Text style={styles.liveInfoText}>{queue.sessionTime}</Text>
-            </View>
-          ) : null}
-          {queue.estimatedWaitMinutes ? (
-            <View style={styles.liveInfoPill}>
-              <Ionicons name="hourglass-outline" size={13} color="#D7F6FF" />
-              <Text style={styles.liveInfoText}>{formatWaitCopy(queue.estimatedWaitMinutes)}</Text>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.metricsRow}>
-          {queue.tokenNumber ? <MetricPill label="Queue No" value={`#${queue.tokenNumber}`} /> : null}
-          <MetricPill
-            label="Now Serving"
-            value={queue.currentServingNumber ? `#${queue.currentServingNumber}` : "--"}
+  if (variant === "compact") {
+    return (
+      <TouchableOpacity style={styles.compactTouch} activeOpacity={0.9} onPress={onPress}>
+        <View style={styles.compactShell}>
+          <LinearGradient
+            colors={["#0B2A4A", "#1269A3"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.compactAccent}
           />
-          {patientsAhead !== null ? <MetricPill label="Ahead" value={String(patientsAhead)} /> : null}
-        </View>
-
-        <Text style={styles.liveMessage}>{visual.message}</Text>
-
-        <View style={styles.liveButtonRow}>
-          <View style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>{visual.cta}</Text>
-            <Ionicons name="arrow-forward" size={16} color="#07182F" />
+          <View style={styles.compactBody}>
+            <View style={styles.compactLeft}>
+              <View style={styles.compactIconBox}>
+                <Ionicons name={resolveQueueIcon(queue.status)} size={18} color="#0B4F6C" />
+              </View>
+              <View style={styles.compactCopy}>
+                <Text style={styles.compactEyebrow}>Live Queue</Text>
+                <Text style={styles.compactTitle} numberOfLines={1}>
+                  {copy.title}
+                </Text>
+                <Text style={styles.compactSubtitle} numberOfLines={1}>
+                  {queue.doctorName || "Doctor appointment"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.compactRight}>
+              <View style={[styles.statusBadge, copy.badgeStyle]}>
+                <Text style={styles.statusBadgeText}>{copy.badgeLabel}</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={16} color={THEME.primaryBlue} />
+            </View>
           </View>
         </View>
-      </LinearGradient>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity style={styles.primaryTouch} activeOpacity={0.94} onPress={onPress}>
+      <View style={styles.shell}>
+        <LinearGradient
+          colors={["#07182F", "#0B4F6C", "#1EA7FD"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerBand}
+        >
+          <View style={styles.headerRow}>
+            <View style={styles.identityRow}>
+              <View style={styles.iconBox}>
+                <Ionicons name={resolveQueueIcon(queue.status)} size={18} color="#FFFFFF" />
+              </View>
+              <View style={styles.headerCopy}>
+                <Text style={styles.headerEyebrow}>Live Queue</Text>
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {queue.doctorName || "Doctor appointment"}
+                </Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  {queue.medicalCenterName || "Medical Center"}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.statusBadge, copy.badgeStyle]}>
+              <Text style={styles.statusBadgeText}>{copy.badgeLabel}</Text>
+            </View>
+          </View>
+        </LinearGradient>
+
+        <View style={styles.cardBody}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleCopy}>
+              <Text style={styles.cardPrimaryTitle}>{copy.title}</Text>
+              <Text style={styles.cardPrimaryMessage}>{copy.message}</Text>
+            </View>
+            <View style={styles.queueTokenPill}>
+              <Text style={styles.queueTokenLabel}>Queue No</Text>
+              <Text style={styles.queueTokenValue}>{formatMetric(queue.tokenNumber, "#")}</Text>
+            </View>
+          </View>
+
+          <View style={styles.infoRow}>
+            <View style={styles.infoPill}>
+              <Ionicons name="time-outline" size={13} color={THEME.primaryBlue} />
+              <Text style={styles.infoPillText}>
+                {queue.sessionTime || formatTimeCopy(queue.scheduledTime)}
+              </Text>
+            </View>
+            {queue.estimatedWaitMinutes ? (
+              <View style={styles.infoPill}>
+                <Ionicons name="hourglass-outline" size={13} color={THEME.primaryBlue} />
+                <Text style={styles.infoPillText}>{formatWaitCopy(queue.estimatedWaitMinutes)}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.metricsRow}>
+            <QueueMetric label="Now Serving" value={formatMetric(queue.currentServingNumber, "#")} />
+            <QueueMetric label="Ahead" value={patientsAhead === null ? "--" : String(patientsAhead)} />
+            <QueueMetric label="Status" value={copy.badgeLabel} />
+          </View>
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={styles.primaryButton} activeOpacity={0.88} onPress={onPress}>
+              <Text style={styles.primaryButtonText}>{copy.cta}</Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  liveCardTouch: {
-    marginBottom: 12,
+  primaryTouch: {
+    marginBottom: 0,
   },
-  liveCard: {
-    borderRadius: 24,
-    padding: 18,
+  shell: {
+    borderRadius: 26,
     overflow: "hidden",
-    minHeight: 198,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: THEME.borderStrong,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
   },
-  liveCardOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255,255,255,0.05)",
+  headerBand: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
   },
-  cardHeader: {
+  headerRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
     justifyContent: "space-between",
+    alignItems: "flex-start",
     gap: 12,
   },
-  cardHeaderCopy: {
-    flex: 1,
-  },
-  liveIdentity: {
+  identityRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
     flex: 1,
   },
-  liveIconBox: {
+  iconBox: {
     width: 42,
     height: 42,
     borderRadius: 14,
@@ -315,21 +383,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  liveEyebrow: {
-    color: "rgba(255,255,255,0.78)",
+  headerCopy: {
+    flex: 1,
+  },
+  headerEyebrow: {
+    color: "rgba(255,255,255,0.74)",
     fontSize: 11,
     fontWeight: "800",
-    letterSpacing: 0.9,
     textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  liveTitle: {
+  headerTitle: {
     marginTop: 4,
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "800",
   },
-  liveSubtitle: {
-    marginTop: 3,
+  headerSubtitle: {
+    marginTop: 2,
     color: "rgba(255,255,255,0.86)",
     fontSize: 13,
     fontWeight: "600",
@@ -355,30 +426,87 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(220,38,38,0.18)",
   },
   badgeNeutral: {
-    backgroundColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  badgeNeutralLight: {
+    backgroundColor: THEME.lightBlueBg,
   },
   statusBadgeText: {
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "800",
   },
-  inlineInfoRow: {
+  statusBadgeDarkText: {
+    color: THEME.primaryBlue,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  cardBody: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  titleCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  cardPrimaryTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  cardPrimaryMessage: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: THEME.textSecondary,
+    fontWeight: "600",
+  },
+  queueTokenPill: {
+    minWidth: 78,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: "#F1F8FF",
+    borderWidth: 1,
+    borderColor: "#D8ECFA",
+  },
+  queueTokenLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#5E738A",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  queueTokenValue: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0B4F6C",
+  },
+  infoRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     marginTop: 14,
   },
-  liveInfoPill: {
+  infoPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: THEME.lightBlueBg,
   },
-  liveInfoText: {
-    color: "#EAF8FF",
+  infoPillText: {
+    color: THEME.primaryBlue,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -386,50 +514,109 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
-    marginTop: 16,
+    marginTop: 14,
   },
   metricPill: {
-    minWidth: 92,
+    flex: 1,
+    minWidth: 88,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "#F8FAFC",
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   metricLabel: {
-    color: "rgba(234,248,255,0.72)",
+    color: "#64748B",
     fontSize: 11,
     fontWeight: "700",
   },
   metricValue: {
     marginTop: 4,
-    color: "#FFFFFF",
-    fontSize: 16,
+    color: "#0F172A",
+    fontSize: 15,
     fontWeight: "900",
   },
-  liveMessage: {
-    marginTop: 14,
-    color: "#EAF8FF",
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-  },
-  liveButtonRow: {
+  actionRow: {
     marginTop: 14,
     alignItems: "flex-start",
   },
   primaryButton: {
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#1EA7FD",
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
   primaryButtonText: {
-    color: "#07182F",
+    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "800",
+  },
+  compactTouch: {
+    marginBottom: 0,
+  },
+  compactShell: {
+    flexDirection: "row",
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: THEME.border,
+  },
+  compactAccent: {
+    width: 8,
+  },
+  compactBody: {
+    flex: 1,
+    minHeight: 86,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  compactLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  compactIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#EAF8FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactCopy: {
+    flex: 1,
+  },
+  compactEyebrow: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#5E738A",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  compactTitle: {
+    marginTop: 3,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  compactSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: THEME.textSecondary,
+    fontWeight: "600",
+  },
+  compactRight: {
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 10,
   },
   upcomingCard: {
     backgroundColor: "#FFFFFF",
@@ -443,6 +630,15 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
+  },
+  simpleHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  simpleHeaderCopy: {
+    flex: 1,
   },
   cardEyebrow: {
     fontSize: 11,
@@ -462,6 +658,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: THEME.textSecondary,
     fontWeight: "600",
+  },
+  inlineInfoRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
   },
   inlineInfoPill: {
     flexDirection: "row",

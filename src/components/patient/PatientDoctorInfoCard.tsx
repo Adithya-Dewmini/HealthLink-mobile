@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { patientTheme } from "../../constants/patientTheme";
+import { getDoctorFallbackImage } from "../../utils/imageUtils";
 
 const THEME = patientTheme.colors;
 
@@ -12,6 +13,7 @@ type Props = {
   locationLabel?: string | null;
   experienceLabel?: string | null;
   imageUrl?: string | null;
+  gender?: string | null;
   verified?: boolean;
   compact?: boolean;
 };
@@ -22,28 +24,42 @@ export default function PatientDoctorInfoCard({
   locationLabel,
   experienceLabel,
   imageUrl,
+  gender,
   verified = false,
   compact = false,
 }: Props) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [gender, imageUrl]);
+
+  const hasRemoteImage = typeof imageUrl === "string" && imageUrl.trim().length > 0 && !imageFailed;
+  const imageSource = hasRemoteImage ? { uri: imageUrl } : getDoctorFallbackImage(gender);
+
   return (
     <View style={styles.card}>
       <View style={styles.row}>
-        {imageUrl ? (
+        <View style={styles.avatarPlaceholder}>
+          {hasRemoteImage ? null : (
+            <LinearGradient colors={[THEME.modernAccent, "#0EA5E9"]} style={styles.avatarGradient} />
+          )}
           <Image
-            source={{ uri: imageUrl }}
-            style={[styles.image, compact ? styles.imageCompact : null]}
+            source={imageSource}
+            style={[styles.image, compact ? styles.imageCompact : null, !hasRemoteImage ? styles.imageFallback : null]}
+            resizeMode={hasRemoteImage ? "cover" : "contain"}
+            onError={() => setImageFailed(true)}
           />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <LinearGradient colors={[THEME.modernAccent, "#0EA5E9"]} style={styles.avatarGradient}>
+          {!hasRemoteImage ? (
+            <View style={styles.fallbackAccent}>
               <MaterialCommunityIcons
                 name="doctor"
-                size={compact ? 26 : 32}
+                size={compact ? 18 : 20}
                 color="#FFFFFF"
               />
-            </LinearGradient>
-          </View>
-        )}
+            </View>
+          ) : null}
+        </View>
 
         <View style={styles.copy}>
           <View style={styles.nameRow}>
@@ -97,8 +113,11 @@ const styles = StyleSheet.create({
   },
   avatarPlaceholder: {
     marginRight: 15,
+    position: "relative",
   },
   avatarGradient: {
+    position: "absolute",
+    inset: 0,
     width: 64,
     height: 64,
     borderRadius: 20,
@@ -112,10 +131,27 @@ const styles = StyleSheet.create({
     marginRight: 15,
     backgroundColor: "#F3F4F6",
   },
+  imageFallback: {
+    backgroundColor: "#F5FBFF",
+    padding: 4,
+  },
   imageCompact: {
     width: 60,
     height: 60,
     borderRadius: 18,
+  },
+  fallbackAccent: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: THEME.modernAccent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
   },
   copy: {
     flex: 1,

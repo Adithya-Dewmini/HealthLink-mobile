@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   Easing,
+  Image,
+  type ImageSourcePropType,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -23,8 +25,11 @@ import LiveQueueCard, {
   UpcomingAppointmentCard,
 } from "../../components/patient/LiveQueueCard";
 import LiveOrderCard from "../../components/patient/LiveOrderCard";
+import ActiveUpdatesSection from "../../components/patient/ActiveUpdatesSection";
 import DashboardBannerCarousel from "../../components/patient/DashboardBannerCarousel";
 import PremiumDashboardEntityCard from "../../components/patient/PremiumDashboardEntityCard";
+import PatientLocationButton from "../../components/patient/PatientLocationButton";
+import PatientLocationSheet from "../../components/patient/PatientLocationSheet";
 import {
   getDashboardBanners,
   type DashboardBanner,
@@ -39,6 +44,7 @@ import { fetchPatientActiveQueueStatus } from "../../services/patientQueueApi";
 import { getSocket } from "../../services/socket";
 import { connectRealtimeSocket, subscribeToPatientRealtime } from "../../services/socketService";
 import { useAuth } from "../../utils/AuthContext";
+import { usePatientLocation } from "../../context/PatientLocationContext";
 
 const THEME = {
   ...patientTheme.colors,
@@ -50,6 +56,7 @@ const THEME = {
 };
 
 const CONTENT_GUTTER = 24;
+const ACTIVE_QUEUE_PRIORITY = ["called", "in_consultation", "next", "waiting", "checked_in"] as const;
 
 const BANNER_TARGET_SCREEN_ALIASES: Record<string, keyof PatientStackParamList> = {
   appointments: "Appointments",
@@ -71,33 +78,33 @@ const BANNER_TARGET_SCREEN_ALIASES: Record<string, keyof PatientStackParamList> 
 
 const EASY_ACTIONS = [
   {
-    icon: "search" as const,
+    key: "findDoctor",
     label: "Find Doctor",
-    accent: "#38BDF8",
+    image: require("../../../assets/images/quick-actions/quick_find_doctor.png") as ImageSourcePropType,
     gradient: ["#E0F2FE", "#F8FCFF"] as const,
   },
   {
-    icon: "document-text" as const,
+    key: "records",
     label: "Records",
-    accent: "#8B5CF6",
+    image: require("../../../assets/images/quick-actions/quick_medical_records.png") as ImageSourcePropType,
     gradient: ["#EDE9FE", "#FAF7FF"] as const,
   },
   {
-    icon: "medkit" as const,
+    key: "prescriptions",
     label: "Prescriptions",
-    accent: "#10B981",
+    image: require("../../../assets/images/quick-actions/quick_prescriptions.png") as ImageSourcePropType,
     gradient: ["#DCFCE7", "#F4FFF9"] as const,
   },
   {
-    icon: "cloud-upload" as const,
+    key: "uploadRx",
     label: "Upload Rx",
-    accent: "#F59E0B",
+    image: require("../../../assets/images/quick-actions/quick_upload_rx.png") as ImageSourcePropType,
     gradient: ["#FFF7ED", "#FFFDF7"] as const,
   },
   {
-    icon: "pulse" as const,
+    key: "activity",
     label: "Activity",
-    accent: "#EC4899",
+    image: require("../../../assets/images/quick-actions/quick_activity.png") as ImageSourcePropType,
     gradient: ["#FCE7F3", "#FFF7FB"] as const,
   },
 ] as const;
@@ -105,9 +112,8 @@ const EASY_ACTIONS = [
 type PatientNavigation = NativeStackNavigationProp<PatientStackParamList>;
 
 type ActionTileProps = {
-  icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  accent: string;
+  image: ImageSourcePropType;
   gradient: readonly [string, string];
   onPress: () => void;
 };
@@ -118,20 +124,19 @@ const normalizeBannerTargetScreen = (value: string | null | undefined): keyof Pa
   return BANNER_TARGET_SCREEN_ALIASES[key] ?? null;
 };
 
-const ActionTile = ({ icon, label, accent, gradient, onPress }: ActionTileProps) => (
-  <TouchableOpacity style={styles.actionTileTouch} onPress={onPress} activeOpacity={0.9}>
-    <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.tile}>
-      <View style={[styles.tileGlow, { backgroundColor: `${accent}18` }]} />
-      <View style={styles.tileTopRow}>
-        <View style={[styles.tileIconCircle, { shadowColor: accent }]}>
-          <Ionicons name={icon} size={24} color={accent} />
-        </View>
-        <View style={[styles.tileAccentDot, { backgroundColor: accent }]} />
-      </View>
-      <Text style={styles.tileLabel} numberOfLines={1}>
-        {label}
-      </Text>
+const ActionTile = ({ image, label, gradient, onPress }: ActionTileProps) => (
+  <TouchableOpacity style={styles.actionTileTouch} onPress={onPress} activeOpacity={0.88}>
+    <LinearGradient
+      colors={gradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.quickActionCircle}
+    >
+      <Image source={image} style={styles.quickActionImage} resizeMode="contain" />
     </LinearGradient>
+    <Text style={styles.tileLabel} numberOfLines={2}>
+      {label}
+    </Text>
   </TouchableOpacity>
 );
 
@@ -172,9 +177,19 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<PatientNavigation>();
   const { user } = useAuth();
+  const {
+    selectedLocation,
+    savedLocations,
+    loading: locationLoading,
+    selectLocation,
+    saveLocation,
+    deleteLocation,
+    getLocationLabel,
+  } = usePatientLocation();
   const fabFloat = useRef(new Animated.Value(0)).current;
   const fabPulse = useRef(new Animated.Value(0)).current;
   const [profileName, setProfileName] = useState("Patient");
+  const [locationSheetVisible, setLocationSheetVisible] = useState(false);
   const [activeQueue, setActiveQueue] = useState<ActiveQueueState | null>(null);
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
   const [banners, setBanners] = useState<DashboardBanner[]>([]);
@@ -328,19 +343,36 @@ export default function Dashboard() {
     }, [loadDashboard])
   );
 
-  const showLiveQueueCard = Boolean(
-    activeQueue?.active &&
-      activeQueue.status !== "appointment_booked" &&
-      activeQueue.status !== "today_appointment" &&
-      activeQueue.status !== "none" &&
-      activeQueue.status !== "completed" &&
-      activeQueue.status !== "cancelled" &&
-      activeQueue.status !== "missed"
-  );
   const showUpcomingAppointmentCard = Boolean(
     activeQueue && (activeQueue.status === "appointment_booked" || activeQueue.status === "today_appointment")
   );
-  const hasActiveUpdates = hasActiveOrder || showLiveQueueCard;
+  const normalizedQueueStatus = String(activeQueue?.status || "").trim().toLowerCase();
+  const queuePriorityIndex = ACTIVE_QUEUE_PRIORITY.indexOf(
+    normalizedQueueStatus as (typeof ACTIVE_QUEUE_PRIORITY)[number]
+  );
+  const hasPrimaryQueue = Boolean(activeQueue?.active && queuePriorityIndex >= 0);
+  const primaryActiveType: "queue" | "order" | null = hasPrimaryQueue ? "queue" : hasActiveOrder ? "order" : null;
+  const hasActiveUpdates = primaryActiveType !== null;
+  const locationCity = useMemo(
+    () => String(selectedLocation?.city || "").trim().toLowerCase(),
+    [selectedLocation?.city]
+  );
+  const sortedMedicalCenters = useMemo(() => {
+    if (!locationCity) return medicalCenters;
+    return [...medicalCenters].sort((left, right) => {
+      const leftScore = String(left.city || left.address || "").toLowerCase().includes(locationCity) ? 0 : 1;
+      const rightScore = String(right.city || right.address || "").toLowerCase().includes(locationCity) ? 0 : 1;
+      return leftScore - rightScore;
+    });
+  }, [locationCity, medicalCenters]);
+  const sortedPharmacies = useMemo(() => {
+    if (!locationCity) return pharmacies;
+    return [...pharmacies].sort((left, right) => {
+      const leftScore = String(left.city || left.address || "").toLowerCase().includes(locationCity) ? 0 : 1;
+      const rightScore = String(right.city || right.address || "").toLowerCase().includes(locationCity) ? 0 : 1;
+      return leftScore - rightScore;
+    });
+  }, [locationCity, pharmacies]);
 
   const handleUpcomingPress = useCallback(() => {
     navigation.navigate("Appointments");
@@ -550,14 +582,22 @@ export default function Dashboard() {
               <Text style={styles.greetingText}>{greeting}</Text>
               <Text style={styles.userNameText}>{profileName}</Text>
             </View>
-            <TouchableOpacity
-              style={styles.notifBtn}
-              onPress={() => navigation.navigate("NotificationCenter", { title: "Notifications", panel: "patient" })}
-              activeOpacity={0.88}
-            >
-              <Ionicons name="notifications-outline" size={22} color="white" />
-              <View style={styles.notifBadge} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <PatientLocationButton
+                loading={locationLoading}
+                location={selectedLocation}
+                label={getLocationLabel(selectedLocation)}
+                onPress={() => setLocationSheetVisible(true)}
+              />
+              <TouchableOpacity
+                style={styles.notifBtn}
+                onPress={() => navigation.navigate("NotificationCenter", { title: "Notifications", panel: "patient" })}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="notifications-outline" size={22} color="white" />
+                <View style={styles.notifBadge} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -598,16 +638,16 @@ export default function Dashboard() {
 
           <View style={styles.bodySection}>
             {hasActiveUpdates ? <Text style={styles.sectionLabel}>Active Updates</Text> : null}
-            {hasActiveUpdates ? (
-              <View style={styles.activeUpdatesStack}>
-                {showLiveQueueCard && activeQueue ? (
-                  <LiveQueueCard queue={activeQueue} onPress={handleQueuePress} />
-                ) : null}
-                <LiveOrderCard onActiveStateChange={setHasActiveOrder} />
-              </View>
-            ) : (
-              <LiveOrderCard onActiveStateChange={setHasActiveOrder} />
-            )}
+            {primaryActiveType === "queue" && activeQueue ? (
+              <ActiveUpdatesSection>
+                <LiveQueueCard variant="primary" queue={activeQueue} onPress={handleQueuePress} />
+              </ActiveUpdatesSection>
+            ) : null}
+            {primaryActiveType !== "queue" ? (
+              <ActiveUpdatesSection>
+                <LiveOrderCard variant="primary" onActiveStateChange={setHasActiveOrder} />
+              </ActiveUpdatesSection>
+            ) : null}
 
             {showUpcomingAppointmentCard && activeQueue ? (
               <UpcomingAppointmentCard appointment={activeQueue} onPress={handleUpcomingPress} />
@@ -620,114 +660,113 @@ export default function Dashboard() {
                 onPress={() => void loadDashboard("refresh")}
               />
             ) : null}
-            <Text style={styles.sectionLabel}>Quick Actions</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.easyActionScroll}
-              contentContainerStyle={styles.easyActionRail}
-            >
-              <ActionTile
-                icon={EASY_ACTIONS[0].icon}
-                label={EASY_ACTIONS[0].label}
-                accent={EASY_ACTIONS[0].accent}
-                gradient={EASY_ACTIONS[0].gradient}
-                onPress={() => navigation.navigate("DoctorSearchScreen")}
-              />
-              <ActionTile
-                icon={EASY_ACTIONS[1].icon}
-                label={EASY_ACTIONS[1].label}
-                accent={EASY_ACTIONS[1].accent}
-                gradient={EASY_ACTIONS[1].gradient}
-                onPress={() => navigation.navigate("MedicalHistoryScreen")}
-              />
-              <ActionTile
-                icon={EASY_ACTIONS[2].icon}
-                label={EASY_ACTIONS[2].label}
-                accent={EASY_ACTIONS[2].accent}
-                gradient={EASY_ACTIONS[2].gradient}
-                onPress={() => navigation.navigate("PatientPrescriptions")}
-              />
-              <ActionTile
-                icon={EASY_ACTIONS[3].icon}
-                label={EASY_ACTIONS[3].label}
-                accent={EASY_ACTIONS[3].accent}
-                gradient={EASY_ACTIONS[3].gradient}
-                onPress={() => navigation.navigate("UploadPrescription")}
-              />
-              <ActionTile
-                icon={EASY_ACTIONS[4].icon}
-                label={EASY_ACTIONS[4].label}
-                accent={EASY_ACTIONS[4].accent}
-                gradient={EASY_ACTIONS[4].gradient}
-                onPress={() => navigation.navigate("ActivityFeed", { title: "Activity Feed" })}
-              />
-            </ScrollView>
-
-            <View style={styles.featuredHeader}>
-              <Text style={styles.sectionLabel}>Healthcare Centers</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("PatientTabs", { screen: "PatientAppointments" })}>
-                <Text style={styles.seeAllText}>See All</Text>
-              </TouchableOpacity>
+            <View style={styles.quickActionsSection}>
+              <Text style={styles.sectionLabel}>Quick Actions</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.easyActionScroll}
+                contentContainerStyle={styles.easyActionRail}
+              >
+                <ActionTile
+                  label={EASY_ACTIONS[0].label}
+                  image={EASY_ACTIONS[0].image}
+                  gradient={EASY_ACTIONS[0].gradient}
+                  onPress={() => navigation.navigate("DoctorSearchScreen")}
+                />
+                <ActionTile
+                  label={EASY_ACTIONS[1].label}
+                  image={EASY_ACTIONS[1].image}
+                  gradient={EASY_ACTIONS[1].gradient}
+                  onPress={() => navigation.navigate("MedicalHistoryScreen")}
+                />
+                <ActionTile
+                  label={EASY_ACTIONS[2].label}
+                  image={EASY_ACTIONS[2].image}
+                  gradient={EASY_ACTIONS[2].gradient}
+                  onPress={() => navigation.navigate("PatientPrescriptions")}
+                />
+                <ActionTile
+                  label={EASY_ACTIONS[3].label}
+                  image={EASY_ACTIONS[3].image}
+                  gradient={EASY_ACTIONS[3].gradient}
+                  onPress={() => navigation.navigate("UploadPrescription")}
+                />
+                <ActionTile
+                  label={EASY_ACTIONS[4].label}
+                  image={EASY_ACTIONS[4].image}
+                  gradient={EASY_ACTIONS[4].gradient}
+                  onPress={() => navigation.navigate("ActivityFeed", { title: "Activity Feed" })}
+                />
+              </ScrollView>
             </View>
 
-            {centersError ? (
-              <InlineMessage message={centersError} actionLabel="Retry" onPress={() => void loadDashboard("refresh")} />
-            ) : null}
+            <View style={styles.listingSection}>
+              <View style={styles.featuredHeader}>
+                <Text style={styles.sectionLabel}>Healthcare Centers</Text>
+                <TouchableOpacity onPress={() => navigation.navigate("PatientTabs", { screen: "PatientAppointments" })}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-              {loadingDashboardData ? (
-                <>
-                  <LoadingCard />
-                  <LoadingCard />
-                </>
-              ) : medicalCenters.length > 0 ? (
-                medicalCenters.map((center) => (
-                  <PremiumDashboardEntityCard
-                    key={center.id}
-                    title={center.name}
-                    subtitle={center.city || center.address || "Address not provided"}
-                    imageUrl={center.imageUrl || center.logoUrl}
-                    status={getCenterStatus(center)}
-                    metadata={
-                      center.activeQueueCount && center.activeQueueCount > 0
-                        ? `${center.activeQueueCount} in queue`
-                        : null
-                    }
-                    icon="business-outline"
-                    onPress={() =>
-                      navigation.navigate("PatientClinicDetails", {
-                        clinicId: center.id,
-                        clinicName: center.name,
-                        location: center.address || center.city || "Location not provided",
-                        status:
-                          center.activeQueueCount && center.activeQueueCount > 0
-                            ? "QUEUE LIVE"
-                            : center.isOpen
-                              ? "OPEN"
-                              : "CLOSED",
-                        image: center.imageUrl || center.logoUrl || "",
-                        rating: 0,
-                        waitTime:
-                          center.activeQueueCount && center.activeQueueCount > 0
-                            ? `${center.activeQueueCount} in queue`
-                            : "Queue details unavailable",
-                        nextAvailable: center.isOpen ? "Open now" : "Unavailable",
-                        specialty: "Medical Center",
-                      })
-                    }
-                  />
-                ))
-              ) : (
-                <View style={styles.emptySectionCard}>
-                  <View style={styles.emptySectionIconWrap}>
-                    <Ionicons name="business-outline" size={24} color="#475569" />
+              {centersError ? (
+                <InlineMessage message={centersError} actionLabel="Retry" onPress={() => void loadDashboard("refresh")} />
+              ) : null}
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                {loadingDashboardData ? (
+                  <>
+                    <LoadingCard />
+                    <LoadingCard />
+                  </>
+                ) : sortedMedicalCenters.length > 0 ? (
+                  sortedMedicalCenters.map((center) => (
+                    <PremiumDashboardEntityCard
+                      key={center.id}
+                      title={center.name}
+                      subtitle={center.city || center.address || "Address not provided"}
+                      imageUrl={center.imageUrl || center.logoUrl}
+                      status={getCenterStatus(center)}
+                      metadata={
+                        center.activeQueueCount && center.activeQueueCount > 0
+                          ? `${center.activeQueueCount} in queue`
+                          : null
+                      }
+                      icon="business-outline"
+                      onPress={() =>
+                        navigation.navigate("PatientClinicDetails", {
+                          clinicId: center.id,
+                          clinicName: center.name,
+                          location: center.address || center.city || "Location not provided",
+                          status:
+                            center.activeQueueCount && center.activeQueueCount > 0
+                              ? "QUEUE LIVE"
+                              : center.isOpen
+                                ? "OPEN"
+                                : "CLOSED",
+                          image: center.imageUrl || center.logoUrl || "",
+                          rating: 0,
+                          waitTime:
+                            center.activeQueueCount && center.activeQueueCount > 0
+                              ? `${center.activeQueueCount} in queue`
+                              : "Queue details unavailable",
+                          nextAvailable: center.isOpen ? "Open now" : "Unavailable",
+                          specialty: "Medical Center",
+                        })
+                      }
+                    />
+                  ))
+                ) : (
+                  <View style={styles.emptySectionCard}>
+                    <View style={styles.emptySectionIconWrap}>
+                      <Ionicons name="business-outline" size={24} color="#475569" />
+                    </View>
+                    <Text style={styles.emptySectionTitle}>No healthcare centers available yet</Text>
+                    <Text style={styles.emptySectionText}>Approved centers will appear here when available.</Text>
                   </View>
-                  <Text style={styles.emptySectionTitle}>No healthcare centers available yet</Text>
-                  <Text style={styles.emptySectionText}>Approved centers will appear here when available.</Text>
-                </View>
-              )}
-            </ScrollView>
+                )}
+              </ScrollView>
+            </View>
 
             <View style={styles.featuredSection}>
               <View style={styles.featuredHeader}>
@@ -753,8 +792,8 @@ export default function Dashboard() {
                     <LoadingCard />
                     <LoadingCard />
                   </>
-                ) : pharmacies.length > 0 ? (
-                  pharmacies.map((pharmacy) => (
+                ) : sortedPharmacies.length > 0 ? (
+                  sortedPharmacies.map((pharmacy) => (
                     <PremiumDashboardEntityCard
                       key={pharmacy.id}
                       title={pharmacy.name}
@@ -814,6 +853,24 @@ export default function Dashboard() {
             </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
+
+        <PatientLocationSheet
+          visible={locationSheetVisible}
+          selectedLocation={selectedLocation}
+          savedLocations={savedLocations}
+          onClose={() => setLocationSheetVisible(false)}
+          onSelect={(location) => {
+            void selectLocation(location);
+            setLocationSheetVisible(false);
+          }}
+          onSave={(location) => {
+            void saveLocation(location);
+            setLocationSheetVisible(false);
+          }}
+          onDelete={(id) => {
+            void deleteLocation(id);
+          }}
+        />
       </SafeAreaView>
     </View>
   );
@@ -840,6 +897,12 @@ const styles = StyleSheet.create({
   headerCopy: {
     flex: 1,
     paddingRight: 16,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexShrink: 1,
   },
   greetingText: { color: "rgba(255,255,255,0.72)", fontSize: 14, fontWeight: "600", marginBottom: 2 },
   userNameText: { color: "white", fontSize: 27, lineHeight: 32, fontWeight: "800", letterSpacing: -0.4 },
@@ -886,8 +949,9 @@ const styles = StyleSheet.create({
   },
   bodySection: {
     marginTop: -10,
-    paddingTop: 10,
+    paddingTop: 18,
     paddingHorizontal: CONTENT_GUTTER,
+    paddingBottom: 8,
     backgroundColor: THEME.bg,
     zIndex: 1,
   },
@@ -898,82 +962,64 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900",
     color: "#94A3B8",
-    marginBottom: 8,
+    marginBottom: 12,
     textTransform: "uppercase",
     letterSpacing: 1.4,
+  },
+  quickActionsSection: {
+    marginTop: 10,
+    marginBottom: 12,
   },
   easyActionRail: {
     paddingLeft: CONTENT_GUTTER,
     paddingRight: CONTENT_GUTTER,
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 6,
   },
   easyActionScroll: {
     marginHorizontal: -CONTENT_GUTTER,
   },
   actionTileTouch: {
-    width: 118,
-  },
-  tile: {
-    minHeight: 118,
-    padding: 14,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
-    overflow: "hidden",
-    justifyContent: "center",
+    width: 104,
     alignItems: "center",
   },
-  tileGlow: {
-    position: "absolute",
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    top: -14,
-    right: -10,
-  },
-  tileTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  tileIconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: "rgba(255,255,255,0.72)",
+  quickActionCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.1,
     shadowRadius: 18,
     elevation: 3,
   },
-  tileAccentDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 3,
+  quickActionImage: {
+    width: 96,
+    height: 96,
   },
   tileLabel: {
-    fontSize: 13,
-    fontWeight: "800",
+    fontSize: 14,
+    fontWeight: "700",
     color: THEME.primary,
-    lineHeight: 17,
-    marginTop: 10,
+    lineHeight: 18,
+    marginTop: 8,
     textAlign: "center",
     width: "100%",
+  },
+  listingSection: {
+    marginTop: 10,
   },
   featuredHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "baseline",
-    marginBottom: 0,
+    marginBottom: 8,
   },
-  featuredSection: { marginTop: 14 },
+  featuredSection: { marginTop: 24 },
   seeAllText: { color: THEME.accent, fontWeight: "800", fontSize: 15 },
-  horizontalScroll: { marginHorizontal: -CONTENT_GUTTER, paddingLeft: CONTENT_GUTTER, marginTop: 4 },
+  horizontalScroll: { marginHorizontal: -CONTENT_GUTTER, paddingLeft: CONTENT_GUTTER, marginTop: 6 },
   inlineMessage: {
     marginBottom: 18,
     paddingHorizontal: 14,
@@ -999,65 +1045,69 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   loadingCardShell: {
-    width: 298,
-    height: 186,
-    marginRight: 16,
-    borderRadius: 26,
+    width: 266,
+    height: 188,
+    marginRight: 14,
+    borderRadius: 20,
     overflow: "hidden",
     backgroundColor: "#E2E8F0",
     ...patientTheme.shadows.card,
   },
   loadingCard: {
     flex: 1,
-    padding: 18,
-    justifyContent: "space-between",
+    padding: 14,
+    justifyContent: "flex-start",
   },
   loadingBadgeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
   },
   loadingBadge: {
-    width: 78,
-    height: 26,
+    width: 76,
+    height: 28,
     borderRadius: 999,
     backgroundColor: "rgba(148,163,184,0.28)",
   },
   loadingEyebrow: {
-    width: 108,
-    height: 26,
-    borderRadius: 999,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: "rgba(148,163,184,0.24)",
   },
   loadingVisual: {
-    width: 48,
-    height: 48,
+    width: "100%",
+    height: 104,
     borderRadius: 16,
     backgroundColor: "rgba(148,163,184,0.22)",
+    marginTop: 12,
   },
   loadingLineLarge: {
-    width: "76%",
-    height: 24,
-    borderRadius: 10,
+    width: "72%",
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "rgba(148,163,184,0.34)",
+    marginTop: 12,
   },
   loadingLineSmall: {
-    width: "58%",
-    height: 14,
-    borderRadius: 8,
+    width: "48%",
+    height: 12,
+    borderRadius: 7,
     backgroundColor: "rgba(148,163,184,0.26)",
+    marginTop: 8,
   },
   emptySectionCard: {
-    width: 298,
-    minHeight: 186,
-    marginRight: 16,
-    borderRadius: 26,
+    width: 266,
+    minHeight: 188,
+    marginRight: 14,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "#E2E8F0",
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 26,
-    paddingVertical: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 20,
     ...patientTheme.shadows.soft,
   },
   emptySectionIconWrap: {

@@ -6,25 +6,33 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  SafeAreaView,
   ActivityIndicator,
   FlatList,
+  Image,
+  StatusBar,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { apiFetch } from "../../config/api";
 import type { PatientStackParamList } from "../../types/navigation";
+import { patientTheme } from "../../constants/patientTheme";
 import SymptomPill from "../../components/patient/SymptomPill";
+import { getDoctorFallbackImage, readDoctorGender, resolveDoctorImage } from "../../utils/imageUtils";
 
 const THEME = {
-  primary: "#2563EB",
-  background: "#F9FAFB",
-  white: "#FFFFFF",
-  textPrimary: "#111827",
-  textSecondary: "#6B7280",
-  border: "#E5E7EB",
-  softBlue: "#EFF6FF",
+  ...patientTheme.colors,
+  primary: patientTheme.colors.primaryBlue,
+  background: patientTheme.colors.background,
+  white: patientTheme.colors.white,
+  textPrimary: patientTheme.colors.modernText,
+  textSecondary: patientTheme.colors.textSecondary,
+  border: patientTheme.colors.modernBorder,
+  softBlue: patientTheme.colors.lightBlueBg,
+  header: patientTheme.colors.modernPrimary,
+  headerAlt: patientTheme.colors.modernPrimaryAlt,
 };
 
 const SPECIALIST_ALIASES: Record<string, string> = {
@@ -71,8 +79,109 @@ const normalizeUrgency = (value?: string | null): "low" | "medium" | "high" => {
   return "low";
 };
 
+function DoctorRecommendationCard({
+  doctor,
+  onPress,
+}: {
+  doctor: {
+    id: number;
+    name: string;
+    specialty: string;
+    city: string;
+    clinicName?: string | null;
+    rating: number | null;
+    experience: string;
+    queueLength: number;
+    isAvailableToday: boolean;
+    profileImage?: string | null;
+    gender?: string | null;
+  };
+  onPress: () => void;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const hasRemoteImage =
+    typeof doctor.profileImage === "string" && doctor.profileImage.trim().length > 0 && !imageFailed;
+  const imageSource = hasRemoteImage ? { uri: doctor.profileImage! } : getDoctorFallbackImage(doctor.gender);
+  const locationLabel = doctor.clinicName || doctor.city || null;
+  const queueLabel = doctor.queueLength > 0 ? `${doctor.queueLength} in queue` : null;
+  const experienceLabel = doctor.experience && doctor.experience !== "N/A" ? doctor.experience : null;
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [doctor.gender, doctor.profileImage]);
+
+  return (
+    <TouchableOpacity style={styles.featuredCard} activeOpacity={0.92} onPress={onPress}>
+      <View style={styles.featuredImageWrap}>
+        <Image
+          source={imageSource}
+          style={styles.featuredDoctorImage}
+          resizeMode={hasRemoteImage ? "cover" : "cover"}
+          onError={() => setImageFailed(true)}
+        />
+        {!hasRemoteImage ? <View style={styles.featuredDoctorImageFallbackTint} /> : null}
+        <LinearGradient
+          colors={["rgba(2, 6, 23, 0.02)", "rgba(2, 6, 23, 0.18)", "rgba(2, 6, 23, 0.45)"]}
+          locations={[0, 0.52, 1]}
+          style={styles.featuredImageOverlay}
+        />
+        <View
+          style={[
+            styles.recommendationAvailabilityBadge,
+            doctor.isAvailableToday ? styles.availabilityBadgeActive : styles.availabilityBadgeInactive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.availabilityText,
+              doctor.isAvailableToday ? styles.availabilityTextActive : styles.availabilityTextInactive,
+            ]}
+          >
+            {doctor.isAvailableToday ? "Available Today" : "Schedule Ahead"}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.featuredCardContent}>
+        <Text style={styles.featuredName} numberOfLines={1}>
+          {doctor.name}
+        </Text>
+        <Text style={styles.featuredSpecialty} numberOfLines={1}>
+          {doctor.specialty}
+        </Text>
+        {locationLabel ? (
+          <Text style={styles.featuredMetaLine} numberOfLines={1}>
+            {locationLabel}
+          </Text>
+        ) : null}
+
+        {(doctor.rating || queueLabel) ? (
+          <View style={styles.featuredMetaRow}>
+            {doctor.rating ? (
+              <Text style={styles.featuredRating}>{`⭐ ${doctor.rating.toFixed(1)}`}</Text>
+            ) : <View />}
+            {queueLabel ? <Text style={styles.featuredDistance}>{queueLabel}</Text> : null}
+          </View>
+        ) : null}
+
+        {(experienceLabel || (doctor.city && doctor.clinicName)) ? (
+          <View style={styles.featuredInfoRow}>
+            {experienceLabel ? <Text style={styles.featuredInfoText}>{experienceLabel}</Text> : <View />}
+            {doctor.city && doctor.clinicName ? <Text style={styles.featuredInfoText}>{doctor.city}</Text> : null}
+          </View>
+        ) : null}
+
+        <View style={styles.featuredCta}>
+          <Text style={styles.featuredCtaText}>View Doctor</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function SymptomCheckerScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
+  const insets = useSafeAreaInsets();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<
@@ -99,6 +208,8 @@ export default function SymptomCheckerScreen() {
       experience: string;
       queueLength: number;
       isAvailableToday: boolean;
+      profileImage?: string | null;
+      gender?: string | null;
     }>
   >([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
@@ -121,9 +232,11 @@ export default function SymptomCheckerScreen() {
         clinicName: doc.clinic_name ?? null,
         rating: typeof doc.rating === "number" ? doc.rating : null,
         reviews: typeof doc.review_count === "number" ? doc.review_count : null,
-        experience: doc.experience_years ? `${doc.experience_years} Years` : "N/A",
+        experience: doc.experience_years ? `${doc.experience_years} Years` : "",
         queueLength: Number(doc.queue_length ?? 0),
         isAvailableToday: Boolean(doc.is_available_today),
+        profileImage: resolveDoctorImage(doc.profile_image ?? null),
+        gender: readDoctorGender(doc.gender, doc.sex),
       }));
       setDoctors(mapped);
     } catch (err) {
@@ -148,10 +261,16 @@ export default function SymptomCheckerScreen() {
     setErrorMessage(null);
   };
 
+  const handleRefresh = () => {
+    handleReset();
+    void loadDoctors();
+  };
+
   const selectedSpecialist = useMemo(
     () => (result ? normalizeSpecialist(result.specialist) : null),
     [result]
   );
+  const headerHeight = insets.top + 92;
 
   const recommendedDoctors = useMemo(() => {
     if (!selectedSpecialist) return [];
@@ -216,299 +335,351 @@ export default function SymptomCheckerScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={THEME.textPrimary} />
-        </TouchableOpacity>
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.headerTitle}>Symptom Checker</Text>
-          <Text style={styles.headerSub}>Find the right doctor for your condition</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.refreshBtn}
-          onPress={() => {
-            handleReset();
-          }}
-        >
-          <Ionicons
-            name="refresh-outline"
-            size={20}
-            color={THEME.primary}
-          />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.screen}>
+      <StatusBar barStyle="light-content" />
+      <LinearGradient
+        colors={[THEME.header, THEME.headerAlt]}
+        style={styles.headerBackdrop}
+      />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.inputCard}>
-          <Text style={styles.inputLabel}>Describe what you are feeling</Text>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Enter your symptoms (e.g. fever, headache)"
-            placeholderTextColor={THEME.textSecondary}
-            multiline
-            value={input}
-            onChangeText={(text) => {
-              setInput(text);
-              setSelectedSymptoms(
-                QUICK_SUGGESTIONS.filter((item) => item.toLowerCase() === text.trim().toLowerCase())
-              );
-            }}
-          />
-          <TouchableOpacity
-            style={[styles.analyzeBtn, !input && { opacity: 0.6 }]}
-            onPress={handleAnalyze}
-            disabled={loading}
-          >
-            <Text style={styles.analyzeBtnText}>Analyze Symptoms</Text>
-            <Ionicons name="sparkles" size={18} color={THEME.white} />
-          </TouchableOpacity>
-        </View>
-
-        {!loading && result === null && (
-          <View style={styles.suggestionSection}>
-            <Text style={styles.sectionLabel}>Quick Suggestions</Text>
-            <View style={styles.pillContainer}>
-              {QUICK_SUGGESTIONS.map((item) => (
-                <SymptomPill
-                  key={item}
-                  label={item}
-                  onPress={() => handleSelectSymptom(item)}
-                  selected={selectedSymptoms.includes(item)}
-                />
-              ))}
+      <SafeAreaView style={styles.safe} edges={[]}>
+        <View style={[styles.fixedHeader, { paddingTop: insets.top + 16 }]}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={styles.headerTextWrap}>
+              <Text style={styles.headerTitle}>Symptom Checker</Text>
+              <Text style={styles.headerSub}>Find the right doctor for your condition</Text>
             </View>
-          </View>
-        )}
-
-        {!loading && errorMessage && (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle" size={18} color="#B91C1C" />
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        )}
-
-        {loading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={THEME.primary} />
-            <Text style={styles.loadingText}>Analyzing symptoms...</Text>
-          </View>
-        )}
-
-        {result !== null && !loading && (
-          <View style={styles.resultContainer}>
-            {result.urgency && (
-              <View
-                style={[
-                  styles.urgencyBadge,
-                  result.urgency === "high" && styles.urgencyHigh,
-                  result.urgency === "medium" && styles.urgencyMedium,
-                  result.urgency === "low" && styles.urgencyLow,
-                ]}
-              >
-                <Text style={styles.urgencyText}>
-                  {result.urgency === "high"
-                    ? "Urgent – Seek immediate care"
-                    : result.urgency === "medium"
-                      ? "Moderate condition"
-                      : "Not urgent"}
-                </Text>
-              </View>
-            )}
-            <View style={styles.resultCard}>
-              <Text style={styles.resultLabel}>Recommended Specialist</Text>
-              <Text style={styles.specialistName}>{selectedSpecialist}</Text>
-              <Text style={styles.resultDesc}>
-                {result.reason
-                  ? result.reason
-                  : `Based on your symptoms of "${input}", a ${selectedSpecialist} can provide a thorough examination and primary care.`}
-              </Text>
-
-              <View style={styles.resultMetaRow}>
-                <View style={styles.resultMetaChip}>
-                  <Ionicons name="pulse" size={14} color={THEME.primary} />
-                  <Text style={styles.resultMetaText}>{result.urgency.toUpperCase()} PRIORITY</Text>
-                </View>
-                <View style={styles.resultMetaChip}>
-                  <Ionicons name="medkit" size={14} color={THEME.primary} />
-                  <Text style={styles.resultMetaText}>{selectedSpecialist}</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.findDoctorBtn}
-                onPress={() =>
-                  selectedSpecialist
-                    ? navigation.navigate("DoctorSearchScreen", {
-                        specialty: selectedSpecialist,
-                      })
-                    : undefined
-                }
-              >
-                <Text style={styles.findDoctorText}>Find Doctors</Text>
-                <Ionicons name="search" size={18} color={THEME.primary} />
-              </TouchableOpacity>
-            </View>
-
-            {recommendedDoctors.length > 0 ? (
-              <View style={styles.featuredSection}>
-                <Text style={styles.featuredTitle}>Recommended Doctors</Text>
-                <FlatList
-                  data={recommendedDoctors}
-                  keyExtractor={(item) => String(item.id)}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.featuredList}
-                  snapToAlignment="start"
-                  decelerationRate="fast"
-                  snapToInterval={232}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.featuredCard}
-                      activeOpacity={0.9}
-                      onPress={() => {
-                        if (!item.clinicId) {
-                          return;
-                        }
-                        navigation.navigate("DoctorAvailabilityScreen", {
-                          doctorId: item.id,
-                          clinicId: item.clinicId,
-                          clinicName: item.clinicName ?? undefined,
-                          doctorName: item.name,
-                          specialty: item.specialty,
-                        });
-                      }}
-                    >
-                      <View style={styles.featuredAvatar}>
-                        <Text style={styles.featuredAvatarText}>
-                          {item.name
-                            .split(" ")
-                            .filter(Boolean)
-                            .slice(0, 2)
-                            .map((part) => part[0]?.toUpperCase())
-                            .join("") || "DR"}
-                        </Text>
-                      </View>
-                      <Text style={styles.featuredName}>{item.name}</Text>
-                      <Text style={styles.featuredSpecialty}>{item.specialty}</Text>
-                      <View style={styles.featuredMetaRow}>
-                        <Text style={styles.featuredRating}>
-                          {item.rating ? `⭐ ${item.rating.toFixed(1)}` : "New"}
-                        </Text>
-                        <Text style={styles.featuredDistance}>{item.city}</Text>
-                      </View>
-                      <View style={styles.featuredInfoRow}>
-                        <Text style={styles.featuredInfoText}>{item.experience}</Text>
-                        <Text style={styles.featuredInfoText}>
-                          Queue {item.queueLength}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.availabilityBadge,
-                          item.isAvailableToday
-                            ? styles.availabilityBadgeActive
-                            : styles.availabilityBadgeInactive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.availabilityText,
-                            item.isAvailableToday
-                              ? styles.availabilityTextActive
-                              : styles.availabilityTextInactive,
-                          ]}
-                        >
-                          {item.isAvailableToday ? "Available Today" : "Schedule Ahead"}
-                        </Text>
-                      </View>
-                      <View style={styles.featuredCta}>
-                        <Text style={styles.featuredCtaText}>View Slots</Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                />
-              </View>
-            ) : doctorsLoading ? (
-              <View style={styles.emptyRecommendationCard}>
-                <ActivityIndicator size="small" color={THEME.primary} />
-                <Text style={styles.emptyRecommendationTitle}>Loading specialists</Text>
-                <Text style={styles.emptyRecommendationText}>
-                  Fetching live doctors for {selectedSpecialist}.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.emptyRecommendationCard}>
-                <Ionicons name="search" size={18} color={THEME.primary} />
-                <Text style={styles.emptyRecommendationTitle}>No doctors found for this specialty</Text>
-                <Text style={styles.emptyRecommendationText}>
-                  Continue to search doctors and we will filter the directory for {selectedSpecialist}.
-                </Text>
-              </View>
-            )}
-
             <TouchableOpacity
-              style={styles.resetBtn}
-              onPress={handleReset}
+              style={styles.refreshBtn}
+              onPress={handleRefresh}
             >
-              <Text style={styles.resetText}>Try Again</Text>
+              <Ionicons
+                name="refresh-outline"
+                size={20}
+                color="#FFFFFF"
+              />
             </TouchableOpacity>
           </View>
-        )}
+        </View>
 
-        <Text style={styles.disclaimer}>
-          This is not a medical diagnosis.{"\n"}Please consult a doctor for professional advice.
-        </Text>
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent, { paddingTop: headerHeight + 18 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.inputCard}>
+            <View style={styles.aiAccentRow}>
+              <View style={styles.aiOrb}>
+                <Ionicons name="sparkles" size={18} color="#FFFFFF" />
+              </View>
+              <View style={styles.aiCopy}>
+                <Text style={styles.aiEyebrow}>HealthLink AI Assistant</Text>
+                <Text style={styles.aiSubcopy}>Smart symptom triage with live doctor matching</Text>
+              </View>
+            </View>
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </SafeAreaView>
+            <Text style={styles.inputLabel}>Describe what you are feeling</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Enter your symptoms (e.g. fever, headache)"
+              placeholderTextColor={THEME.textSecondary}
+              multiline
+              value={input}
+              onChangeText={(text) => {
+                setInput(text);
+                setSelectedSymptoms(
+                  QUICK_SUGGESTIONS.filter((item) => item.toLowerCase() === text.trim().toLowerCase())
+                );
+              }}
+            />
+            <View style={styles.aiDivider} />
+            <LinearGradient
+              colors={[patientTheme.colors.primaryBlue, patientTheme.colors.aqua]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={!input ? [styles.analyzeBtn, styles.analyzeBtnDisabled] : styles.analyzeBtn}
+            >
+              <TouchableOpacity
+                style={styles.analyzeBtnContent}
+                onPress={handleAnalyze}
+                disabled={loading || !input}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.analyzeBtnText}>Analyze Symptoms</Text>
+                <Ionicons name="sparkles" size={18} color={THEME.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+
+          {!loading && result === null && (
+            <View style={styles.suggestionSection}>
+              <Text style={styles.sectionLabel}>Quick Suggestions</Text>
+              <View style={styles.pillContainer}>
+                {QUICK_SUGGESTIONS.map((item) => (
+                  <SymptomPill
+                    key={item}
+                    label={item}
+                    onPress={() => handleSelectSymptom(item)}
+                    selected={selectedSymptoms.includes(item)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {!loading && errorMessage && (
+            <View style={styles.errorBanner}>
+              <Ionicons name="alert-circle" size={18} color="#B91C1C" />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          )}
+
+          {loading && (
+          <View style={styles.loadingContainer}>
+              <LinearGradient
+                colors={["rgba(3, 105, 161, 0.08)", "rgba(14, 165, 233, 0.14)"]}
+                style={styles.loadingHalo}
+              >
+                <ActivityIndicator size="large" color={THEME.primary} />
+              </LinearGradient>
+              <Text style={styles.loadingText}>Analyzing symptoms...</Text>
+              <Text style={styles.loadingSubtext}>HealthLink AI is matching symptoms with the right specialist.</Text>
+          </View>
+          )}
+
+          {result !== null && !loading && (
+            <View style={styles.resultContainer}>
+              {result.urgency && (
+                <View
+                  style={[
+                    styles.urgencyBadge,
+                    result.urgency === "high" && styles.urgencyHigh,
+                    result.urgency === "medium" && styles.urgencyMedium,
+                    result.urgency === "low" && styles.urgencyLow,
+                  ]}
+                >
+                  <Text style={styles.urgencyText}>
+                    {result.urgency === "high"
+                      ? "Urgent – Seek immediate care"
+                      : result.urgency === "medium"
+                        ? "Moderate condition"
+                        : "Not urgent"}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.resultCard}>
+                <View style={styles.resultCardGlow} />
+                <Text style={styles.resultLabel}>Recommended Specialist</Text>
+                <Text style={styles.specialistName}>{selectedSpecialist}</Text>
+                <Text style={styles.resultDesc}>
+                  {result.reason
+                    ? result.reason
+                    : `Based on your symptoms of "${input}", a ${selectedSpecialist} can provide a thorough examination and primary care.`}
+                </Text>
+
+                <View style={styles.resultMetaRow}>
+                  <View style={styles.resultMetaChip}>
+                    <Ionicons name="pulse" size={14} color={THEME.primary} />
+                    <Text style={styles.resultMetaText}>{result.urgency.toUpperCase()} PRIORITY</Text>
+                  </View>
+                  <View style={styles.resultMetaChip}>
+                    <Ionicons name="medkit" size={14} color={THEME.primary} />
+                    <Text style={styles.resultMetaText}>{selectedSpecialist}</Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.findDoctorBtn}
+                  onPress={() =>
+                    selectedSpecialist
+                      ? navigation.navigate("DoctorSearchScreen", {
+                          specialty: selectedSpecialist,
+                        })
+                      : undefined
+                  }
+                >
+                  <Text style={styles.findDoctorText}>Find Doctors</Text>
+                  <Ionicons name="search" size={18} color={THEME.primary} />
+                </TouchableOpacity>
+              </View>
+
+              {recommendedDoctors.length > 0 ? (
+                <View style={styles.featuredSection}>
+                  <Text style={styles.featuredTitle}>Recommended Doctors</Text>
+                  <FlatList
+                    data={recommendedDoctors}
+                    keyExtractor={(item) => String(item.id)}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.featuredList}
+                    snapToAlignment="start"
+                    decelerationRate="fast"
+                    snapToInterval={282}
+                    renderItem={({ item }) => (
+                      <DoctorRecommendationCard
+                        doctor={item}
+                        onPress={() => {
+                          navigation.navigate("PatientDoctorDetails", {
+                            doctorId: item.id,
+                          });
+                        }}
+                      />
+                    )}
+                  />
+                </View>
+              ) : doctorsLoading ? (
+                <View style={styles.emptyRecommendationCard}>
+                  <ActivityIndicator size="small" color={THEME.primary} />
+                  <Text style={styles.emptyRecommendationTitle}>Loading specialists</Text>
+                  <Text style={styles.emptyRecommendationText}>
+                    Fetching live doctors for {selectedSpecialist}.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.emptyRecommendationCard}>
+                  <Ionicons name="search" size={18} color={THEME.primary} />
+                  <Text style={styles.emptyRecommendationTitle}>No doctors found for this specialty</Text>
+                  <Text style={styles.emptyRecommendationText}>
+                    Continue to search doctors and we will filter the directory for {selectedSpecialist}.
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={styles.resetBtn}
+                onPress={handleReset}
+              >
+                <Text style={styles.resetText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: THEME.background },
   safe: { flex: 1, backgroundColor: THEME.background },
+  headerBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 220,
+  },
+  fixedHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    backgroundColor: THEME.header,
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
+    shadowColor: "#02111F",
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 6,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 20,
-    backgroundColor: THEME.white,
     gap: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: THEME.border,
   },
   headerTextWrap: {
     flex: 1,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: THEME.background,
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
     justifyContent: "center",
     alignItems: "center",
   },
   refreshBtn: {
     marginLeft: "auto",
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: THEME.background,
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
     justifyContent: "center",
     alignItems: "center",
   },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: THEME.textPrimary },
-  headerSub: { fontSize: 13, color: THEME.textSecondary, marginTop: 2 },
-  scrollContent: { padding: 20 },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    letterSpacing: -0.6,
+  },
+  headerSub: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.74)",
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
   inputCard: {
     backgroundColor: THEME.white,
-    borderRadius: 20,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
-    marginBottom: 25,
+    borderRadius: 26,
+    padding: 18,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.07,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 5,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: "#E4EEF7",
+    overflow: "hidden",
+  },
+  aiAccentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 15,
+    marginBottom: 14,
+  },
+  aiCopy: {
+    flex: 1,
+  },
+  aiOrb: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: THEME.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: THEME.primary,
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  aiEyebrow: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: THEME.primary,
+    textTransform: "uppercase",
+    letterSpacing: 1.1,
+  },
+  aiSubcopy: {
+    marginTop: 4,
+    fontSize: 12,
+    color: THEME.textSecondary,
+    fontWeight: "600",
   },
   inputLabel: {
     fontSize: 14,
@@ -517,23 +688,40 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   textInput: {
-    minHeight: 120,
+    minHeight: 124,
     fontSize: 16,
     color: THEME.textPrimary,
     textAlignVertical: "top",
-    marginBottom: 15,
+    lineHeight: 24,
+    marginBottom: 14,
+  },
+  aiDivider: {
+    height: 1,
+    backgroundColor: "#EBF2F8",
+    marginBottom: 14,
   },
   analyzeBtn: {
-    backgroundColor: THEME.primary,
     height: 56,
     borderRadius: 28,
+    overflow: "hidden",
+    shadowColor: patientTheme.colors.primaryBlue,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  analyzeBtnDisabled: {
+    opacity: 0.55,
+  },
+  analyzeBtnContent: {
+    flex: 1,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     gap: 10,
   },
   analyzeBtnText: { color: THEME.white, fontWeight: "800", fontSize: 16 },
-  suggestionSection: { marginBottom: 25 },
+  suggestionSection: { marginBottom: 30 },
   sectionLabel: {
     fontSize: 14,
     fontWeight: "800",
@@ -562,8 +750,25 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600",
   },
-  loadingContainer: { paddingVertical: 40, alignItems: "center" },
-  loadingText: { marginTop: 15, color: THEME.primary, fontWeight: "700", fontSize: 16 },
+  loadingContainer: { paddingVertical: 36, alignItems: "center" },
+  loadingHalo: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#D7EBFA",
+  },
+  loadingText: { marginTop: 15, color: THEME.primary, fontWeight: "800", fontSize: 16 },
+  loadingSubtext: {
+    marginTop: 8,
+    textAlign: "center",
+    color: THEME.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: 22,
+  },
   resultContainer: { marginBottom: 25 },
   urgencyBadge: {
     alignSelf: "flex-start",
@@ -578,14 +783,25 @@ const styles = StyleSheet.create({
   urgencyLow: { backgroundColor: "#10B981" },
   resultCard: {
     backgroundColor: THEME.white,
-    borderRadius: 24,
+    borderRadius: 26,
     padding: 24,
-    shadowColor: THEME.primary,
-    shadowOpacity: 0.05,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
     shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 5,
     borderWidth: 1,
-    borderColor: THEME.softBlue,
+    borderColor: "#DCEAFB",
+    overflow: "hidden",
+  },
+  resultCardGlow: {
+    position: "absolute",
+    top: -34,
+    right: -10,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(56,189,248,0.10)",
   },
   resultLabel: {
     fontSize: 13,
@@ -617,7 +833,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   findDoctorBtn: {
-    backgroundColor: THEME.softBlue,
+    backgroundColor: "#E6F1FF",
     height: 56,
     borderRadius: 28,
     flexDirection: "row",
@@ -628,12 +844,13 @@ const styles = StyleSheet.create({
   findDoctorText: { color: THEME.primary, fontWeight: "800", fontSize: 16 },
   resetBtn: { alignSelf: "center", marginTop: 15, padding: 10 },
   resetText: { color: THEME.textSecondary, fontWeight: "700", textDecorationLine: "underline" },
-  featuredSection: { marginTop: 20 },
+  featuredSection: { marginTop: 24 },
   featuredTitle: {
-    fontSize: 16,
-    fontWeight: "800",
+    fontSize: 18,
+    fontWeight: "900",
     color: THEME.textPrimary,
-    marginBottom: 12,
+    marginBottom: 14,
+    letterSpacing: -0.4,
   },
   featuredList: { paddingRight: 20 },
   emptyRecommendationCard: {
@@ -656,37 +873,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   featuredCard: {
-    width: 220,
+    width: 266,
     backgroundColor: THEME.white,
-    borderRadius: 16,
-    marginRight: 12,
-    padding: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 3,
+    borderRadius: 20,
+    marginRight: 14,
+    borderWidth: 1,
+    borderColor: "#E7EEF6",
+    overflow: "hidden",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
-  featuredAvatar: {
+  featuredImageWrap: {
     width: "100%",
-    height: 110,
-    borderRadius: 12,
-    backgroundColor: "#DBEAFE",
-    marginBottom: 10,
-    alignItems: "center",
-    justifyContent: "center",
+    height: 170,
+    overflow: "hidden",
+    backgroundColor: "#EAF8FF",
+    position: "relative",
   },
-  featuredAvatarText: {
-    color: THEME.primary,
-    fontSize: 28,
-    fontWeight: "900",
+  featuredDoctorImage: {
+    width: "100%",
+    height: "100%",
   },
-  featuredName: { fontSize: 15, fontWeight: "700", color: THEME.textPrimary },
-  featuredSpecialty: { fontSize: 13, color: THEME.primary, marginTop: 2 },
+  featuredDoctorImageFallbackTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(234,248,255,0.12)",
+  },
+  featuredImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  recommendationAvailabilityBadge: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
+  },
+  featuredCardContent: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  featuredName: { fontSize: 16, fontWeight: "900", color: THEME.textPrimary },
+  featuredSpecialty: { fontSize: 13, color: THEME.primary, marginTop: 2, fontWeight: "700" },
+  featuredMetaLine: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
   featuredMetaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 6,
+    marginTop: 10,
     marginBottom: 10,
+    minHeight: 18,
   },
   featuredRating: { fontSize: 12, color: THEME.textSecondary },
   featuredDistance: { fontSize: 12, color: THEME.textSecondary },
@@ -694,18 +941,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 10,
+    minHeight: 18,
   },
   featuredInfoText: {
     fontSize: 12,
     color: THEME.textSecondary,
     fontWeight: "600",
-  },
-  availabilityBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    marginBottom: 10,
   },
   availabilityBadgeActive: {
     backgroundColor: "#DCFCE7",
@@ -729,14 +970,8 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.softBlue,
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#D8EAFE",
   },
   featuredCtaText: { color: THEME.primary, fontWeight: "700", fontSize: 13 },
-  disclaimer: {
-    textAlign: "center",
-    color: THEME.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-    opacity: 0.8,
-    marginTop: 10,
-  },
 });

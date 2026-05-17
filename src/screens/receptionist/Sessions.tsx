@@ -2,6 +2,8 @@ import React, { useCallback, useContext, useEffect, useMemo, useState } from "re
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -147,7 +149,10 @@ export default function ReceptionistSessions() {
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [sessions, setSessions] = useState<SessionBoardItem[]>([]);
+  const [allDoctors, setAllDoctors] = useState<DoctorItem[]>([]);
   const [noSessionDoctors, setNoSessionDoctors] = useState<DoctorItem[]>([]);
+  const [showAddSessionPicker, setShowAddSessionPicker] = useState(false);
+  const [doctorPickerSearch, setDoctorPickerSearch] = useState("");
 
   const receptionistName = user?.name?.trim() || "Receptionist";
 
@@ -234,6 +239,7 @@ export default function ReceptionistSessions() {
         });
 
         const doctorIdsWithSessions = new Set<number>(board.map((item: SessionBoardItem) => item.doctorId));
+        setAllDoctors(doctorRows);
         setNoSessionDoctors(
           doctorRows.filter((doctor) => !doctorIdsWithSessions.has(Number(doctor.doctorId)))
         );
@@ -359,6 +365,55 @@ export default function ReceptionistSessions() {
     [loadData]
   );
 
+  const doctorPickerItems = useMemo(() => {
+    const query = doctorPickerSearch.trim().toLowerCase();
+    return allDoctors
+      .filter((doctor) => {
+        if (!query) return true;
+        return [doctor.doctorName, doctor.specialization]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => {
+        const leftHasSessions = !noSessionDoctors.some(
+          (item) => Number(item.doctorUserId) === Number(left.doctorUserId)
+        );
+        const rightHasSessions = !noSessionDoctors.some(
+          (item) => Number(item.doctorUserId) === Number(right.doctorUserId)
+        );
+        if (leftHasSessions !== rightHasSessions) {
+          return leftHasSessions ? 1 : -1;
+        }
+        return left.doctorName.localeCompare(right.doctorName);
+      });
+  }, [allDoctors, doctorPickerSearch, noSessionDoctors]);
+
+  const openAddSessionPicker = useCallback(() => {
+    if (!allDoctors.length) {
+      Alert.alert("Doctors unavailable", "Assigned doctors are still loading. Please refresh and try again.");
+      return;
+    }
+    setDoctorPickerSearch("");
+    setShowAddSessionPicker(true);
+  }, [allDoctors.length]);
+
+  const openSessionManagementForDoctor = useCallback(
+    (doctor: DoctorItem) => {
+      setShowAddSessionPicker(false);
+      navigation.navigate("ReceptionistDoctorSessionManagement", {
+        doctorId: doctor.doctorId,
+        doctorUserId: doctor.doctorUserId,
+        doctorName: doctor.doctorName,
+        specialization: doctor.specialization || null,
+        initialTab: "manual",
+        openManualForm: true,
+      });
+    },
+    [navigation]
+  );
+
   if (!hasAccess) {
     return (
       <ReceptionAccessNotAssigned message="Doctor session management has not been assigned to your account." />
@@ -461,14 +516,7 @@ export default function ReceptionistSessions() {
                   </View>
                   <ReceptionistButton
                     label="Add Session"
-                    onPress={() =>
-                      navigation.navigate("ReceptionistDoctorSessionManagement", {
-                        doctorId: doctor.doctorId,
-                        doctorUserId: doctor.doctorUserId,
-                        doctorName: doctor.doctorName,
-                        specialization: doctor.specialization || null,
-                      })
-                    }
+                    onPress={() => openSessionManagementForDoctor(doctor)}
                   />
                 </SurfaceCard>
               ))}
@@ -624,6 +672,79 @@ export default function ReceptionistSessions() {
           </View>
         )}
       </ScrollView>
+
+      <Modal visible={showAddSessionPicker} transparent animationType="fade" onRequestClose={() => setShowAddSessionPicker(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowAddSessionPicker(false)}>
+          <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Session</Text>
+              <TouchableOpacity style={styles.modalCloseButton} onPress={() => setShowAddSessionPicker(false)}>
+                <Ionicons name="close" size={20} color={RECEPTION_THEME.navy} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalSearchBar}>
+              <Ionicons name="search-outline" size={18} color={RECEPTION_THEME.textSecondary} />
+              <TextInput
+                style={styles.modalSearchInput}
+                value={doctorPickerSearch}
+                onChangeText={setDoctorPickerSearch}
+                placeholder="Search doctor or specialty"
+                placeholderTextColor={RECEPTION_THEME.textSecondary}
+              />
+            </View>
+
+            <ScrollView style={styles.modalList} contentContainerStyle={styles.modalListContent} showsVerticalScrollIndicator={false}>
+              {doctorPickerItems.length === 0 ? (
+                <View style={styles.modalEmptyState}>
+                  <Ionicons name="person-outline" size={22} color={RECEPTION_THEME.textSecondary} />
+                  <Text style={styles.modalEmptyText}>No doctors match this search.</Text>
+                </View>
+              ) : (
+                doctorPickerItems.map((doctor) => {
+                  return (
+                    <TouchableOpacity
+                      key={doctor.doctorUserId}
+                      style={styles.modalDoctorRow}
+                      onPress={() => openSessionManagementForDoctor(doctor)}
+                      activeOpacity={0.88}
+                    >
+                      <View style={styles.modalDoctorAvatar}>
+                        <Text style={styles.modalDoctorAvatarText}>
+                          {doctor.doctorName
+                            .split(" ")
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((part) => part[0]?.toUpperCase())
+                            .join("") || "DR"}
+                        </Text>
+                      </View>
+                      <View style={styles.modalDoctorCopy}>
+                        <Text style={styles.modalDoctorName}>{doctor.doctorName}</Text>
+                        <Text style={styles.modalDoctorMeta}>{doctor.specialization || "Specialist"}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={RECEPTION_THEME.textSecondary} />
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <TouchableOpacity
+        style={styles.floatingAddButton}
+        activeOpacity={0.9}
+        onPress={openAddSessionPicker}
+        accessibilityRole="button"
+        accessibilityLabel="Add doctor session"
+      >
+        <View style={styles.floatingAddHalo} />
+        <View style={styles.floatingAddCore}>
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -843,5 +964,142 @@ const styles = StyleSheet.create({
   },
   noSessionCopy: {
     gap: 4,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(2, 6, 23, 0.45)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 18,
+    maxHeight: "80%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  modalTitle: {
+    color: RECEPTION_THEME.navy,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: RECEPTION_THEME.lightAqua,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalSearchBar: {
+    marginTop: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 16,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: RECEPTION_THEME.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  modalSearchInput: {
+    flex: 1,
+    color: RECEPTION_THEME.navy,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalList: {
+    marginTop: 16,
+  },
+  modalListContent: {
+    gap: 10,
+    paddingBottom: 8,
+  },
+  modalEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 28,
+    gap: 8,
+  },
+  modalEmptyText: {
+    color: RECEPTION_THEME.textSecondary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalDoctorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: "#F8FBFF",
+    borderWidth: 1,
+    borderColor: RECEPTION_THEME.border,
+  },
+  modalDoctorAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: RECEPTION_THEME.lightAqua,
+  },
+  modalDoctorAvatarText: {
+    color: RECEPTION_THEME.navy,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  modalDoctorCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  modalDoctorName: {
+    color: RECEPTION_THEME.navy,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  modalDoctorMeta: {
+    color: RECEPTION_THEME.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  floatingAddButton: {
+    position: "absolute",
+    right: 22,
+    bottom: 136,
+    width: 74,
+    height: 74,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  floatingAddHalo: {
+    position: "absolute",
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: "rgba(56, 189, 248, 0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.18)",
+  },
+  floatingAddCore: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: RECEPTION_THEME.primary,
+    borderWidth: 4,
+    borderColor: RECEPTION_THEME.aqua,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: RECEPTION_THEME.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    elevation: 8,
   },
 });
