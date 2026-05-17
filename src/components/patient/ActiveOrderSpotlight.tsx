@@ -82,7 +82,11 @@ const formatTime = (value: string) =>
 const pickActiveOrder = (orders: OrderSummary[]) =>
   orders.find((order) => !TERMINAL_STATUSES.has(order.status)) ?? null;
 
-export default function ActiveOrderSpotlight() {
+export default function ActiveOrderSpotlight({
+  onActiveStateChange,
+}: {
+  onActiveStateChange?: (active: boolean) => void;
+}) {
   const navigation = useNavigation<NativeStackNavigationProp<PatientStackParamList>>();
   const { user } = React.useContext(AuthContext);
   const [order, setOrder] = useState<OrderSummary | null>(null);
@@ -110,6 +114,10 @@ export default function ActiveOrderSpotlight() {
       return undefined;
     }, [loadActiveOrder])
   );
+
+  useEffect(() => {
+    onActiveStateChange?.(Boolean(order));
+  }, [onActiveStateChange, order]);
 
   useEffect(() => {
     const patientId = user?.id;

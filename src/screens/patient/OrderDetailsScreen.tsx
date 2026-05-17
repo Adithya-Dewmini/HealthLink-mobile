@@ -255,6 +255,14 @@ export default function OrderDetailsScreen() {
             <View style={styles.detailBlock}>
               <Text style={styles.blockLabel}>Invoice</Text>
               <Text style={styles.blockText}>{order.invoice.invoiceNo}</Text>
+              <Text style={styles.blockText}>Amount: {formatPrice(order.invoice.amount ?? order.invoice.total)}</Text>
+              <Text style={styles.blockText}>Status: {String(order.invoice.status || "issued").replace(/_/g, " ")}</Text>
+              <Text style={styles.blockText}>
+                Issued: {new Date(order.invoice.issuedAt).toLocaleString("en-LK")}
+              </Text>
+              <Text style={styles.blockText}>
+                Email: {order.invoice.emailedAt ? `Sent ${new Date(order.invoice.emailedAt).toLocaleString("en-LK")}` : "Pending"}
+              </Text>
               <TouchableOpacity
                 style={styles.inlineActionButton}
                 onPress={() => navigation.navigate("InvoiceScreen", { orderId: order.id })}
@@ -263,7 +271,12 @@ export default function OrderDetailsScreen() {
                 <Text style={styles.inlineActionText}>View invoice</Text>
               </TouchableOpacity>
             </View>
-          ) : null}
+          ) : (
+            <View style={styles.detailBlock}>
+              <Text style={styles.blockLabel}>Invoice</Text>
+              <Text style={styles.blockText}>Invoice will appear after payment confirmation.</Text>
+            </View>
+          )}
           {order.paymentMethod === "online" && order.paymentStatus !== "paid" ? (
             <TouchableOpacity style={styles.inlinePrimaryButton} onPress={() => void handleResumePayment()}>
               <Ionicons name="card-outline" size={16} color="#FFFFFF" />

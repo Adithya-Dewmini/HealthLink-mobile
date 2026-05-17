@@ -111,6 +111,8 @@ export type PaymentSummary = {
 export type InvoiceSummary = {
   id: number;
   invoiceNo: string;
+  amount?: number;
+  status?: string;
   subtotal: number;
   deliveryFee: number;
   serviceFee: number;
@@ -119,6 +121,8 @@ export type InvoiceSummary = {
   currency: string;
   pdfUrl: string | null;
   issuedAt: string;
+  emailedAt?: string | null;
+  emailTo?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -414,6 +418,11 @@ const normalizeInvoice = (item: any): InvoiceSummary | null => {
         : typeof item?.invoice_no === "string"
           ? item.invoice_no
           : `HL-INV-${id}`,
+    amount: normalizeMoney(item?.amount ?? item?.total),
+    status:
+      typeof item?.status === "string" && item.status.trim()
+        ? item.status
+        : "issued",
     subtotal: normalizeMoney(item?.subtotal),
     deliveryFee: normalizeMoney(item?.deliveryFee ?? item?.delivery_fee),
     serviceFee: normalizeMoney(item?.serviceFee ?? item?.service_fee),
@@ -433,6 +442,18 @@ const normalizeInvoice = (item: any): InvoiceSummary | null => {
         : typeof item?.issued_at === "string"
           ? item.issued_at
           : new Date().toISOString(),
+    emailedAt:
+      typeof item?.emailedAt === "string"
+        ? item.emailedAt
+        : typeof item?.emailed_at === "string"
+          ? item.emailed_at
+          : null,
+    emailTo:
+      typeof item?.emailTo === "string"
+        ? item.emailTo
+        : typeof item?.email_to === "string"
+          ? item.email_to
+          : null,
     createdAt:
       typeof item?.createdAt === "string"
         ? item.createdAt

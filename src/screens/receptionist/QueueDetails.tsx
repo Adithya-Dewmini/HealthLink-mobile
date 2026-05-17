@@ -196,11 +196,19 @@ export default function ReceptionistQueueDetails() {
     socket.on("queue:update", refresh);
     socket.on("queue:next", refresh);
     socket.on("session:start", refresh);
+    socket.on("session.updated", refresh);
+    socket.on("appointment.updated", refresh);
+    socket.on("consultation.updated", refresh);
+    socket.on("connect", refresh);
 
     return () => {
       socket.off("queue:update", refresh);
       socket.off("queue:next", refresh);
       socket.off("session:start", refresh);
+      socket.off("session.updated", refresh);
+      socket.off("appointment.updated", refresh);
+      socket.off("consultation.updated", refresh);
+      socket.off("connect", refresh);
       leaveSessionRoom(sessionId);
     };
   }, [detail?.queue.sessionId, loadDetail, route.params?.sessionId]);

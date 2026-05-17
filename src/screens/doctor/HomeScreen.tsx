@@ -171,6 +171,7 @@ export default function HomeScreen() {
         params: {
           scheduleId: session.id,
           sessionId: session.id,
+          queueId: session.queueId ?? undefined,
         },
       });
     },
@@ -302,6 +303,7 @@ export default function HomeScreen() {
                       <Text style={styles.liveQueueTitle} numberOfLines={1}>
                         {liveSession.medicalCenterName || "Clinic Session"}
                       </Text>
+                      <Text style={styles.liveQueueMeta}>Dr. {doctorName}</Text>
                     </View>
                     <ScheduleStatusBadge label="Live" tone="live" />
                   </View>

@@ -385,11 +385,17 @@ export default function QueueScreen() {
     socket.on("queue:update", handleQueueUpdated);
     socket.on("queue:next", handleQueueUpdated);
     socket.on("session:start", handleQueueUpdated);
+    socket.on("session.updated", handleQueueUpdated);
+    socket.on("appointment.updated", handleQueueUpdated);
+    socket.on("consultation.updated", handleQueueUpdated);
 
     return () => {
       socket.off("queue:update", handleQueueUpdated);
       socket.off("queue:next", handleQueueUpdated);
       socket.off("session:start", handleQueueUpdated);
+      socket.off("session.updated", handleQueueUpdated);
+      socket.off("appointment.updated", handleQueueUpdated);
+      socket.off("consultation.updated", handleQueueUpdated);
       if (activeSessionId) {
         leaveSessionRoom(activeSessionId);
       }
@@ -429,7 +435,11 @@ export default function QueueScreen() {
         void notifyLocal("Queue Empty", "There are no patients waiting.");
       }
       if (response?.queueId) {
-        navigation.navigate("ConsultationPage", { queueId: response.queueId });
+        navigation.navigate("ConsultationPage", {
+          queueId: response.queueId,
+          patientId: response?.patient?.patient_id ?? null,
+          sessionId: queue?.sessionId ?? selectedScheduleId ?? null,
+        });
       }
       await loadQueueScreen("refresh");
     } catch (loadError: any) {
@@ -450,7 +460,11 @@ export default function QueueScreen() {
       return;
     }
 
-    navigation.navigate("ConsultationPage", { queueId: currentPatient.queue_id });
+    navigation.navigate("ConsultationPage", {
+      queueId: currentPatient.queue_id,
+      patientId: currentPatient.patient_id ?? null,
+      sessionId: queue?.sessionId ?? selectedScheduleId ?? null,
+    });
   };
 
   const handleCallSelectedPatient = async (patient: DoctorQueuePatient) => {
@@ -461,7 +475,11 @@ export default function QueueScreen() {
       setActionLoading("next");
       const response = await callSelectedPatient(token, patient.id);
       if (response?.queueId) {
-        navigation.navigate("ConsultationPage", { queueId: response.queueId });
+        navigation.navigate("ConsultationPage", {
+          queueId: response.queueId,
+          patientId: response?.patient?.patient_id ?? patient.patient_id ?? null,
+          sessionId: queue?.sessionId ?? selectedScheduleId ?? null,
+        });
       }
       await loadQueueScreen("refresh");
     } catch (loadError: any) {
@@ -743,7 +761,7 @@ export default function QueueScreen() {
           />
           <ActionButton
             icon="refresh-circle"
-            label="Skip"
+            label="Mark No Show"
             onPress={handleSkipPatient}
             disabled={!isQueueLive || !hasActivePatient}
             loading={actionLoading === "skip"}
@@ -764,7 +782,7 @@ export default function QueueScreen() {
 
         <View style={styles.currentPatientCard}>
           <View style={styles.currentPatientHeader}>
-            <Text style={styles.sectionTitle}>Current Patient</Text>
+            <Text style={styles.sectionTitle}>Called / In Consultation</Text>
             <View style={styles.queueBadge}>
               <Text style={styles.queueBadgeText}>#{String(currentPatient?.token_number ?? "--")}</Text>
             </View>
@@ -792,6 +810,9 @@ export default function QueueScreen() {
                       )}`
                     : "Walk-in patient"}
                 </Text>
+                <Text style={styles.currentPatientMeta}>
+                  {hasActivePatient ? "Patient is ready for consultation." : "No patient has been called yet."}
+                </Text>
               </View>
             </View>
           ) : (
@@ -815,7 +836,7 @@ export default function QueueScreen() {
         </View>
 
         <View style={styles.queueSectionHeader}>
-          <Text style={styles.sectionTitle}>Waiting Queue</Text>
+          <Text style={styles.sectionTitle}>Waiting</Text>
           <Text style={styles.sectionCount}>{waitingPatients.length}</Text>
         </View>
 

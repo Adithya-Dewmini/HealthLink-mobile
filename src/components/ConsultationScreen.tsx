@@ -35,6 +35,9 @@ import { getDisplayInitials, resolveDoctorImage } from "../utils/imageUtils";
 
 type ConsultationScreenProps = {
   queueId?: string | number;
+  patientId?: string | number | null;
+  appointmentId?: string | number | null;
+  sessionId?: string | number | null;
 };
 
 type MedicineItem = {
@@ -226,7 +229,12 @@ const mapContextMedicine = (medicine: any, index: number): MedicineItem => ({
   notes: String(medicine?.instructions || medicine?.notes || "").trim(),
 });
 
-export default function ConsultationScreen({ queueId }: ConsultationScreenProps) {
+export default function ConsultationScreen({
+  queueId,
+  patientId: routePatientId,
+  appointmentId: routeAppointmentId,
+  sessionId: routeSessionId,
+}: ConsultationScreenProps) {
   const navigation = useNavigation<any>();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"History" | "Notes" | "Medicines">("Notes");
@@ -298,10 +306,12 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
             : "";
           setPatientAge(gender ? `${data.patient.age}${gender}` : `${data.patient.age}`);
         }
-        setPatientId(data?.patient?.id ?? null);
+        setPatientId(data?.patient?.id ?? (routePatientId ? Number(routePatientId) : null));
         setQueueSummary(data?.queue ?? null);
-        setAppointmentSummary(data?.appointment ?? null);
-        setSessionSummary(data?.session ?? null);
+        setAppointmentSummary(
+          data?.appointment ?? (routeAppointmentId ? { id: routeAppointmentId } : null)
+        );
+        setSessionSummary(data?.session ?? (routeSessionId ? { id: routeSessionId } : null));
         setPatientToken(data?.queue?.tokenNumber ?? null);
         setPrescriptionId(data?.consultation?.prescriptionId ?? null);
         setPrescriptionIssuedAt(data?.consultation?.prescriptionIssuedAt ?? null);
@@ -320,7 +330,7 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
       }
     };
     void fetchPatientData();
-  }, [isVerifiedDoctor, queueId]);
+  }, [isVerifiedDoctor, queueId, routeAppointmentId, routePatientId, routeSessionId]);
 
   useEffect(() => {
     if (!isVerifiedDoctor) return;
@@ -1077,7 +1087,11 @@ export default function ConsultationScreen({ queueId }: ConsultationScreenProps)
               <ActivityIndicator size="small" color={THEME.surface} />
             ) : (
               <>
-                <Text style={styles.completeButtonText}>Complete Consultation</Text>
+                <Text style={styles.completeButtonText}>
+                  {hasIssuedPrescription || hasMedicineEntries
+                    ? "Complete Consultation"
+                    : "Complete Without Prescription"}
+                </Text>
                 <Ionicons name="arrow-forward" size={18} color={THEME.surface} />
               </>
             )}

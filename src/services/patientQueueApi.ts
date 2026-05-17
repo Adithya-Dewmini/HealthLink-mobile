@@ -1,5 +1,5 @@
 import { apiFetch } from "../config/api";
-import type { ActiveQueueState, ActiveQueueStatus } from "../components/patient/ActiveQueueFloatingCard";
+import type { ActiveQueueState, ActiveQueueStatus } from "../components/patient/LiveQueueCard";
 
 type QueuePayload = ActiveQueueState & {
   queueStatus?: string | null;
@@ -15,9 +15,16 @@ const VALID_STATUSES = new Set<ActiveQueueStatus>([
   "today_appointment",
   "queue_live",
   "check_in_required",
+  "not_arrived",
+  "checked_in",
   "waiting",
   "next",
+  "called",
+  "in_consultation",
+  "late",
   "missed",
+  "cancelled",
+  "completed",
 ]);
 
 const parseErrorMessage = async (response: Response, fallback: string) => {
@@ -53,6 +60,7 @@ export const normalizePatientActiveQueue = (payload: unknown): QueuePayload | nu
     estimatedWaitMinutes: Number(data.estimatedWaitMinutes ?? 0) || undefined,
     queueStatus: data.queueStatus ? String(data.queueStatus) : null,
     patientQueueStatus: data.patientQueueStatus ? String(data.patientQueueStatus) : null,
+    consultationStatus: data.consultationStatus ? String(data.consultationStatus) : null,
     checkInState: data.checkInState ? String(data.checkInState) : null,
     waitingCount: Number(data.waitingCount ?? 0) || 0,
     message: data.message ? String(data.message) : null,

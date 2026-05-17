@@ -150,12 +150,8 @@ export default function CheckoutScreen() {
       ) : (
         <>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.fulfillmentCard}>
-              <Text style={styles.eyebrow}>Fulfillment</Text>
-              <Text style={styles.cardTitle}>Choose how you receive this order</Text>
-              <Text style={styles.cardText}>
-                Pickup stays available, and delivery is pharmacy-managed without a separate rider flow.
-              </Text>
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Choose delivery method</Text>
               <View style={styles.fulfillmentToggleRow}>
                 {(["pickup", "delivery"] as const).map((option) => {
                   const active = fulfillmentType === option;
@@ -166,7 +162,7 @@ export default function CheckoutScreen() {
                       onPress={() => setFulfillmentType(option)}
                     >
                       <Text style={[styles.fulfillmentToggleText, active && styles.fulfillmentToggleTextActive]}>
-                        {option === "pickup" ? "Pickup" : "Delivery"}
+                        {option === "pickup" ? "Pick Up" : "Deliver To Me"}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -391,41 +387,27 @@ const styles = StyleSheet.create({
   centerWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   helperText: { fontSize: 15, color: THEME.textSecondary },
   content: { padding: 20, paddingBottom: 220 },
-  fulfillmentCard: {
-    backgroundColor: "#0F172A",
-    borderRadius: 28,
-    padding: 20,
-  },
-  eyebrow: {
-    color: "#94A3B8",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-  },
-  cardTitle: { marginTop: 8, color: "#FFFFFF", fontSize: 24, fontWeight: "800" },
-  cardText: { marginTop: 8, color: "#CBD5E1", fontSize: 14, lineHeight: 22 },
   fulfillmentToggleRow: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 16,
   },
   fulfillmentToggle: {
     flex: 1,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    minHeight: 52,
+    borderRadius: 16,
+    backgroundColor: "#F8FAFC",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: THEME.border,
+    paddingHorizontal: 10,
   },
   fulfillmentToggleActive: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#FFFFFF",
+    backgroundColor: THEME.modernAccentDark,
+    borderColor: THEME.modernAccentDark,
   },
-  fulfillmentToggleText: { fontSize: 14, fontWeight: "800", color: "#CBD5E1" },
-  fulfillmentToggleTextActive: { color: "#0F172A" },
+  fulfillmentToggleText: { fontSize: 15, fontWeight: "800", color: THEME.navy },
+  fulfillmentToggleTextActive: { color: "#FFFFFF" },
   sectionCard: {
     marginTop: 16,
     backgroundColor: "#FFFFFF",

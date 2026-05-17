@@ -39,6 +39,7 @@ type SessionItem = {
   doctorId: number;
   doctorName: string;
   specialty: string;
+  clinicName: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -91,6 +92,7 @@ const normalizeSession = (input: any): SessionItem => ({
   doctorId: Number(input?.doctor_id ?? input?.doctorId ?? 0),
   doctorName: String(input?.doctor_name || input?.doctorName || "Doctor"),
   specialty: String(input?.specialty || "Specialist"),
+  clinicName: String(input?.clinic_name || input?.clinicName || "Clinic"),
   date: String(input?.date || ""),
   startTime: String(input?.start_time || input?.startTime || "").slice(0, 5),
   endTime: String(input?.end_time || input?.endTime || "").slice(0, 5),
@@ -260,10 +262,16 @@ export default function ReceptionistSessions() {
     };
 
     socket.on("queue:update", refresh);
+    socket.on("session.updated", refresh);
+    socket.on("appointment.updated", refresh);
+    socket.on("consultation.updated", refresh);
     socket.on("connect", refresh);
 
     return () => {
       socket.off("queue:update", refresh);
+      socket.off("session.updated", refresh);
+      socket.off("appointment.updated", refresh);
+      socket.off("consultation.updated", refresh);
       socket.off("connect", refresh);
     };
   }, [loadData]);
@@ -480,6 +488,7 @@ export default function ReceptionistSessions() {
                   <View style={styles.sessionCopy}>
                     <Text style={styles.sessionTitle}>{session.doctorName}</Text>
                     <Text style={styles.sessionMeta}>{session.specialty}</Text>
+                    <Text style={styles.sessionMeta}>{session.clinicName}</Text>
                     <Text style={styles.sessionMeta}>
                       {formatDateLabel(session.date)} • {session.startTime} - {session.endTime}
                     </Text>
@@ -521,11 +530,24 @@ export default function ReceptionistSessions() {
 
                 <View style={styles.actionsColumn}>
                   {session.state === "today" ? (
-                    <ReceptionistButton
-                      label="Start Session"
-                      onPress={() => void runStartSession(session.id)}
-                      loading={busyKey === `start:${session.id}`}
-                    />
+                    <View style={styles.inlineActions}>
+                      <ReceptionistButton
+                        label="Start Session"
+                        onPress={() => void runStartSession(session.id)}
+                        loading={busyKey === `start:${session.id}`}
+                      />
+                      <ReceptionistButton
+                        label="Check In"
+                        tone="secondary"
+                        onPress={() =>
+                          navigation.navigate("ReceptionistCheckInPatients", {
+                            sessionId: session.id,
+                            doctorName: session.doctorName,
+                            specialization: session.specialty,
+                          })
+                        }
+                      />
+                    </View>
                   ) : null}
                   {session.state === "upcoming" ? (
                     <TouchableOpacity

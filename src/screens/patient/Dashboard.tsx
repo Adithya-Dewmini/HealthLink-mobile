@@ -18,11 +18,11 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { PatientStackParamList } from "../../types/navigation";
 import { apiFetch } from "../../config/api";
 import { patientTheme } from "../../constants/patientTheme";
-import ActiveQueueFloatingCard, {
+import LiveQueueCard, {
   type ActiveQueueState,
   UpcomingAppointmentCard,
-} from "../../components/patient/ActiveQueueFloatingCard";
-import ActiveOrderSpotlight from "../../components/patient/ActiveOrderSpotlight";
+} from "../../components/patient/LiveQueueCard";
+import LiveOrderCard from "../../components/patient/LiveOrderCard";
 import DashboardBannerCarousel from "../../components/patient/DashboardBannerCarousel";
 import PremiumDashboardEntityCard from "../../components/patient/PremiumDashboardEntityCard";
 import {
@@ -36,6 +36,9 @@ import {
   type DashboardPharmacy,
 } from "../../services/patientDashboardApi";
 import { fetchPatientActiveQueueStatus } from "../../services/patientQueueApi";
+import { getSocket } from "../../services/socket";
+import { connectRealtimeSocket, subscribeToPatientRealtime } from "../../services/socketService";
+import { useAuth } from "../../utils/AuthContext";
 
 const THEME = {
   ...patientTheme.colors,
@@ -168,10 +171,12 @@ const InlineMessage = ({
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<PatientNavigation>();
+  const { user } = useAuth();
   const fabFloat = useRef(new Animated.Value(0)).current;
   const fabPulse = useRef(new Animated.Value(0)).current;
   const [profileName, setProfileName] = useState("Patient");
   const [activeQueue, setActiveQueue] = useState<ActiveQueueState | null>(null);
+  const [hasActiveOrder, setHasActiveOrder] = useState(false);
   const [banners, setBanners] = useState<DashboardBanner[]>([]);
   const [medicalCenters, setMedicalCenters] = useState<DashboardMedicalCenter[]>([]);
   const [pharmacies, setPharmacies] = useState<DashboardPharmacy[]>([]);
@@ -323,12 +328,19 @@ export default function Dashboard() {
     }, [loadDashboard])
   );
 
-  const showFloatingQueue = Boolean(
+  const showLiveQueueCard = Boolean(
     activeQueue?.active &&
       activeQueue.status !== "appointment_booked" &&
       activeQueue.status !== "today_appointment" &&
-      activeQueue.status !== "none"
+      activeQueue.status !== "none" &&
+      activeQueue.status !== "completed" &&
+      activeQueue.status !== "cancelled" &&
+      activeQueue.status !== "missed"
   );
+  const showUpcomingAppointmentCard = Boolean(
+    activeQueue && (activeQueue.status === "appointment_booked" || activeQueue.status === "today_appointment")
+  );
+  const hasActiveUpdates = hasActiveOrder || showLiveQueueCard;
 
   const handleUpcomingPress = useCallback(() => {
     navigation.navigate("Appointments");
@@ -348,6 +360,34 @@ export default function Dashboard() {
 
     navigation.navigate("Appointments");
   }, [activeQueue, navigation]);
+
+  useEffect(() => {
+    const patientId = user?.id;
+    if (!patientId) {
+      return undefined;
+    }
+
+    void connectRealtimeSocket();
+    void subscribeToPatientRealtime(patientId);
+    const socket = getSocket();
+    const refresh = () => {
+      void loadDashboard("refresh");
+    };
+
+    socket.on("queue:update", refresh);
+    socket.on("session.updated", refresh);
+    socket.on("appointment.updated", refresh);
+    socket.on("consultation.updated", refresh);
+    socket.on("connect", refresh);
+
+    return () => {
+      socket.off("queue:update", refresh);
+      socket.off("session.updated", refresh);
+      socket.off("appointment.updated", refresh);
+      socket.off("consultation.updated", refresh);
+      socket.off("connect", refresh);
+    };
+  }, [loadDashboard, user?.id]);
 
   const handleBannerPress = useCallback((banner: DashboardBanner) => {
     const targetType = String(banner.targetType || "none").toLowerCase();
@@ -529,7 +569,6 @@ export default function Dashboard() {
           contentContainerStyle={[
             styles.scrollContent,
             { paddingTop: fixedHeaderHeight },
-            showFloatingQueue ? styles.scrollContentWithTracker : null,
           ]}
           refreshControl={
             <RefreshControl
@@ -558,9 +597,19 @@ export default function Dashboard() {
           </View>
 
           <View style={styles.bodySection}>
-            <ActiveOrderSpotlight />
+            {hasActiveUpdates ? <Text style={styles.sectionLabel}>Active Updates</Text> : null}
+            {hasActiveUpdates ? (
+              <View style={styles.activeUpdatesStack}>
+                {showLiveQueueCard && activeQueue ? (
+                  <LiveQueueCard queue={activeQueue} onPress={handleQueuePress} />
+                ) : null}
+                <LiveOrderCard onActiveStateChange={setHasActiveOrder} />
+              </View>
+            ) : (
+              <LiveOrderCard onActiveStateChange={setHasActiveOrder} />
+            )}
 
-            {activeQueue && (activeQueue.status === "appointment_booked" || activeQueue.status === "today_appointment") ? (
+            {showUpcomingAppointmentCard && activeQueue ? (
               <UpcomingAppointmentCard appointment={activeQueue} onPress={handleUpcomingPress} />
             ) : null}
 
@@ -735,14 +784,13 @@ export default function Dashboard() {
           </View>
         </ScrollView>
 
-        {showFloatingQueue && activeQueue ? <ActiveQueueFloatingCard queue={activeQueue} onPress={handleQueuePress} /> : null}
         <Animated.View
           pointerEvents="box-none"
           style={[
             styles.medimateFab,
             fabAnimatedStyle,
             {
-              bottom: showFloatingQueue ? 196 : Math.max(insets.bottom, 20) + 88,
+              bottom: Math.max(insets.bottom, 20) + 88,
             },
           ]}
         >
@@ -819,10 +867,7 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bg,
   },
   scrollContent: {
-    paddingBottom: 200,
-  },
-  scrollContentWithTracker: {
-    paddingBottom: 300,
+    paddingBottom: 220,
   },
   scrollHeroSection: {
     position: "relative",
@@ -845,6 +890,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: CONTENT_GUTTER,
     backgroundColor: THEME.bg,
     zIndex: 1,
+  },
+  activeUpdatesStack: {
+    marginBottom: 8,
   },
   sectionLabel: {
     fontSize: 12,

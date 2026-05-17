@@ -33,6 +33,19 @@ const extractStatusCode = (error: unknown) => {
   return typeof response.status === "number" ? response.status : null;
 };
 
+const extractErrorCode = (error: unknown) => {
+  if (!isRecord(error)) return null;
+
+  const directCode = error.code;
+  if (typeof directCode === "string" && directCode.trim()) return directCode.trim().toUpperCase();
+
+  const response = error.response;
+  if (!isRecord(response)) return null;
+  const data = response.data;
+  if (!isRecord(data)) return null;
+  return typeof data.code === "string" && data.code.trim() ? data.code.trim().toUpperCase() : null;
+};
+
 export const getFriendlyError = (
   error: unknown,
   fallbackMessage = "Something went wrong. Please try again."
@@ -40,6 +53,30 @@ export const getFriendlyError = (
   const message = extractMessage(error).trim();
   const normalized = message.toLowerCase();
   const statusCode = extractStatusCode(error);
+  const errorCode = extractErrorCode(error);
+
+  switch (errorCode) {
+    case "SESSION_NOT_LIVE":
+      return "This session is not live yet. Start or reopen the queue first.";
+    case "DOCTOR_NOT_ASSIGNED":
+      return "Your doctor profile is not linked to this clinic session.";
+    case "QUEUE_NOT_FOUND":
+      return "Queue details are unavailable right now. Refresh and try again.";
+    case "QUEUE_ALREADY_COMPLETED":
+      return "This clinic queue has already ended.";
+    case "PATIENT_NOT_CALLED":
+      return "No active called patient was found for this action.";
+    case "CONSULTATION_NOT_FOUND":
+      return "This consultation could not be found.";
+    case "CONSULTATION_ALREADY_COMPLETED":
+      return "This consultation has already been completed.";
+    case "PRESCRIPTION_REQUIRED_FIELDS":
+      return "Review the medicine details before issuing or completing the prescription.";
+    case "NOT_ALLOWED":
+      return "You do not have permission to perform this action.";
+    default:
+      break;
+  }
 
   if (
     normalized.includes("failed to fetch") ||

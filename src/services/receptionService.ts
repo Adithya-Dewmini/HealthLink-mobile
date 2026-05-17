@@ -34,15 +34,52 @@ const friendlyReceptionError = (message: string, fallback: string) => {
   return message.trim() || fallback;
 };
 
+const friendlyReceptionErrorCode = (code: string | null | undefined, fallback: string) => {
+  switch (String(code || "").trim().toUpperCase()) {
+    case "APPOINTMENT_NOT_FOUND":
+      return "This appointment could not be found.";
+    case "ALREADY_CHECKED_IN":
+      return "This patient is already checked in.";
+    case "APPOINTMENT_CANCELLED":
+      return "Cancelled appointments cannot be checked in.";
+    case "APPOINTMENT_COMPLETED":
+      return "Completed appointments cannot be checked in.";
+    case "APPOINTMENT_MISSED":
+      return "Missed appointments cannot be checked in.";
+    case "SESSION_NOT_TODAY":
+      return "Only today's appointments can be updated here.";
+    case "SESSION_NOT_LIVE":
+      return "This session is not live yet.";
+    case "QUEUE_ENTRY_EXISTS":
+      return "This patient already has a queue entry.";
+    case "QUEUE_NOT_FOUND":
+      return "Queue details are unavailable for this session.";
+    case "QUEUE_NOT_ACTIVE":
+      return "This queue is not active right now.";
+    case "QUEUE_NOT_STARTED":
+      return "Start the session before using queue actions.";
+    case "NOT_ALLOWED":
+      return "You do not have permission to perform this action.";
+    default:
+      return fallback;
+  }
+};
+
 const requireOk = async (response: Response, fallback: string) => {
   const body = await parseBody(response);
   if (!response.ok) {
+    const errorCode =
+      typeof body.code === "string"
+        ? body.code
+        : body && typeof body.error === "object" && typeof body.error?.code === "string"
+          ? body.error.code
+          : null;
     const message = typeof body.message === "string" && body.message.trim() ? body.message : fallback;
     if (IS_DEVELOPMENT) {
       console.log("[reception]", response.url, response.status, body);
       throw new Error(`${message} (HTTP ${response.status} @ ${response.url})`);
     }
-    throw new Error(friendlyReceptionError(message, fallback));
+    throw new Error(friendlyReceptionError(message, friendlyReceptionErrorCode(errorCode, fallback)));
   }
   return body;
 };

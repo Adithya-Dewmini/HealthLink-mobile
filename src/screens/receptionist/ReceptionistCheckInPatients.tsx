@@ -34,6 +34,7 @@ import {
   updateReceptionAppointment,
   checkInReceptionVisit,
 } from "../../services/receptionService";
+import { connectRealtimeSocket } from "../../services/socketService";
 import { getFriendlyError } from "../../utils/friendlyErrors";
 import { getSocket } from "../../services/socket";
 
@@ -68,6 +69,7 @@ type SessionItem = {
   id: number;
   doctorName: string;
   specialty: string;
+  clinicName: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -87,7 +89,7 @@ type SectionKey = "booked" | "checked_in" | "late" | "missed" | "walkins";
 
 const LATE_THRESHOLD_MINUTES = 15;
 const SECTION_TABS: Array<{ key: SectionKey; label: string }> = [
-  { key: "booked", label: "Booked" },
+  { key: "booked", label: "Not Arrived" },
   { key: "checked_in", label: "Checked In" },
   { key: "late", label: "Late" },
   { key: "missed", label: "Missed" },
@@ -98,6 +100,7 @@ const normalizeSession = (input: any): SessionItem => ({
   id: Number(input?.id ?? 0),
   doctorName: String(input?.doctor_name || input?.doctorName || "Doctor"),
   specialty: String(input?.specialty || "Specialist"),
+  clinicName: String(input?.clinic_name || input?.clinicName || "Clinic"),
   date: String(input?.date || ""),
   startTime: String(input?.start_time || input?.startTime || "").slice(0, 5),
   endTime: String(input?.end_time || input?.endTime || "").slice(0, 5),
@@ -125,6 +128,67 @@ const queueStatusTone = (status?: string | null): "info" | "warning" | "success"
   if (normalized === "PAUSED") return "warning";
   if (normalized === "ENDED" || normalized === "COMPLETED") return "neutral";
   return "info";
+};
+
+const isSessionLive = (status?: string | null) => {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "LIVE" || normalized === "PAUSED";
+};
+
+const getVisitStatusLabel = (visit: VisitItem, isLateSection: boolean) => {
+  if (isLateSection) return "Late";
+  switch (visit.visitStatus) {
+    case "booked":
+      return "Not Arrived";
+    case "checked_in":
+      return "Checked In";
+    case "waiting":
+      return "Waiting";
+    case "with_doctor":
+      return "With Doctor";
+    case "completed":
+      return "Completed";
+    case "missed":
+      return "Missed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Booked";
+  }
+};
+
+const getVisitStatusTone = (
+  visit: VisitItem,
+  isLateSection: boolean
+): "info" | "warning" | "success" | "danger" | "neutral" => {
+  if (isLateSection) return "warning";
+  if (visit.visitStatus === "missed" || visit.visitStatus === "cancelled") return "danger";
+  if (visit.visitStatus === "completed") return "neutral";
+  if (visit.visitStatus === "with_doctor") return "success";
+  return "info";
+};
+
+const getVisitHint = (visit: VisitItem, isLateSection: boolean) => {
+  if (isLateSection) {
+    return "Past appointment time. Check in late or mark missed.";
+  }
+  switch (visit.visitStatus) {
+    case "booked":
+      return "Booked for today and not yet checked in.";
+    case "checked_in":
+    case "waiting":
+      return "Checked in and waiting in the live queue.";
+    case "with_doctor":
+      return "Patient has already been called by the doctor.";
+    case "missed":
+      return "Marked missed and removed from the active queue.";
+    case "completed":
+      return "Consultation finished.";
+    case "cancelled":
+      return "Appointment cancelled.";
+    default:
+      return "";
+  }
 };
 
 export default function ReceptionistCheckInPatients() {
@@ -165,6 +229,7 @@ export default function ReceptionistCheckInPatients() {
           id: route.params.sessionId,
           doctorName: route.params.doctorName || "Doctor",
           specialty: route.params.specialization || "Specialist",
+          clinicName: "Clinic",
           date: "",
           startTime: "",
           endTime: "",
@@ -210,16 +275,23 @@ export default function ReceptionistCheckInPatients() {
   );
 
   useEffect(() => {
+    void connectRealtimeSocket();
     const socket = getSocket();
     const refresh = () => {
       void loadData("refresh");
     };
 
     socket.on("queue:update", refresh);
+    socket.on("session.updated", refresh);
+    socket.on("appointment.updated", refresh);
+    socket.on("consultation.updated", refresh);
     socket.on("connect", refresh);
 
     return () => {
       socket.off("queue:update", refresh);
+      socket.off("session.updated", refresh);
+      socket.off("appointment.updated", refresh);
+      socket.off("consultation.updated", refresh);
       socket.off("connect", refresh);
     };
   }, [loadData]);
@@ -242,12 +314,12 @@ export default function ReceptionistCheckInPatients() {
   const summary = useMemo(() => {
     const waiting = visits.filter((visit) => ["waiting", "with_doctor"].includes(visit.visitStatus)).length;
     return {
-      booked: visits.filter((visit) => visit.visitStatus === "booked").length,
+      booked: grouped.booked.length,
       checkedIn: grouped.checked_in.length,
       waiting,
       walkIns: walkIns.length,
     };
-  }, [grouped.checked_in.length, visits, walkIns.length]);
+  }, [grouped.booked.length, grouped.checked_in.length, visits, walkIns.length]);
 
   const runAction = useCallback(
     async (visit: VisitItem, action: "checkin" | "missed" | "undo") => {
@@ -394,6 +466,10 @@ export default function ReceptionistCheckInPatients() {
                   <Text style={styles.summarySubtitle}>
                     {session?.specialty || route.params.specialization || "Specialist"} • {session?.startTime || "--:--"} - {session?.endTime || "--:--"}
                   </Text>
+                  <Text style={styles.summarySubtitle}>
+                    {session?.clinicName || "Clinic"}
+                    {session?.date ? ` • ${session.date}` : ""}
+                  </Text>
                 </View>
                 <StatusBadge
                   label={session?.queueStatus === "LIVE" ? "Live" : session?.queueStatus === "PAUSED" ? "Paused" : "Today"}
@@ -402,7 +478,7 @@ export default function ReceptionistCheckInPatients() {
               </View>
 
               <View style={styles.metricsRow}>
-                <MetricCard label="Booked" value={String(summary.booked)} />
+                <MetricCard label="Not Arrived" value={String(summary.booked)} />
                 <MetricCard label="Checked In" value={String(summary.checkedIn)} />
                 <MetricCard label="Waiting" value={String(summary.waiting)} />
                 <MetricCard label="Walk-ins" value={String(summary.walkIns)} />
@@ -430,7 +506,12 @@ export default function ReceptionistCheckInPatients() {
                       onPress={() => void startSession()}
                       loading={busyKey === "start-session"}
                     />
-                    <ReceptionistButton label="Add Walk-in" tone="secondary" onPress={() => setWalkInModalVisible(true)} />
+                    <ReceptionistButton
+                      label="Add Walk-in"
+                      tone="secondary"
+                      onPress={() => setWalkInModalVisible(true)}
+                      disabled={!isSessionLive(session?.queueStatus)}
+                    />
                   </>
                 )}
               </View>
@@ -457,7 +538,17 @@ export default function ReceptionistCheckInPatients() {
             {visibleRows.length === 0 ? (
               <EmptyState
                 title="No patients in this section"
-                message="Pull to refresh or switch to another section."
+                message={
+                  activeSection === "booked"
+                    ? "No booked patients are waiting to arrive."
+                    : activeSection === "checked_in"
+                      ? "No checked-in patients in this session right now."
+                      : activeSection === "late"
+                        ? "No patients have crossed the late threshold."
+                        : activeSection === "missed"
+                          ? "No patients have been marked missed."
+                          : "No walk-in patients have been added."
+                }
                 icon="people-outline"
               />
             ) : (
@@ -576,10 +667,11 @@ function PatientVisitRow({
             {visit.tokenNumber ? ` • Token #${visit.tokenNumber}` : ""}
           </Text>
           {visit.patientPhone ? <Text style={styles.rowSubtitle}>{visit.patientPhone}</Text> : null}
+          {getVisitHint(visit, isLateSection) ? <Text style={styles.rowHint}>{getVisitHint(visit, isLateSection)}</Text> : null}
         </View>
         <StatusBadge
-          label={isLateSection ? "Late" : visit.visitStatus.replaceAll("_", " ")}
-          tone={isLateSection ? "warning" : visit.visitStatus === "missed" ? "danger" : "info"}
+          label={getVisitStatusLabel(visit, isLateSection)}
+          tone={getVisitStatusTone(visit, isLateSection)}
         />
       </View>
 
@@ -766,6 +858,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: RECEPTION_THEME.textSecondary,
     fontSize: 13,
+    fontWeight: "600",
+  },
+  rowHint: {
+    marginTop: 8,
+    color: RECEPTION_THEME.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: "600",
   },
   modalOverlay: {

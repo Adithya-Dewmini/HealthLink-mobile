@@ -195,13 +195,15 @@ export default function PaymentStatusScreen() {
           title: "Payment confirmation is still pending",
           description:
             payment?.message ||
-            "The gateway return was received, but the verified backend callback has not completed yet. You can retry checkout or refresh again shortly.",
+            "The gateway return was received, but the verified backend callback has not completed yet. You can return to your order and check again shortly.",
         }
       : currentStatus === "pending"
         ? {
             ...baseStatusMeta,
-            title: "Waiting for payment confirmation",
-            description: payment?.message || baseStatusMeta.description,
+            title: "Checking payment confirmation",
+            description:
+              payment?.message ||
+              "Payment confirmation is still pending. You can return to the app and check order status anytime.",
           }
         : {
             ...baseStatusMeta,
@@ -311,7 +313,7 @@ export default function PaymentStatusScreen() {
             <View style={styles.pendingTimeoutCard}>
               <Ionicons name="time-outline" size={18} color="#0F766E" />
               <Text style={styles.pendingTimeoutText}>
-                Payment confirmation is still pending. If this does not resolve shortly, start a new checkout attempt.
+                Payment confirmation is still pending. You can return to the app and check order status later.
               </Text>
             </View>
           ) : null}
@@ -325,17 +327,52 @@ export default function PaymentStatusScreen() {
           </Text>
         </View>
 
-        {invoiceReady ? (
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => navigation.navigate("InvoiceScreen", { orderId })}
-          >
-            <Ionicons name="document-text-outline" size={18} color={THEME.modernAccentDark} />
-            <Text style={styles.secondaryButtonText}>
-              View Invoice {payment.invoice?.invoiceNo ? `(${payment.invoice.invoiceNo})` : ""}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Invoice</Text>
+          {invoiceReady ? (
+            <>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Invoice number</Text>
+                <Text style={styles.summaryValue}>{payment.invoice?.invoiceNo}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Amount</Text>
+                <Text style={styles.summaryValue}>
+                  {formatPrice(payment.invoice?.amount ?? payment.invoice?.total ?? payment.amount, payment.invoice?.currency ?? payment.currency)}
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Status</Text>
+                <Text style={styles.summaryValue}>{String(payment.invoice?.status || "issued").replace(/_/g, " ")}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Issued at</Text>
+                <Text style={styles.summaryValue}>
+                  {payment.invoice?.issuedAt ? new Date(payment.invoice.issuedAt).toLocaleString("en-LK") : "--"}
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Email status</Text>
+                <Text style={styles.summaryValue}>
+                  {payment.invoice?.emailedAt
+                    ? `Sent ${new Date(payment.invoice.emailedAt).toLocaleString("en-LK")}`
+                    : "Pending"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => navigation.navigate("InvoiceScreen", { orderId })}
+              >
+                <Ionicons name="document-text-outline" size={18} color={THEME.modernAccentDark} />
+                <Text style={styles.secondaryButtonText}>
+                  View Invoice {payment.invoice?.invoiceNo ? `(${payment.invoice.invoiceNo})` : ""}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.metaText}>Invoice will appear after payment confirmation.</Text>
+          )}
+        </View>
 
         {canRetry ? (
           <TouchableOpacity style={styles.ctaButton} onPress={() => void handleRetry()} disabled={retrying}>
